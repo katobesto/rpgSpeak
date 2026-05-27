@@ -1,0 +1,263 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ─── CSS Design Tokens ─────────────────────────────────────────────────────── */
+:root {
+  --accent: #7c3aed;
+  --accent-hover: #6d28d9;
+  --accent-muted: rgba(124, 58, 237, 0.15);
+
+  --surface-0: #0f0f11;
+  --surface-1: #18181b;
+  --surface-2: #27272a;
+  --surface-3: #3f3f46;
+
+  --border: rgba(255, 255, 255, 0.08);
+  --text-primary: #fafafa;
+  --text-secondary: #a1a1aa;
+  --text-muted: #71717a;
+}
+
+.theme-light {
+  --surface-0: #edf0f3;
+  --surface-1: #f5f7fa;
+  --surface-2: #e3e7ed;
+  --surface-3: #c8cdd6;
+  --border: rgba(0, 0, 0, 0.2);
+  --text-primary: #0f172a;
+  --text-secondary: #374151;
+  --text-muted: #6b7280;
+}
+
+/* ─── Base ──────────────────────────────────────────────────────────────────── */
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: var(--surface-3) transparent;
+}
+
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 3px; }
+*::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+body {
+  margin: 0;
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--surface-0);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+
+/* ─── Search highlight ───────────────────────────────────────────────────────── */
+/* Class applied dynamically so Tailwind JIT won't purge it */
+.msg-highlight { animation: msgHighlight 2s ease-out forwards; }
+
+/* ─── Prose / Markdown ──────────────────────────────────────────────────────── */
+.prose {
+  @apply text-sm leading-relaxed;
+  color: var(--text-primary);
+}
+.prose p { @apply mb-3 last:mb-0; }
+.prose code {
+  @apply font-mono text-xs px-1.5 py-0.5 rounded;
+  background: var(--surface-2);
+  color: #a78bfa;
+}
+.prose pre {
+  @apply rounded-lg p-4 overflow-x-auto mb-3 font-mono text-xs;
+  background: var(--surface-2);
+}
+.prose pre code { @apply bg-transparent p-0 text-[#e2e8f0]; }
+.theme-light .prose code { color: #5b21b6; }               /* inline code: violeta oscuro legible */
+.theme-light .prose pre code { color: #1e293b; }           /* bloque código: casi negro */
+.prose strong { @apply font-semibold; color: var(--text-primary); }
+.prose em {
+  font-style: italic;
+  color: var(--text-secondary);
+}
+
+/* Full action/description paragraphs (whole <p> wrapped in <em>) — stage-direction style */
+.prose p:has(> em:only-child) {
+  border-left: 2px solid rgba(124, 58, 237, 0.55);
+  padding: 5px 10px 5px 14px;
+  margin: 6px 0 !important;
+  background: rgba(124, 58, 237, 0.06);
+  border-radius: 0 6px 6px 0;
+}
+.prose p:has(> em:only-child) em {
+  color: rgba(255, 255, 255, 0.72);
+  background: none;
+  padding: 0;
+}
+.prose blockquote {
+  @apply border-l-2 pl-4 italic my-3;
+  border-color: var(--accent);
+  color: var(--text-secondary);
+}
+.prose ul { @apply list-disc pl-5 mb-3 space-y-1; }
+.prose ol { @apply list-decimal pl-5 mb-3 space-y-1; }
+.prose h1 { @apply text-xl font-bold mb-3; }
+.prose h2 { @apply text-lg font-semibold mb-2; }
+.prose h3 { @apply text-base font-semibold mb-2; }
+.prose a { color: var(--accent); @apply underline; }
+.prose hr { @apply my-4; border-color: var(--border); }
+
+/* ─── Chat bubble tails (bocadillo) ─────────────────────────────────────────── */
+.bubble-char::before {
+  content: '';
+  position: absolute;
+  top: 14px;
+  left: -7px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 6px 7px 6px 0;
+  border-color: transparent var(--surface-2) transparent transparent;
+}
+
+.bubble-user::before {
+  content: '';
+  position: absolute;
+  top: 14px;
+  right: -7px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 6px 0 6px 7px;
+  border-color: transparent transparent transparent var(--accent);
+}
+
+/* ─── Typing indicator dots ─────────────────────────────────────────────────── */
+.typing-dot {
+  @apply w-2 h-2 rounded-full inline-block;
+  background: var(--text-muted);
+  animation: pulseDot 1.4s ease-in-out infinite;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* ─── Dynamic viewport height (shrinks with virtual keyboard on mobile) ─────── */
+/*
+  100vh is fixed on Android Chrome — it doesn't shrink when the soft keyboard
+  appears, hiding content behind it.  100dvh updates dynamically.
+  Two declarations: browsers that don't understand dvh fall back to 100vh.
+*/
+.h-dvh {
+  height: 100vh;   /* fallback */
+  height: 100dvh;  /* Chrome 108+, iOS Safari 15.4+, Firefox 101+ */
+}
+
+/* ─── Utility ────────────────────────────────────────────────────────────────── */
+.truncate-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.glass {
+  backdrop-filter: blur(12px);
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+}
+
+/* ─── Narrator message formatting ───────────────────────────────────────────── */
+
+/* Narrator em: defer to the p:has rule above; strip any leftover background */
+.prose.narrator-content em,
+.narrator-content em {
+  font-style: italic;
+  background: none;
+  padding: 0;
+  color: var(--text-secondary);
+}
+
+/* When the whole <p> is em inside narrator, use the same stage-direction style */
+.narrator-content p:has(> em:only-child) em {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+/* Speaker line: **Name:** "dialogue" */
+.narrator-content p.speaker-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 12px 0 3px;
+  padding: 4px 0;
+}
+
+.narrator-content .speaker-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.narrator-content .speaker-tag img {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 2px solid rgba(124, 58, 237, 0.45);
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+}
+
+.narrator-content .speaker-initials {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  font-size: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-weight: 700;
+  border: 2px solid rgba(124, 58, 237, 0.45);
+}
+
+.narrator-content .speaker-tag strong {
+  color: var(--text-primary);
+  font-weight: 700;
+  font-size: 0.88em;
+  letter-spacing: 0.01em;
+}
+
+/* Rest of the dialogue text on the same line */
+.narrator-content p.speaker-line > .speaker-tag + *,
+.narrator-content p.speaker-line > .speaker-tag ~ * {
+  color: var(--text-primary);
+}
+
+/* ─── Light mode corrections ─────────────────────────────────────────────────── */
+
+/*
+  Stage-direction italic blocks ( *acción entre asteriscos* ) use white text
+  hardcoded for dark mode. En light mode, override to accent-tinted dark text
+  visible over the very-light lilac background.
+*/
+.theme-light .prose p:has(> em:only-child) em,
+.theme-light .narrator-content p:has(> em:only-child) em {
+  color: rgba(109, 40, 217, 0.82);   /* accent-hover tinted, readable on light */
+}
+
+/*
+  User chat bubble: in dark mode the accent (#7c3aed) background is correct.
+  In light mode override to a very light accent tint so it reads as "almost white".
+  The inline style on the element requires !important to be overridden from CSS.
+*/
+.theme-light .bubble-user {
+  background: rgba(124, 58, 237, 0.22) !important;
+  color: var(--text-primary) !important;  /* override text-white (visible when editing) */
+}
+/* Matching tail arrow */
+.theme-light .bubble-user::before {
+  border-color: transparent transparent transparent rgba(124, 58, 237, 0.22) !important;
+}

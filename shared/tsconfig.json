@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "declaration": true,
+    "emitDeclarationOnly": true,
+    "outDir": "./dist",
+    "rootDir": "./types",
+    "strict": true,
+    "skipLibCheck": true
+  },
+  "include": ["types/**/*"]
+}

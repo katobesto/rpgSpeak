@@ -1,0 +1,347 @@
+import React, { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { storiesApi } from '../../api/stories.ts';
+import { charactersApi } from '../../api/characters.ts';
+import { Modal } from '../ui/Modal.tsx';
+import { Button } from '../ui/Button.tsx';
+import { Input, Textarea } from '../ui/Input.tsx';
+import { Avatar } from '../ui/Avatar.tsx';
+import type { Story, CreateStoryDto } from '@rpgspeak/shared';
+import { Plus, Trash2, Search } from 'lucide-react';
+
+/** crypto.randomUUID() only works in secure contexts (HTTPS / localhost).
+ *  When serving from LAN over plain HTTP, fall back to a Math.random UUID v4. */
+function randomId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16);
+  });
+}
+
+interface StoryEditorProps {
+  story?: Story | null;
+  open: boolean;
+  onClose: () => void;
+}
+
+const DEFAULT_STORY: CreateStoryDto = {
+  name: '',
+  description: '',
+  globalContext: '',
+  narrativeRules: '',
+  worldLore: '',
+  persistentEvents: [],
+  stateVariables: {},
+  timeline: [],
+  behaviorRestrictions: [],
+  isActive: false,
+  adventureMode: false,
+  characters: [],
+};
+
+type TabId = 'basic' | 'context' | 'events' | 'rules' | 'characters';
+
+const TABS: { id: TabId; label: string }[] = [
+  { id: 'basic', label: 'Basic' },
+  { id: 'context', label: 'Context & Lore' },
+  { id: 'events', label: 'Events' },
+  { id: 'rules', label: 'Rules' },
+  { id: 'characters', label: 'Personajes' },
+];
+
+export function StoryEditor({ story, open, onClose }: StoryEditorProps) {
+  const [tab, setTab] = useState<TabId>('basic');
+  const [form, setForm] = useState<CreateStoryDto>(
+    story ? { ...DEFAULT_STORY, ...story } : DEFAULT_STORY
+  );
+  const [newRestriction, setNewRestriction] = useState('');
+  const [newVarKey, setNewVarKey] = useState('');
+  const [newVarVal, setNewVarVal] = useState('');
+  const [charSearch, setCharSearch] = useState('');
+  const qc = useQueryClient();
+
+  const { data: allCharacters = [] } = useQuery({
+    queryKey: ['characters'],
+    queryFn: () => charactersApi.list(),
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: () =>
+      story ? storiesApi.update(story.id, form) : storiesApi.create(form),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['stories'] });
+      onClose();
+    },
+  });
+
+  function set<K extends keyof CreateStoryDto>(key: K, value: CreateStoryDto[K]) {
+    setForm((f) => ({ ...f, [key]: value }));
+  }
+
+  function addEvent() {
+    set('persistentEvents', [
+      ...form.persistentEvents,
+      { id: randomId(), title: '', description: '', timestamp: new Date().toISOString(), importance: 5 },
+    ]);
+  }
+
+  function updateEvent(i: number, field: string, value: string | number) {
+    const updated = [...form.persistentEvents];
+    updated[i] = { ...updated[i], [field]: value };
+    set('persistentEvents', updated);
+  }
+
+  function addRestriction() {
+    if (newRestriction.trim()) {
+      set('behaviorRestrictions', [...form.behaviorRestrictions, newRestriction.trim()]);
+      setNewRestriction('');
+    }
+  }
+
+  function addStateVar() {
+    if (newVarKey.trim()) {
+      set('stateVariables', { ...form.stateVariables, [newVarKey.trim()]: newVarVal });
+      setNewVarKey('');
+      setNewVarVal('');
+    }
+  }
+
+  return (
+    <Modal
+      open={open}
+      onClose={onClose}
+      title={story ? `Edit: ${story.name}` : 'New Story'}
+      size="xl"
+      footer={
+        <>
+          <Button variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button onClick={() => saveMutation.mutate()} loading={saveMutation.isPending}>
+            {story ? 'Save Changes' : 'Create Story'}
+          </Button>
+        </>
+      }
+    >
+      {/* Tabs */}
+      <div className="flex gap-1 mb-5 border-b border-border">
+        {TABS.map((t) => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              tab === t.id ? 'border-accent text-accent' : 'border-transparent text-text-muted hover:text-text-primary'
+            }`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="space-y-4">
+        {tab === 'basic' && (
+          <>
+            <Input label="Name *" value={form.name} onChange={(e) => set('name', e.target.value)} placeholder="Story name" />
+            <Textarea label="Description" value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Brief description of this story or scenario" rows={3} />
+            <label className="flex items-center gap-3 cursor-pointer">
+              <input type="checkbox" checked={form.isActive} onChange={(e) => set('isActive', e.target.checked)}
+                className="w-4 h-4 rounded accent-violet-600" />
+              <span className="text-sm text-text-secondary">Active by default in new conversations</span>
+            </label>
+            <div className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
+              form.adventureMode ? 'border-accent bg-accent/10' : 'border-border hover:border-accent/40'
+            }`} onClick={() => set('adventureMode', !form.adventureMode)}>
+              <input
+                type="checkbox"
+                checked={form.adventureMode ?? false}
+                onChange={(e) => set('adventureMode', e.target.checked)}
+                className="w-4 h-4 rounded mt-0.5 accent-violet-600 flex-shrink-0"
+                onClick={(e) => e.stopPropagation()}
+              />
+              <div>
+                <span className={`text-sm font-medium ${form.adventureMode ? 'text-accent' : 'text-text-primary'}`}>
+                  Modo Aventura / RPG
+                </span>
+                <p className="text-xs text-text-muted mt-0.5">
+                  Activa el modo Game Master: la IA narra como GM, gestiona mecánicas RPG y siempre pregunta qué hacer a continuación.
+                </p>
+              </div>
+            </div>
+          </>
+        )}
+
+        {tab === 'context' && (
+          <>
+            <Textarea label="Global Context" value={form.globalContext} onChange={(e) => set('globalContext', e.target.value)}
+              placeholder="The overarching scenario context that applies to all conversations using this story..." rows={6} />
+            <Textarea label="World Lore" value={form.worldLore} onChange={(e) => set('worldLore', e.target.value)}
+              placeholder="World-building, setting details, important places and factions..." rows={6} />
+            {/* State Variables */}
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-text-secondary">State Variables</label>
+              <div className="space-y-1">
+                {Object.entries(form.stateVariables).map(([k, v]) => (
+                  <div key={k} className="flex items-center gap-2">
+                    <span className="text-xs font-mono text-accent w-32 truncate">{k}</span>
+                    <span className="text-xs text-text-secondary flex-1">= {String(v)}</span>
+                    <button onClick={() => {
+                      const { [k]: _, ...rest } = form.stateVariables;
+                      set('stateVariables', rest);
+                    }} className="text-text-muted hover:text-red-400"><Trash2 size={12} /></button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input value={newVarKey} onChange={(e) => setNewVarKey(e.target.value)} placeholder="variable_name"
+                  className="flex-1 rounded-lg px-3 py-1.5 text-xs bg-surface-2 border border-border text-text-primary focus:outline-none focus:ring-1 focus:ring-accent font-mono" />
+                <input value={newVarVal} onChange={(e) => setNewVarVal(e.target.value)} placeholder="value"
+                  className="flex-1 rounded-lg px-3 py-1.5 text-xs bg-surface-2 border border-border text-text-primary focus:outline-none focus:ring-1 focus:ring-accent" />
+                <Button size="sm" variant="outline" onClick={addStateVar}><Plus size={12} /></Button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {tab === 'events' && (
+          <div className="space-y-4">
+            <div className="flex justify-end">
+              <Button size="sm" variant="outline" onClick={addEvent}><Plus size={13} /> Add Event</Button>
+            </div>
+            {form.persistentEvents.map((ev, i) => (
+              <div key={ev.id} className="rounded-xl border border-border p-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-medium text-text-secondary">Event {i + 1}</span>
+                  <button onClick={() => set('persistentEvents', form.persistentEvents.filter((_, idx) => idx !== i))}
+                    className="text-text-muted hover:text-red-400"><Trash2 size={13} /></button>
+                </div>
+                <Input label="Title" value={ev.title} onChange={(e) => updateEvent(i, 'title', e.target.value)} />
+                <Textarea label="Description" value={ev.description} onChange={(e) => updateEvent(i, 'description', e.target.value)} rows={2} />
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-text-secondary">Importance: {ev.importance}</label>
+                  <input type="range" min="1" max="10" value={ev.importance}
+                    onChange={(e) => updateEvent(i, 'importance', parseInt(e.target.value))}
+                    className="accent-violet-600" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tab === 'rules' && (
+          <>
+            <Textarea label="Narrative Rules" value={form.narrativeRules} onChange={(e) => set('narrativeRules', e.target.value)}
+              placeholder="How should the narrative flow? What must the AI follow?" rows={5} />
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-text-secondary">Behavior Restrictions</label>
+              <div className="space-y-1">
+                {form.behaviorRestrictions.map((r, i) => (
+                  <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-surface-2">
+                    <span className="flex-1 text-xs text-text-primary">{r}</span>
+                    <button onClick={() => set('behaviorRestrictions', form.behaviorRestrictions.filter((_, idx) => idx !== i))}
+                      className="text-text-muted hover:text-red-400"><Trash2 size={12} /></button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <input value={newRestriction} onChange={(e) => setNewRestriction(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter') addRestriction(); }}
+                  placeholder="e.g. Do not break character"
+                  className="flex-1 rounded-lg px-3 py-2 text-sm bg-surface-2 border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent" />
+                <Button size="sm" variant="outline" onClick={addRestriction}><Plus size={13} /></Button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {tab === 'characters' && (() => {
+          const linkedIds = new Set(form.characters.map((c) => c.characterId));
+          const availableChars = allCharacters.filter(
+            (c) => !linkedIds.has(c.id) && c.name.toLowerCase().includes(charSearch.toLowerCase())
+          );
+          return (
+            <div className="space-y-5">
+              {/* Linked characters */}
+              <div>
+                <p className="text-xs font-medium text-text-secondary mb-2">
+                  Personajes vinculados ({form.characters.length})
+                </p>
+                {form.characters.length === 0 ? (
+                  <div className="text-xs text-text-muted py-5 text-center rounded-xl border border-dashed border-border">
+                    No hay personajes vinculados. Agrégalos desde la sección inferior.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {form.characters.map((link, i) => {
+                      const char = allCharacters.find((c) => c.id === link.characterId);
+                      return (
+                        <div key={link.characterId} className="flex items-center gap-3 px-3 py-2 rounded-xl border border-border"
+                          style={{ background: 'var(--surface-2)' }}>
+                          <Avatar name={char?.name ?? '?'} src={char?.avatar} size="sm" />
+                          <span className="text-sm font-medium flex-1 truncate">{char?.name ?? link.characterId}</span>
+                          <input
+                            value={link.role}
+                            onChange={(e) => {
+                              const updated = [...form.characters];
+                              updated[i] = { ...updated[i], role: e.target.value };
+                              set('characters', updated);
+                            }}
+                            placeholder="Rol (opcional)"
+                            className="w-32 rounded-lg px-2 py-1 text-xs border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                            style={{ background: 'var(--surface-1)' }}
+                          />
+                          <button
+                            onClick={() => set('characters', form.characters.filter((_, idx) => idx !== i))}
+                            className="text-text-muted hover:text-red-400 flex-shrink-0 transition-colors"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Character picker */}
+              <div>
+                <p className="text-xs font-medium text-text-secondary mb-2">Agregar personaje</p>
+                <div className="relative mb-2">
+                  <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted pointer-events-none" />
+                  <input
+                    value={charSearch}
+                    onChange={(e) => setCharSearch(e.target.value)}
+                    placeholder="Buscar personajes..."
+                    className="w-full pl-8 pr-3 py-1.5 rounded-lg text-xs border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                    style={{ background: 'var(--surface-2)' }}
+                  />
+                </div>
+                <div className="max-h-48 overflow-y-auto rounded-xl border border-border divide-y divide-border">
+                  {availableChars.length === 0 ? (
+                    <p className="text-xs text-text-muted text-center py-4">
+                      {linkedIds.size === allCharacters.length
+                        ? 'Todos los personajes ya están vinculados'
+                        : 'No se encontraron personajes'}
+                    </p>
+                  ) : (
+                    availableChars.map((char) => (
+                      <button
+                        key={char.id}
+                        onClick={() => set('characters', [...form.characters, { characterId: char.id, role: '', notes: '' }])}
+                        className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-white/6 text-left transition-colors"
+                      >
+                        <Avatar name={char.name} src={char.avatar} size="xs" />
+                        <span className="text-sm flex-1 truncate">{char.name}</span>
+                        {char.tags.length > 0 && (
+                          <span className="text-[10px] text-text-muted truncate max-w-[100px]">{char.tags[0]}</span>
+                        )}
+                        <Plus size={12} className="text-text-muted flex-shrink-0" />
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+      </div>
+    </Modal>
+  );
+}

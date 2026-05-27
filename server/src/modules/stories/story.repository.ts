@@ -1,0 +1,150 @@
+import { eq, like, sql, and } from 'drizzle-orm';
+import { getDb } from '../../db/index.js';
+import { stories, storyCharacters, type DbStory } from '../../db/schema.js';
+import type { Story, StoryCharacterLink } from '@rpgspeak/shared';
+import { v4 as uuidv4 } from 'uuid';
+
+function resolveOwnerName(userId: string | null | undefined): string | null {
+  if (!userId) return null;
+  const db = getDb();
+  const row = db.get<{ display_name: string }>(
+    sql`SELECT display_name FROM users WHERE id = ${userId} LIMIT 1`
+  );
+  return row?.display_name ?? null;
+}
+
+function now() {
+  return new Date().toISOString();
+}
+
+function dbToStory(row: DbStory, chars: StoryCharacterLink[] = []): Story {
+  const userId = (row as unknown as { userId?: string | null }).userId ?? null;
+  return {
+    id: row.id,
+    userId,
+    ownerName: resolveOwnerName(userId),
+    name: row.name,
+    description: row.description,
+    globalContext: row.globalContext,
+    narrativeRules: row.narrativeRules,
+    worldLore: row.worldLore,
+    persistentEvents: JSON.parse(row.persistentEvents),
+    stateVariables: JSON.parse(row.stateVariables),
+    timeline: JSON.parse(row.timeline),
+    behaviorRestrictions: JSON.parse(row.behaviorRestrictions),
+    isActive: Boolean(row.isActive),
+    adventureMode: Boolean(row.adventureMode),
+    characters: chars,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+export class StoryRepository {
+  private get db() {
+    return getDb();
+  }
+
+  private getChars(storyId: string): StoryCharacterLink[] {
+    return this.db
+      .select()
+      .from(storyCharacters)
+      .where(eq(storyCharacters.storyId, storyId))
+      .all()
+      .map((r) => ({ characterId: r.characterId, role: r.role, notes: r.notes }));
+  }
+
+  findAll(search?: string, userId?: string, isAdmin = false, characterId?: string): Story[] {
+    const conds = [];
+    if (search) conds.push(like(stories.name, `%${search}%`));
+    if (!isAdmin && userId) {
+      // own stories OR stories explicitly assigned by admin
+      conds.push(sql`(${stories.userId} = ${userId} OR ${stories.id} IN (
+        SELECT story_id FROM user_stories WHERE user_id = ${userId}
+      ))`);
+    }
+    if (characterId) {
+      conds.push(sql`${stories.id} IN (
+        SELECT story_id FROM story_characters WHERE character_id = ${characterId}
+      )`);
+    }
+    let query = this.db.select().from(stories).$dynamic();
+    if (conds.length === 1) query = query.where(conds[0]);
+    else if (conds.length > 1) query = query.where(and(...conds));
+    const rows = query.all();
+    return rows.map((r) => dbToStory(r, this.getChars(r.id)));
+  }
+
+  findById(id: string): Story | null {
+    const row = this.db.select().from(stories).where(eq(stories.id, id)).get();
+    return row ? dbToStory(row, this.getChars(id)) : null;
+  }
+
+  create(data: Omit<Story, 'id' | 'createdAt' | 'updatedAt' | 'userId' | 'ownerName'>, userId?: string): Story {
+    const id = uuidv4();
+    const ts = now();
+    this.db.run(sql`
+      INSERT INTO stories (
+        id, name, description, global_context, narrative_rules, world_lore,
+        persistent_events, state_variables, timeline, behavior_restrictions,
+        is_active, adventure_mode, user_id, created_at, updated_at
+      ) VALUES (
+        ${id}, ${data.name}, ${data.description}, ${data.globalContext},
+        ${data.narrativeRules}, ${data.worldLore},
+        ${JSON.stringify(data.persistentEvents)}, ${JSON.stringify(data.stateVariables)},
+        ${JSON.stringify(data.timeline)}, ${JSON.stringify(data.behaviorRestrictions)},
+        ${data.isActive ? 1 : 0}, ${data.adventureMode ? 1 : 0}, ${userId ?? null}, ${ts}, ${ts}
+      )
+    `);
+
+    for (const c of data.characters) {
+      this.db.run(sql`
+        INSERT INTO story_characters (story_id, character_id, role, notes)
+        VALUES (${id}, ${c.characterId}, ${c.role}, ${c.notes})
+      `);
+    }
+
+    return this.findById(id)!;
+  }
+
+  update(id: string, data: Partial<Omit<Story, 'id' | 'createdAt' | 'updatedAt'>>): Story | null {
+    const existing = this.findById(id);
+    if (!existing) return null;
+    const ts = now();
+    const merged = { ...existing, ...data };
+
+    this.db.run(sql`
+      UPDATE stories SET
+        name                 = ${merged.name},
+        description          = ${merged.description},
+        global_context       = ${merged.globalContext},
+        narrative_rules      = ${merged.narrativeRules},
+        world_lore           = ${merged.worldLore},
+        persistent_events    = ${JSON.stringify(merged.persistentEvents)},
+        state_variables      = ${JSON.stringify(merged.stateVariables)},
+        timeline             = ${JSON.stringify(merged.timeline)},
+        behavior_restrictions= ${JSON.stringify(merged.behaviorRestrictions)},
+        is_active            = ${merged.isActive ? 1 : 0},
+        adventure_mode       = ${merged.adventureMode ? 1 : 0},
+        updated_at           = ${ts}
+      WHERE id = ${id}
+    `);
+
+    if (data.characters !== undefined) {
+      this.db.run(sql`DELETE FROM story_characters WHERE story_id = ${id}`);
+      for (const c of data.characters) {
+        this.db.run(sql`
+          INSERT INTO story_characters (story_id, character_id, role, notes)
+          VALUES (${id}, ${c.characterId}, ${c.role}, ${c.notes})
+        `);
+      }
+    }
+
+    return this.findById(id)!;
+  }
+
+  delete(id: string): boolean {
+    this.db.run(sql`DELETE FROM stories WHERE id = ${id}`);
+    return true;
+  }
+}

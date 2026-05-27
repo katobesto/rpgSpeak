@@ -1,0 +1,2213 @@
+import React, { useState, useEffect } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { settingsApi } from '../../api/settings.ts';
+import { providersApi } from '../../api/providers.ts';
+import { ttsApi } from '../../api/tts.ts';
+import { getAuthHeader } from '../../api/client.ts';
+import { usersApi, authApi } from '../../api/auth.ts';
+import { charactersApi } from '../../api/characters.ts';
+import { storiesApi } from '../../api/stories.ts';
+import { Button } from '../ui/Button.tsx';
+import { Input, Textarea } from '../ui/Input.tsx';
+import { Plus, Trash2, RefreshCw, Check, X, Volume2, Wifi, WifiOff, Download, CheckCircle2, Play, Square, Loader, LogOut, Users, Shield, UserCircle, RotateCcw, AlertCircle, BarChart2, Zap, Camera, Sparkles, Wand2, FlaskConical, Upload, Link2, BookOpen } from 'lucide-react';
+import type { Provider, CreateProviderDto, AppSettings, TtsSettings, TtsVoice } from '@rpgspeak/shared';
+import { useUiStore } from '../../stores/ui.store.ts';
+import { useAuthStore } from '../../stores/auth.store.ts';
+import { conversationsApi } from '../../api/conversations.ts';
+import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
+
+type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats';
+
+const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'memoryInjectionPrompt', 'allowNsfw', 'nsfwBlockedMessage'];
+const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength', 'affinitySystemPrompt'];
+const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel'];
+
+export function SettingsPanel() {
+  const [tab, setTab] = useState<STab>('profile');
+  const qc = useQueryClient();
+  const { appearance, setAppearancePref } = useUiStore();
+  const { user: currentUser, isAdmin, clearAuth } = useAuthStore();
+
+  const STABS: { id: STab; label: string }[] = [
+    { id: 'profile', label: 'Perfil' },
+    { id: 'appearance', label: 'Apariencia' },
+    ...(isAdmin ? [
+      { id: 'generation' as STab, label: 'Generación' },
+      { id: 'context' as STab, label: 'Contexto' },
+      { id: 'providers' as STab, label: 'Providers' },
+      { id: 'voice' as STab, label: 'Voz / TTS' },
+      { id: 'stats' as STab, label: 'Estadísticas' },
+      { id: 'users' as STab, label: 'Usuarios' },
+    ] : []),
+  ];
+
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: settingsApi.get });
+  const { data: providers = [] } = useQuery({ queryKey: ['providers'], queryFn: providersApi.list });
+
+  // Local draft — avoids cursor-jump on text inputs; saved explicitly via "Guardar"
+  const [draft, setDraft] = useState<AppSettings | null>(null);
+  useEffect(() => {
+    if (settings && draft === null) setDraft({ ...settings });
+  }, [settings]);
+
+  const updateSettings = useMutation({
+    mutationFn: (data: Partial<AppSettings>) => settingsApi.update(data),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] }),
+  });
+
+  // Update draft locally without saving to server
+  function update<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
+    setDraft((d) => d ? { ...d, [key]: value } : d);
+  }
+
+  // Save a subset of draft keys to the server
+  function save(keys: (keyof AppSettings)[]) {
+    if (!draft) return;
+    const patch: Partial<AppSettings> = {};
+    for (const k of keys) (patch as Record<string, unknown>)[k] = draft[k];
+    updateSettings.mutate(patch);
+  }
+
+  if (!settings || !draft) return null;
+
+  return (
+    <div className="flex flex-col h-full">
+      <div className="flex-shrink-0 px-6 py-4 border-b border-border">
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-lg font-semibold">Settings</h1>
+            <p className="text-xs text-text-muted mt-0.5">Configure your rpgSpeak experience</p>
+          </div>
+          <div className="flex items-center gap-2 mt-0.5">
+            <div className="text-right">
+              <p className="text-sm font-medium text-text-primary leading-tight">
+                {currentUser?.displayName}
+              </p>
+              <p className="text-xs text-text-muted leading-tight flex items-center gap-1 justify-end">
+                {isAdmin && <Shield size={10} className="text-accent" />}
+                {currentUser?.username}
+              </p>
+            </div>
+            <button
+              onClick={clearAuth}
+              title="Cerrar sesión"
+              className="p-1.5 rounded-lg text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
+            >
+              <LogOut size={16} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex flex-1 min-h-0">
+        {/* Tab nav */}
+        <nav className="w-40 flex-shrink-0 border-r border-border p-3 space-y-0.5">
+          {STABS.map((t) => (
+            <button key={t.id} onClick={() => setTab(t.id)}
+              className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${
+                tab === t.id ? 'bg-accent-muted text-accent font-medium' : 'text-text-secondary hover:text-text-primary hover:bg-white/5'
+              }`}>
+              {t.label}
+            </button>
+          ))}
+        </nav>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {tab === 'profile' && <ProfileSection />}
+
+          {tab === 'appearance' && (
+            <>
+              <Section title="Tema">
+                <div className="flex gap-2">
+                  {(['dark', 'light'] as const).map((t) => (
+                    <button key={t} onClick={() => setAppearancePref('theme', t)}
+                      className={`flex-1 py-2 rounded-lg text-sm capitalize border transition-colors ${
+                        appearance.theme === t
+                          ? 'border-accent bg-accent-muted text-accent'
+                          : 'border-border text-text-secondary hover:border-accent/40'
+                      }`}>
+                      {t === 'dark' ? 'Oscuro' : 'Claro'}
+                    </button>
+                  ))}
+                </div>
+              </Section>
+
+              <Section title="Color de acento">
+                <div className="flex items-center gap-3">
+                  <input type="color" value={appearance.accentColor}
+                    onChange={(e) => setAppearancePref('accentColor', e.target.value)}
+                    className="w-10 h-10 rounded-lg border-0 cursor-pointer bg-transparent" />
+                  <Input value={appearance.accentColor} onChange={(e) => setAppearancePref('accentColor', e.target.value)} className="font-mono text-xs" />
+                </div>
+              </Section>
+
+              <Section title="Tamaño de fuente">
+                <div className="flex gap-2">
+                  {(['sm', 'md', 'lg'] as const).map((s) => (
+                    <button key={s} onClick={() => setAppearancePref('fontSize', s)}
+                      className={`flex-1 py-2 rounded-lg text-sm border transition-colors ${
+                        appearance.fontSize === s ? 'border-accent bg-accent-muted text-accent' : 'border-border text-text-secondary hover:border-accent/40'
+                      }`}>
+                      {s === 'sm' ? 'Pequeño' : s === 'md' ? 'Normal' : 'Grande'}
+                    </button>
+                  ))}
+                </div>
+              </Section>
+
+              <Section title="Interfaz">
+                <ToggleRow
+                  label="Mostrar hora" description="Muestra la hora de cada mensaje"
+                  checked={appearance.showTimestamps} onChange={(v) => setAppearancePref('showTimestamps', v)} />
+                <ToggleRow
+                  label="Mostrar tokens" description="Muestra el conteo de tokens por mensaje"
+                  checked={appearance.showTokenCount} onChange={(v) => setAppearancePref('showTokenCount', v)} />
+              </Section>
+              <p className="text-xs text-text-muted text-right">Los cambios se guardan automáticamente.</p>
+            </>
+          )}
+
+          {tab === 'generation' && isAdmin && (
+            <>
+              <Section title="Modelo por defecto">
+                <DefaultModelSection
+                  providers={providers}
+                  defaultProviderId={draft.defaultProviderId}
+                  defaultModelId={draft.defaultModelId}
+                  onProviderChange={(v) => update('defaultProviderId', v)}
+                  onModelChange={(v) => update('defaultModelId', v)}
+                />
+              </Section>
+
+              <Section title="Entrada">
+                <ToggleRow
+                  label="Enter para enviar" description="Enter envía el mensaje; Shift+Enter para nueva línea"
+                  checked={draft.sendOnEnter} onChange={(v) => update('sendOnEnter', v)} />
+                <ToggleRow
+                  label="Streaming" description="Muestra los tokens según se generan"
+                  checked={draft.streamingEnabled} onChange={(v) => update('streamingEnabled', v)} />
+              </Section>
+
+              <Section title="Opciones de API">
+                <ToggleRow
+                  label="Deshabilitar fallbacks de proveedor"
+                  description="Envía allow_fallbacks:false en cada petición. Evita que OpenRouter redirija a servidores alternativos de pago cuando el modelo principal no está disponible."
+                  checked={draft.disableFallbacks ?? false}
+                  onChange={(v) => update('disableFallbacks', v)}
+                />
+              </Section>
+
+              <Section title="Prompt de sistema global">
+                <Textarea
+                  value={draft.globalSystemPrompt}
+                  onChange={(e) => update('globalSystemPrompt', e.target.value)}
+                  placeholder="Instrucciones añadidas a todas las conversaciones, antes del prompt del personaje..."
+                  rows={5}
+                  hint="Se aplica a todos los personajes. Usar con moderación."
+                />
+              </Section>
+
+              <Section title="Formato de respuesta (personaje)">
+                <p className="text-xs text-text-muted mb-1 leading-relaxed">
+                  Instrucción de formato inyectada al final del prompt del personaje. Vacío = sin formato forzado.
+                </p>
+                <RestorablePrompt
+                  settingsKey="responseFormatPrompt"
+                  value={draft.responseFormatPrompt ?? ''}
+                  onChange={(v) => update('responseFormatPrompt', v)}
+                  rows={5}
+                />
+              </Section>
+
+              <Section title="Prompt del Narrador">
+                <p className="text-xs text-text-muted mb-1 leading-relaxed">
+                  Se usa cuando el modo <strong className="text-text-secondary">Narrador</strong> está activo (sin aventura).
+                  Usa <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{PERSONAJES}}'}</code> donde insertar los bloques de personaje.
+                </p>
+                <RestorablePrompt
+                  settingsKey="narratorPrompt"
+                  value={draft.narratorPrompt ?? ''}
+                  onChange={(v) => update('narratorPrompt', v)}
+                  rows={14}
+                  mono
+                />
+              </Section>
+
+              <Section title="Prompt del Game Master (Aventura)">
+                <p className="text-xs text-text-muted mb-1 leading-relaxed">
+                  Se usa cuando el modo <strong className="text-text-secondary">Narrador + Aventura</strong> está activo.
+                  Usa <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{PERSONAJES}}'}</code> para los bloques de personaje con sus fichas RPG.
+                </p>
+                <RestorablePrompt
+                  settingsKey="adventurePrompt"
+                  value={draft.adventurePrompt ?? ''}
+                  onChange={(v) => update('adventurePrompt', v)}
+                  rows={14}
+                  mono
+                />
+              </Section>
+
+              <ScenePromptSection
+                value={draft.sceneImagePrompt ?? ''}
+                onChange={(v) => update('sceneImagePrompt', v)}
+              />
+
+              <Section title="LLM Rápido de apoyo">
+                <FastLlmSection
+                  providers={providers}
+                  enabled={draft.fastLlmEnabled ?? false}
+                  providerId={draft.fastLlmProviderId ?? null}
+                  modelId={draft.fastLlmModelId ?? null}
+                  debugMode={draft.fastLlmDebugMode ?? false}
+                  analysisPrompt={draft.fastLlmAnalysisPrompt ?? ''}
+                  onEnabledChange={(v) => update('fastLlmEnabled', v)}
+                  onProviderChange={(v) => update('fastLlmProviderId', v)}
+                  onModelChange={(v) => update('fastLlmModelId', v)}
+                  onDebugModeChange={(v) => update('fastLlmDebugMode', v)}
+                  onAnalysisPromptChange={(v) => update('fastLlmAnalysisPrompt', v)}
+                />
+              </Section>
+
+              <Section title="Prompt de inyección de memoria">
+                <p className="text-xs text-text-muted mb-1 leading-relaxed">
+                  Se inserta justo antes del último mensaje del usuario.
+                  Usa <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{MEMORIAS}}'}</code> donde quieres que aparezca el bloque de recuerdos activos. Vacío = sin inyección.
+                </p>
+                <RestorablePrompt
+                  settingsKey="memoryInjectionPrompt"
+                  value={draft.memoryInjectionPrompt ?? ''}
+                  onChange={(v) => update('memoryInjectionPrompt', v)}
+                  rows={8}
+                  mono
+                />
+              </Section>
+
+              <Section title="Moderación de contenido">
+                <ToggleRow
+                  label="Permitir contenido adulto (NSFW)"
+                  description="Cuando está desactivado, el sistema detecta y bloquea mensajes con contacto sexual o vocabulario explícito antes de enviarlos al LLM. Si está activado, el LLM principal gestiona el contenido libremente."
+                  checked={draft.allowNsfw ?? false}
+                  onChange={(v) => update('allowNsfw', v)}
+                />
+                {!(draft.allowNsfw) && (
+                  <div className="mt-3 space-y-1">
+                    <p className="text-xs text-text-muted">Mensaje de bloqueo mostrado al jugador</p>
+                    <div className="space-y-1">
+                      <div className="flex justify-end">
+                        <RestoreButton settingsKey="nsfwBlockedMessage" onRestore={(v) => update('nsfwBlockedMessage', v)} />
+                      </div>
+                      <textarea
+                        value={draft.nsfwBlockedMessage ?? ''}
+                        onChange={(e) => update('nsfwBlockedMessage', e.target.value)}
+                        rows={2}
+                        className="w-full rounded-lg px-3 py-2 text-xs bg-surface-2 border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent font-mono resize-none"
+                      />
+                    </div>
+                  </div>
+                )}
+              </Section>
+
+              <SaveBar onSave={() => save(GENERATION_KEYS)} isPending={updateSettings.isPending} isSuccess={updateSettings.isSuccess} />
+            </>
+          )}
+
+          {tab === 'context' && isAdmin && (
+            <>
+              <Section title="Estrategia de contexto">
+                <div className="flex gap-2">
+                  {(['rolling', 'summary', 'hybrid'] as const).map((s) => (
+                    <button key={s} onClick={() => update('contextStrategy', s)}
+                      className={`flex-1 py-2 rounded-lg text-sm capitalize border transition-colors ${
+                        draft.contextStrategy === s ? 'border-accent bg-accent-muted text-accent' : 'border-border text-text-secondary hover:border-accent/40'
+                      }`}>
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-text-muted">
+                  Rolling: últimos N mensajes. Summary: resume contexto antiguo. Hybrid: ambos.
+                </p>
+              </Section>
+              <Section title="Tokens de respuesta">
+                <Input
+                  label="Máximo tokens por respuesta"
+                  type="number"
+                  value={draft.maxResponseTokens ?? ''}
+                  onChange={(e) => update('maxResponseTokens', e.target.value ? parseInt(e.target.value) : null)}
+                  min={64}
+                  placeholder="Sin límite (recomendado)"
+                  hint="Deja vacío para que el modelo genere respuestas completas sin cortar."
+                />
+              </Section>
+              <Section title="Ventana de contexto">
+                <Input
+                  label="Tokens de contexto de entrada"
+                  type="number"
+                  value={draft.defaultContextLength ?? 32768}
+                  onChange={(e) => update('defaultContextLength', parseInt(e.target.value) || 32768)}
+                  min={1024}
+                  max={131072}
+                  hint="Cuántos tokens del historial se envían al modelo."
+                />
+                <Input label="Máx. mensajes en contexto" type="number" value={draft.maxContextMessages}
+                  onChange={(e) => update('maxContextMessages', parseInt(e.target.value))} min={5} max={200}
+                  hint="Número máximo de mensajes del historial incluidos." />
+                <Input label="Umbral de auto-resumen" type="number" value={draft.autoSummarizeThreshold}
+                  onChange={(e) => update('autoSummarizeThreshold', parseInt(e.target.value))} min={5} max={200}
+                  hint="Resumir contexto cuando el número de mensajes supera este valor." />
+              </Section>
+              {isAdmin && (
+                <Section title="Prompt de Afinidad (Admin)">
+                  <p className="text-xs text-text-muted mb-1">
+                    Instrucciones inyectadas en el system prompt para controlar el comportamiento según el nivel de afinidad.
+                    Incluye el tag <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">[AFINIDAD:Nombre:±N]</code> para actualizaciones automáticas (solo cuando el LLM Rápido no está activo).
+                  </p>
+                  <RestorablePrompt
+                    settingsKey="affinitySystemPrompt"
+                    value={draft.affinitySystemPrompt ?? ''}
+                    onChange={(v) => update('affinitySystemPrompt', v)}
+                    rows={14}
+                    mono
+                  />
+                </Section>
+              )}
+              <SaveBar onSave={() => save(CONTEXT_KEYS)} isPending={updateSettings.isPending} isSuccess={updateSettings.isSuccess} />
+            </>
+          )}
+
+          {tab === 'providers' && isAdmin && (
+            <>
+              <ProvidersSection providers={providers} />
+
+              <div className="border-t border-border pt-5 space-y-4">
+                <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider">
+                  Generación de imagen
+                </h3>
+                <ImageProviderSection draft={draft} update={update} />
+                <SaveBar
+                  onSave={() => save(INTEGRATIONS_KEYS)}
+                  isPending={updateSettings.isPending}
+                  isSuccess={updateSettings.isSuccess}
+                />
+              </div>
+            </>
+          )}
+
+          {tab === 'voice' && isAdmin && (
+            <VoiceSection settings={settings} onUpdate={(patch) => updateSettings.mutate({ ttsSettings: patch })} />
+          )}
+
+          {tab === 'stats' && isAdmin && <StatsSection />}
+
+          {tab === 'users' && isAdmin && <UsersSection />}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Voice / TTS section ─────────────────────────────────────────────────────
+
+// Static catalog — Piper TTS voices, mirrors Python VOICE_CATALOG
+const STATIC_CATALOG: Omit<TtsVoice, 'available'>[] = [
+  { id: 'es_daniela', name: 'Daniela', gender: 'female', description: 'Voz femenina expresiva, acento argentino (alta calidad)',   type: 'builtin' },
+  { id: 'es_sofia',   name: 'Sofía',   gender: 'female', description: 'Voz femenina clara y natural (España)',                     type: 'builtin' },
+  { id: 'es_laura',   name: 'Laura',   gender: 'female', description: 'Voz femenina cálida y expresiva, acento mexicano (alta calidad)', type: 'builtin' },
+  { id: 'es_carlos',  name: 'Carlos',  gender: 'male',   description: 'Voz masculina grave y narrativa (España)',                  type: 'builtin' },
+  { id: 'es_david',   name: 'David',   gender: 'male',   description: 'Voz masculina clara y expresiva (España)',                  type: 'builtin' },
+  { id: 'es_antonio', name: 'Antonio', gender: 'male',   description: 'Voz masculina neutra y profesional (México)',               type: 'builtin' },
+  { id: 'es_claude',  name: 'Claude',  gender: 'male',   description: 'Voz masculina, acento mexicano (alta calidad)',             type: 'builtin' },
+];
+
+const PREVIEW_TEXT = 'El viento susurraba entre las ruinas del castillo mientras la aventura comenzaba a desplegarse ante ti.';
+
+// Module-level preview audio (single instance)
+let _previewAudio: HTMLAudioElement | null = null;
+let _previewUrl:   string | null = null;
+
+function stopPreview() {
+  if (_previewAudio) { _previewAudio.pause(); _previewAudio.src = ''; _previewAudio = null; }
+  if (_previewUrl)   { URL.revokeObjectURL(_previewUrl); _previewUrl = null; }
+}
+
+function VoiceSection({
+  settings,
+  onUpdate,
+}: {
+  settings: AppSettings;
+  onUpdate: (patch: TtsSettings) => void;
+}) {
+  const tts = settings.ttsSettings;
+  function setTts(partial: Partial<TtsSettings>) { onUpdate({ ...tts, ...partial }); }
+
+  // Service status
+  const [status, setStatus] = React.useState<{ online: boolean } | null>(null);
+  const [statusLoading, setStatusLoading] = React.useState(false);
+
+  async function checkStatus() {
+    setStatusLoading(true);
+    try { setStatus(await ttsApi.status()); }
+    catch { setStatus({ online: false }); }
+    finally { setStatusLoading(false); }
+  }
+  useEffect(() => { checkStatus(); }, []);
+
+  // Voices
+  const qc = useQueryClient();
+  const { data: liveVoices, refetch: refetchVoices } = useQuery({
+    queryKey: ['tts-voices'],
+    queryFn: ttsApi.voices,
+    retry: false,
+    staleTime: 30_000,
+  });
+  const voices: TtsVoice[] = (liveVoices && liveVoices.length > 0)
+    ? liveVoices
+    : STATIC_CATALOG.map((v) => ({ ...v, available: true }));
+  const females = voices.filter((v) => v.gender === 'female');
+  const males   = voices.filter((v) => v.gender === 'male');
+
+  // Download
+  const [downloading, setDownloading] = React.useState<string | null>(null);
+  const [downloadError, setDownloadError] = React.useState<string | null>(null);
+
+  async function download(voiceId: string) {
+    setDownloading(voiceId);
+    setDownloadError(null);
+    try {
+      await ttsApi.downloadVoice(voiceId);
+      await refetchVoices();
+      qc.invalidateQueries({ queryKey: ['tts-voices'] });
+    } catch (e) {
+      setDownloadError(voiceId);
+    } finally {
+      setDownloading(null);
+    }
+  }
+
+  // Preview
+  const [previewing, setPreviewing] = React.useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = React.useState<string | null>(null);
+
+  async function togglePreview(voiceId: string, speed: number, temperature: number) {
+    // Stop if already playing this voice
+    if (previewing === voiceId || previewLoading === voiceId) {
+      stopPreview();
+      setPreviewing(null);
+      setPreviewLoading(null);
+      return;
+    }
+    stopPreview();
+    setPreviewing(null);
+    setPreviewLoading(voiceId);
+    try {
+      const resp = await fetch('/api/tts/synthesize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+        body: JSON.stringify({ text: PREVIEW_TEXT, voiceId, speed, temperature }),
+      });
+      if (!resp.ok) throw new Error('Error de síntesis');
+      const blob = await resp.blob();
+      _previewUrl  = URL.createObjectURL(blob);
+      _previewAudio = new Audio(_previewUrl);
+      _previewAudio.onended = () => { stopPreview(); setPreviewing(null); };
+      _previewAudio.onerror = () => { stopPreview(); setPreviewing(null); };
+      setPreviewing(voiceId);
+      setPreviewLoading(null);
+      await _previewAudio.play();
+    } catch {
+      stopPreview();
+      setPreviewLoading(null);
+    }
+  }
+
+  // Stop preview when unmounting
+  useEffect(() => () => stopPreview(), []);
+
+  return (
+    <>
+      {/* ── Service ──────────────────────────────────────────────────────────── */}
+      <Section title="Servicio TTS">
+        <div className="space-y-3">
+          <ToggleRow
+            label="Activar síntesis de voz"
+            description="Muestra el botón de altavoz en los mensajes de la IA"
+            checked={tts.enabled}
+            onChange={(v) => setTts({ enabled: v })}
+          />
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-text-secondary">URL del servicio Python</label>
+            <div className="flex gap-2">
+              <input
+                value={tts.serviceUrl}
+                onChange={(e) => setTts({ serviceUrl: e.target.value })}
+                className="flex-1 rounded-lg px-3 py-2 text-sm border border-border bg-transparent text-text-primary focus:outline-none focus:ring-1 focus:ring-accent font-mono"
+                placeholder="http://localhost:8020"
+              />
+              <button onClick={checkStatus} disabled={statusLoading}
+                className="px-3 py-2 rounded-lg border border-border text-xs text-text-muted hover:text-text-primary hover:border-accent/50 transition-colors disabled:opacity-50">
+                <RefreshCw size={13} className={statusLoading ? 'animate-spin' : ''} />
+              </button>
+            </div>
+            {status && (
+              <div className={`flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-lg border ${
+                status.online ? 'border-green-500/30 bg-green-500/8 text-green-400' : 'border-red-500/30 bg-red-500/8 text-red-400'
+              }`}>
+                {status.online ? <Wifi size={11} /> : <WifiOff size={11} />}
+                {status.online ? '✓ Servicio Piper activo' : 'Servicio no disponible — ejecuta ./dev.sh'}
+              </div>
+            )}
+          </div>
+          <details className="group">
+            <summary className="cursor-pointer text-xs text-text-muted hover:text-text-primary select-none">
+              ▸ Cómo arrancar el servicio TTS
+            </summary>
+            <div className="mt-2 p-3 rounded-lg border border-border text-xs font-mono text-text-secondary space-y-1" style={{ background: 'var(--surface-2)' }}>
+              <p className="text-text-muted font-sans mb-1">Arrancar todo con un solo comando:</p>
+              <p>./dev.sh</p>
+              <p className="text-text-muted font-sans mt-2">O solo el servicio TTS:</p>
+              <p>cd tts-service && ./start.sh</p>
+            </div>
+          </details>
+        </div>
+      </Section>
+
+      {/* ── Playback parameters ──────────────────────────────────────────────── */}
+      <Section title="Parámetros de reproducción">
+        <ToggleRow
+          label="Reproducir automáticamente"
+          description="Reproduce cada respuesta de la IA sin pulsar el botón"
+          checked={tts.autoPlay}
+          onChange={(v) => setTts({ autoPlay: v })}
+        />
+        <SliderRow label="Velocidad" value={tts.speed} min={0.5} max={2.0} step={0.1}
+          format={(v) => `${v.toFixed(1)}×`} onChange={(v) => setTts({ speed: v })} />
+        <SliderRow label="Expresividad" value={tts.temperature} min={0.1} max={1.0} step={0.05}
+          format={(v) => v.toFixed(2)} onChange={(v) => setTts({ temperature: v })}
+          hint="Baja = voz estable. Alta = más dinámica pero menos precisa." />
+      </Section>
+
+      {/* ── Voice selection ──────────────────────────────────────────────────── */}
+      <Section title="Voces femeninas">
+        <VoiceGrid voices={females} selectedId={tts.defaultVoiceId}
+          onSelect={(id) => setTts({ defaultVoiceId: id })}
+          downloading={downloading} downloadError={downloadError} onDownload={download}
+          previewing={previewing} previewLoading={previewLoading}
+          onPreview={(id) => togglePreview(id, tts.speed, tts.temperature)} />
+      </Section>
+      <Section title="Voces masculinas">
+        <VoiceGrid voices={males} selectedId={tts.defaultVoiceId}
+          onSelect={(id) => setTts({ defaultVoiceId: id })}
+          downloading={downloading} downloadError={downloadError} onDownload={download}
+          previewing={previewing} previewLoading={previewLoading}
+          onPreview={(id) => togglePreview(id, tts.speed, tts.temperature)} />
+      </Section>
+    </>
+  );
+}
+
+function SliderRow({
+  label, value, min, max, step, format, hint, onChange,
+}: {
+  label: string; value: number; min: number; max: number; step: number;
+  format: (v: number) => string; hint?: string; onChange: (v: number) => void;
+}) {
+  return (
+    <div className="py-2 border-b border-border last:border-0 space-y-1.5">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium">{label}</p>
+        <span className="text-xs font-mono text-accent">{format(value)}</span>
+      </div>
+      <input
+        type="range" min={min} max={max} step={step}
+        value={value}
+        onChange={(e) => onChange(parseFloat(e.target.value))}
+        className="w-full accent-accent"
+      />
+      {hint && <p className="text-[10px] text-text-muted">{hint}</p>}
+    </div>
+  );
+}
+
+function VoiceGrid({
+  voices, selectedId, onSelect,
+  downloading, downloadError, onDownload,
+  previewing, previewLoading, onPreview,
+}: {
+  voices: TtsVoice[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  downloading: string | null;
+  downloadError: string | null;
+  onDownload: (id: string) => void;
+  previewing: string | null;
+  previewLoading: string | null;
+  onPreview: (id: string) => void;
+}) {
+  return (
+    <div className="grid grid-cols-2 gap-2">
+      {voices.map((voice) => {
+        const isSelected    = selectedId === voice.id;
+        const isDownloading = downloading === voice.id;
+        const hasError      = downloadError === voice.id;
+        const needsDownload = !voice.available;
+        const isPreviewing  = previewing === voice.id;
+        const isLoadingPrev = previewLoading === voice.id;
+
+        return (
+          <div
+            key={voice.id}
+            className={`relative flex flex-col p-3 rounded-xl border transition-all ${
+              isSelected
+                ? 'border-accent'
+                : needsDownload
+                ? 'border-border opacity-70'
+                : 'border-border hover:border-accent/40'
+            }`}
+            style={{ background: isSelected ? 'rgba(var(--accent-rgb,99,102,241),0.08)' : 'var(--surface-2)' }}
+          >
+            {/* Header row: icon + name + selected check */}
+            <div className="flex items-start gap-2">
+              <div className={`mt-0.5 p-1 rounded-md flex-shrink-0 ${isSelected ? 'bg-accent/20' : 'bg-white/8'}`}>
+                <Volume2 size={11} className={isSelected ? 'text-accent' : 'text-text-muted'} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  <span className={`text-xs font-semibold ${isSelected ? 'text-accent' : 'text-text-primary'}`}>
+                    {voice.name}
+                  </span>
+                  {isSelected && <CheckCircle2 size={10} className="text-accent flex-shrink-0" />}
+                </div>
+                <p className="text-[10px] text-text-muted leading-tight mt-0.5 line-clamp-2">
+                  {voice.description}
+                </p>
+              </div>
+            </div>
+
+            {/* Action row */}
+            <div className="flex gap-1.5 mt-2.5">
+              {needsDownload ? (
+                /* ── Download button ── */
+                <button
+                  onClick={() => onDownload(voice.id)}
+                  disabled={isDownloading}
+                  className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg border text-[10px] font-medium transition-colors disabled:opacity-50 ${
+                    hasError
+                      ? 'border-red-500/40 text-red-400 hover:bg-red-500/10'
+                      : 'border-accent/50 text-accent hover:bg-accent/10'
+                  }`}
+                >
+                  <Download size={9} className={isDownloading ? 'animate-bounce' : ''} />
+                  {isDownloading ? 'Descargando…' : hasError ? 'Reintentar' : 'Descargar voz'}
+                </button>
+              ) : (
+                <>
+                  {/* ── Select button ── */}
+                  <button
+                    onClick={() => onSelect(voice.id)}
+                    className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg border text-[10px] font-medium transition-colors ${
+                      isSelected
+                        ? 'border-accent/60 bg-accent/15 text-accent cursor-default'
+                        : 'border-border text-text-muted hover:border-accent/50 hover:text-text-primary hover:bg-white/5'
+                    }`}
+                  >
+                    {isSelected ? <><CheckCircle2 size={9} /> Seleccionada</> : 'Seleccionar'}
+                  </button>
+
+                  {/* ── Preview button ── */}
+                  <button
+                    onClick={() => onPreview(voice.id)}
+                    disabled={isLoadingPrev}
+                    title={isPreviewing ? 'Detener preview' : 'Escuchar ejemplo'}
+                    className={`flex items-center justify-center w-7 rounded-lg border text-[10px] transition-colors disabled:opacity-50 ${
+                      isPreviewing
+                        ? 'border-accent/60 bg-accent/15 text-accent'
+                        : 'border-border text-text-muted hover:border-accent/50 hover:text-accent hover:bg-accent/8'
+                    }`}
+                  >
+                    {isLoadingPrev
+                      ? <Loader size={9} className="animate-spin" />
+                      : isPreviewing
+                      ? <Square size={9} />
+                      : <Play size={9} />
+                    }
+                  </button>
+                </>
+              )}
+            </div>
+
+            {/* Download progress hint */}
+            {isDownloading && (
+              <p className="mt-1.5 text-[9px] text-text-muted text-center">
+                Descargando modelo (~60 MB)…
+              </p>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Section ─────────────────────────────────────────────────────────────────
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-3">
+      <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider">{title}</h3>
+      <div className="space-y-3">{children}</div>
+    </div>
+  );
+}
+
+function ToggleRow({ label, description, checked, onChange }: {
+  label: string; description: string; checked: boolean; onChange: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between py-2 border-b border-border last:border-0">
+      <div>
+        <p className="text-sm font-medium">{label}</p>
+        <p className="text-xs text-text-muted">{description}</p>
+      </div>
+      <button
+        onClick={() => onChange(!checked)}
+        className={`relative w-10 h-5 rounded-full transition-colors ${checked ? 'bg-accent' : 'bg-surface-3'}`}
+      >
+        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform ${checked ? 'translate-x-5' : 'translate-x-0.5'}`} />
+      </button>
+    </div>
+  );
+}
+
+// ─── Shared restore helpers ───────────────────────────────────────────────────
+
+/** Inline "Restaurar" button — use inside custom layouts (e.g. FastLlmSection). */
+function RestoreButton({ settingsKey, onRestore }: { settingsKey: keyof AppSettings; onRestore: (v: string) => void }) {
+  const [restoring, setRestoring] = useState(false);
+  async function handleRestore() {
+    setRestoring(true);
+    try { onRestore((await settingsApi.getDefault(settingsKey)).value as string); }
+    catch { /* silently ignore */ }
+    finally { setRestoring(false); }
+  }
+  return (
+    <button
+      onClick={handleRestore}
+      disabled={restoring}
+      title="Restaurar valor por defecto"
+      className="flex items-center gap-1 px-2 py-1 rounded text-[11px] text-text-muted hover:text-text-primary hover:bg-white/8 border border-border transition-colors"
+    >
+      {restoring ? <Loader size={11} className="animate-spin" /> : <RotateCcw size={11} />}
+      Restaurar
+    </button>
+  );
+}
+
+// ─── Reusable restorable prompt textarea ─────────────────────────────────────
+
+function RestorablePrompt({
+  settingsKey,
+  value,
+  onChange,
+  rows = 10,
+  mono = false,
+  hint,
+}: {
+  settingsKey: keyof AppSettings;
+  value: string;
+  onChange: (v: string) => void;
+  rows?: number;
+  mono?: boolean;
+  hint?: string;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex justify-end">
+        <RestoreButton settingsKey={settingsKey} onRestore={onChange} />
+      </div>
+      <Textarea
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        rows={rows}
+        className={mono ? 'font-mono text-xs' : undefined}
+        hint={hint}
+      />
+    </div>
+  );
+}
+
+// ─── Scene prompt section ────────────────────────────────────────────────────
+
+function ScenePromptSection({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <Section title="Prompt de generación de escena (imagen)">
+      <p className="text-xs text-text-muted">
+        Plantilla que se envía al LLM para generar la descripción visual de una escena.
+        Usa <code className="bg-surface-3 px-1 rounded text-accent">{'{{characters}}'}</code> y{' '}
+        <code className="bg-surface-3 px-1 rounded text-accent">{'{{messages}}'}</code> como variables.
+      </p>
+      <RestorablePrompt
+        settingsKey="sceneImagePrompt"
+        value={value}
+        onChange={onChange}
+        rows={12}
+        mono
+        hint="Incluye instrucciones de posicionamiento (on the left / in the center / on the right) para mejorar escenas con varios personajes."
+      />
+    </Section>
+  );
+}
+
+function SaveBar({ onSave, isPending, isSuccess }: { onSave: () => void; isPending: boolean; isSuccess: boolean }) {
+  return (
+    <div className="flex justify-end pt-2">
+      <button
+        onClick={onSave}
+        disabled={isPending}
+        className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium bg-accent text-white hover:bg-accent/80 disabled:opacity-50 transition-colors"
+      >
+        {isPending ? (
+          <Loader size={13} className="animate-spin" />
+        ) : isSuccess ? (
+          <CheckCircle2 size={13} />
+        ) : null}
+        {isSuccess ? 'Guardado' : 'Guardar'}
+      </button>
+    </div>
+  );
+}
+
+// ─── Fast LLM section ────────────────────────────────────────────────────────
+
+function FastLlmSection({
+  providers, enabled, providerId, modelId, debugMode, analysisPrompt,
+  onEnabledChange, onProviderChange, onModelChange, onDebugModeChange, onAnalysisPromptChange,
+}: {
+  providers: Provider[];
+  enabled: boolean;
+  providerId: string | null;
+  modelId: string | null;
+  debugMode: boolean;
+  analysisPrompt: string;
+  onEnabledChange: (v: boolean) => void;
+  onProviderChange: (v: string | null) => void;
+  onModelChange: (v: string | null) => void;
+  onDebugModeChange: (v: boolean) => void;
+  onAnalysisPromptChange: (v: string) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-text-muted leading-relaxed">
+        Modelo pequeño y rápido que analiza cada intercambio para crear memorias automáticas y
+        gestionar la afinidad. Cuando está activo, el LLM principal ya no necesita emitir etiquetas{' '}
+        <code className="bg-surface-3 px-1 rounded text-[10px] text-accent">[AFINIDAD]</code>.
+        <br />
+        <span className="text-text-muted/70">Recomendado: Qwen2.5 1.5B · Gemma2 2B · Llama3.2 3B</span>
+      </p>
+
+      <ToggleRow
+        label="Activar LLM Rápido"
+        description="Analiza cada respuesta para generar memorias y actualizar afinidades automáticamente"
+        checked={enabled}
+        onChange={onEnabledChange}
+      />
+
+      {enabled && (
+        <>
+          <DefaultModelSection
+            providers={providers}
+            defaultProviderId={providerId}
+            defaultModelId={modelId}
+            onProviderChange={onProviderChange}
+            onModelChange={onModelChange}
+          />
+
+          <ToggleRow
+            label="Modo debug"
+            description="Muestra el análisis del LLM Rápido debajo de cada mensaje del personaje"
+            checked={debugMode}
+            onChange={onDebugModeChange}
+          />
+
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-text-secondary">
+                Prompt de análisis
+              </label>
+              <RestoreButton settingsKey="fastLlmAnalysisPrompt" onRestore={onAnalysisPromptChange} />
+            </div>
+            <p className="text-[10px] text-text-muted">
+              Variables disponibles:{' '}
+              <code className="bg-surface-3 px-1 rounded text-accent">{'{{PERSONAJES}}'}</code>{' '}
+              <code className="bg-surface-3 px-1 rounded text-accent">{'{{MENSAJE_JUGADOR}}'}</code>{' '}
+              <code className="bg-surface-3 px-1 rounded text-accent">{'{{RESPUESTA}}'}</code>
+            </p>
+            <textarea
+              value={analysisPrompt}
+              onChange={(e) => onAnalysisPromptChange(e.target.value)}
+              rows={12}
+              className="w-full rounded-lg px-3 py-2 text-xs bg-surface-2 border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent resize-y font-mono leading-relaxed"
+              placeholder="Prompt de análisis del LLM Rápido…"
+            />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Default Model section ───────────────────────────────────────────────────
+
+function DefaultModelSection({
+  providers,
+  defaultProviderId,
+  defaultModelId,
+  onProviderChange,
+  onModelChange,
+}: {
+  providers: Provider[];
+  defaultProviderId: string | null;
+  defaultModelId: string | null;
+  onProviderChange: (v: string | null) => void;
+  onModelChange: (v: string | null) => void;
+}) {
+  const [models, setModels] = React.useState<string[]>([]);
+  const [loading, setLoading] = React.useState(false);
+
+  async function loadModels(providerId: string) {
+    setLoading(true);
+    setModels([]);
+    try {
+      const list = await providersApi.listModels(providerId);
+      setModels(list.map((m) => m.id));
+    } catch {
+      setModels([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleProviderChange(pid: string) {
+    const val = pid || null;
+    onProviderChange(val);
+    onModelChange(null);
+    if (val) loadModels(val);
+    else setModels([]);
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-text-muted">
+        Usado cuando el personaje no tiene un provider/modelo propio configurado.
+      </p>
+      <div className="flex flex-col gap-1">
+        <label className="text-xs font-medium text-text-secondary">Provider</label>
+        <select
+          value={defaultProviderId ?? ''}
+          onChange={(e) => handleProviderChange(e.target.value)}
+          className="w-full rounded-lg px-3 py-2 text-sm border border-border focus:outline-none focus:ring-1 focus:ring-accent"
+          style={{ background: 'var(--surface-1)', color: 'var(--text-primary)' }}
+        >
+          <option value="">— ninguno —</option>
+          {providers.map((p) => (
+            <option key={p.id} value={p.id}>{p.name} ({p.type})</option>
+          ))}
+        </select>
+      </div>
+
+      {defaultProviderId && (
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-text-secondary">Modelo</label>
+          {loading ? (
+            <p className="text-xs text-text-muted animate-pulse">Cargando modelos...</p>
+          ) : models.length > 0 ? (
+            <select
+              value={defaultModelId ?? ''}
+              onChange={(e) => onModelChange(e.target.value || null)}
+              className="w-full rounded-lg px-3 py-2 text-sm border border-border focus:outline-none focus:ring-1 focus:ring-accent"
+              style={{ background: 'var(--surface-1)', color: 'var(--text-primary)' }}
+            >
+              <option value="">— elige un modelo —</option>
+              {models.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          ) : (
+            <input
+              value={defaultModelId ?? ''}
+              onChange={(e) => onModelChange(e.target.value || null)}
+              placeholder="ej. llama3.2, mistral, gemma2..."
+              className="w-full rounded-lg px-3 py-2 text-sm border border-border focus:outline-none focus:ring-1 focus:ring-accent bg-transparent"
+              style={{ color: 'var(--text-primary)' }}
+            />
+          )}
+          {!loading && models.length === 0 && (
+            <p className="text-[10px] text-text-muted">
+              Provider no conectado — escribe el nombre del modelo manualmente.
+            </p>
+          )}
+          <button
+            onClick={() => loadModels(defaultProviderId)}
+            className="text-xs text-accent hover:underline text-left w-fit"
+          >
+            Recargar modelos
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Providers section ────────────────────────────────────────────────────────
+
+const PROVIDER_TYPES = [
+  { value: 'ollama',      label: 'Ollama',          url: 'http://localhost:11434',         hint: 'ollama serve' },
+  { value: 'lmstudio',   label: 'LM Studio',        url: 'http://localhost:1234/v1',       hint: 'Enable local server in LM Studio' },
+  { value: 'mlx',        label: 'MLX (Apple)',       url: 'http://localhost:8000/v1',       hint: 'Puerto habitual: 8000 (oMLX) o 8080 (mlx_lm.server).  Si el servidor pide API Key, introdúcela abajo' },
+  { value: 'openai',     label: 'OpenAI',            url: 'https://api.openai.com/v1',     hint: 'Requires API key' },
+  { value: 'openrouter', label: 'OpenRouter',        url: 'https://openrouter.ai/api/v1',  hint: 'Requires API key' },
+  { value: 'kobold',     label: 'KoboldCpp',         url: 'http://localhost:5001',         hint: 'koboldcpp --host 0.0.0.0' },
+  { value: 'oobabooga',  label: 'Oobabooga',         url: 'http://localhost:5000/v1',      hint: 'Enable --api flag' },
+  { value: 'custom',     label: 'Custom (OpenAI-compatible)', url: 'http://localhost:8080/v1', hint: 'Any OpenAI-compatible endpoint' },
+];
+
+function ProvidersSection({ providers }: { providers: Provider[] }) {
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const qc = useQueryClient();
+
+  const DEFAULT_NEW: CreateProviderDto = {
+    name: '',
+    type: 'ollama',
+    baseUrl: 'http://localhost:11434',
+    apiKey: null,
+    defaultModel: null,
+    isEnabled: true,
+    config: {},
+  };
+  const [newProv, setNewProv] = useState<CreateProviderDto>(DEFAULT_NEW);
+
+  const create = useMutation({
+    mutationFn: () => providersApi.create(newProv),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['providers'] }); setAdding(false); setNewProv(DEFAULT_NEW); },
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: string) => providersApi.delete(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['providers'] }),
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="text-xs font-semibold text-text-muted uppercase tracking-wider">LLM Providers</h3>
+        <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
+          <Plus size={13} /> Add Provider
+        </Button>
+      </div>
+
+      {/* Add form */}
+      {adding && (
+        <div className="rounded-xl border border-accent/40 p-4 space-y-3 animate-slide-up"
+          style={{ background: 'var(--surface-2)' }}>
+          <h4 className="text-sm font-medium">New Provider</h4>
+          <div className="grid grid-cols-2 gap-3">
+            <Input label="Name" value={newProv.name} onChange={(e) => setNewProv((p) => ({ ...p, name: e.target.value }))} placeholder="My Ollama" />
+            <div className="flex flex-col gap-1">
+              <label className="text-xs font-medium text-text-secondary">Type</label>
+              <select
+                value={newProv.type}
+                onChange={(e) => {
+                  const t = PROVIDER_TYPES.find((p) => p.value === e.target.value);
+                  setNewProv((p) => ({ ...p, type: e.target.value as Provider['type'], baseUrl: t?.url ?? p.baseUrl }));
+                }}
+                className="rounded-lg px-3 py-2 text-sm bg-surface-1 border border-border text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+              >
+                {PROVIDER_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+            </div>
+          </div>
+          {/* Hint for the selected provider type */}
+          {(() => {
+            const hint = PROVIDER_TYPES.find((t) => t.value === newProv.type)?.hint;
+            return hint ? (
+              <div className="flex items-start gap-2 px-3 py-2 rounded-lg text-xs text-text-muted"
+                style={{ background: 'var(--surface-3)' }}>
+                <span className="font-mono mt-0.5">$</span>
+                <span>{hint}</span>
+              </div>
+            ) : null;
+          })()}
+          <Input label="Base URL" value={newProv.baseUrl} onChange={(e) => setNewProv((p) => ({ ...p, baseUrl: e.target.value }))} placeholder="http://localhost:11434" />
+          <Input label="API Key (optional)" value={newProv.apiKey ?? ''} onChange={(e) => setNewProv((p) => ({ ...p, apiKey: e.target.value || null }))} type="password" placeholder="sk-..." />
+          <div className="flex gap-2 justify-end">
+            <Button variant="ghost" size="sm" onClick={() => setAdding(false)}>Cancel</Button>
+            <Button size="sm" onClick={() => create.mutate()} loading={create.isPending}>Add Provider</Button>
+          </div>
+        </div>
+      )}
+
+      {/* Provider list */}
+      <div className="space-y-2">
+        {providers.map((p) => (
+          <ProviderRow key={p.id} provider={p} onDelete={() => remove.mutate(p.id)} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProviderRow({ provider, onDelete }: { provider: Provider; onDelete: () => void }) {
+  const [validating, setValidating] = useState(false);
+  const [valid, setValid] = useState<boolean | null>(null);
+  const [validError, setValidError] = useState<string | null>(null);
+
+  async function validate() {
+    setValidating(true);
+    setValidError(null);
+    try {
+      const result = await providersApi.validate(provider.id);
+      setValid(result.valid);
+      setValidError(result.valid ? null : (result.error ?? 'Conexión fallida'));
+    } catch (err) {
+      setValid(false);
+      setValidError(err instanceof Error ? err.message : 'Error al conectar');
+    } finally {
+      setValidating(false);
+    }
+  }
+
+  return (
+    <div className="rounded-xl border border-border overflow-hidden"
+      style={{ background: 'var(--surface-2)' }}>
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium">{provider.name}</span>
+            <span className="px-1.5 py-0.5 rounded text-[10px] bg-accent-muted text-accent">{provider.type}</span>
+            {!provider.isEnabled && <span className="px-1.5 py-0.5 rounded text-[10px] bg-surface-3 text-text-muted">disabled</span>}
+          </div>
+          <p className="text-xs text-text-muted font-mono truncate">{provider.baseUrl}</p>
+        </div>
+        <div className="flex items-center gap-1">
+          {valid === true  && <Check size={14} className="text-emerald-400" />}
+          {valid === false && <X    size={14} className="text-red-400" />}
+          <button onClick={validate} disabled={validating}
+            className="p-1.5 rounded hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors"
+            title="Probar conexión">
+            <RefreshCw size={13} className={validating ? 'animate-spin' : ''} />
+          </button>
+          <button onClick={onDelete}
+            className="p-1.5 rounded hover:bg-red-500/10 text-text-muted hover:text-red-400 transition-colors"
+            title="Eliminar">
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+      {/* Error detail shown below the row after a failed validate */}
+      {validError && (
+        <div className="px-4 py-2 border-t border-border flex items-start gap-2"
+          style={{ background: 'var(--surface-3)' }}>
+          <AlertCircle size={12} className="text-red-400 flex-shrink-0 mt-0.5" />
+          <p className="text-[11px] text-red-400 leading-relaxed">{validError}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Profile section ─────────────────────────────────────────────────────────
+
+function ProfileSection() {
+  const { user, setAuth } = useAuthStore();
+  const [displayName, setDisplayName] = useState(user?.displayName ?? '');
+  const [appearance,  setAppearance]  = useState(user?.appearance  ?? '');
+  const [saved, setSaved] = useState(false);
+
+  // Avatar upload & crop
+  const [cropSrc,     setCropSrc]     = useState<string | null>(null);
+  const [pendingFile, setPendingFile] = useState<File | null>(null);
+
+  // Inspiration modal state
+  const [inspiredUrl,    setInspiredUrl]    = useState<string | null>(null);
+  const [inspirationPrompt, setInspirationPrompt] = useState('');
+  const [showInspirationModal, setShowInspirationModal] = useState(false);
+
+  const isDirty =
+    displayName.trim() !== (user?.displayName ?? '') ||
+    appearance          !== (user?.appearance  ?? '');
+
+  // ── mutations ──────────────────────────────────────────────────────────────
+  const updateMut = useMutation({
+    mutationFn: () => authApi.updateProfile({ displayName: displayName.trim(), appearance }),
+    onSuccess: (data) => { setAuth(data.token, data.user); setSaved(true); setTimeout(() => setSaved(false), 2000); },
+  });
+
+  const uploadAvatarMut = useMutation({
+    mutationFn: (file: File) => authApi.uploadAvatar(file),
+    onSuccess: (data) => { setAuth(data.token, data.user); setPendingFile(null); setCropSrc(null); },
+  });
+
+  const deleteAvatarMut = useMutation({
+    mutationFn: () => authApi.deleteAvatar(),
+    onSuccess: (data) => setAuth(data.token, data.user),
+  });
+
+  const generateDescMut = useMutation({
+    mutationFn: () => authApi.generateDescription(),
+    onSuccess: ({ description }) => { setAppearance(description); setSaved(false); },
+  });
+
+  const inspirationMut = useMutation({
+    mutationFn: (prompt?: string) => authApi.generateInspiration(prompt),
+    onSuccess: ({ imageUrl }) => { setInspiredUrl(imageUrl); },
+  });
+
+  // ── avatar upload — open crop modal first ─────────────────────────────────
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPendingFile(file);
+    const url = URL.createObjectURL(file);
+    setCropSrc(url);
+    e.target.value = ''; // reset so same file can be picked again
+  }
+
+  async function handleCropConfirm(blob: Blob) {
+    const croppedFile = new File([blob], pendingFile?.name ?? 'avatar.jpg', { type: blob.type });
+    await uploadAvatarMut.mutateAsync(croppedFile);
+    if (cropSrc?.startsWith('blob:')) URL.revokeObjectURL(cropSrc);
+    setCropSrc(null);
+  }
+
+  // ── use inspired image as avatar ──────────────────────────────────────────
+  function handleUseInspiredAsAvatar() {
+    if (!inspiredUrl) return;
+    setCropSrc(inspiredUrl);
+    setPendingFile(new File([], 'inspired.png', { type: 'image/png' }));
+    setShowInspirationModal(false);
+  }
+
+  const avatarSrc = user?.avatar ? `${user.avatar}?t=${user.updatedAt}` : null;
+
+  return (
+    <div className="space-y-6">
+      {/* ── Avatar ──────────────────────────────────────────────────────── */}
+      <Section title="Foto de perfil">
+        <div className="flex items-start gap-5">
+          {/* Photo */}
+          <div className="relative flex-shrink-0">
+            <div
+              className="w-24 h-24 rounded-full border-2 border-border overflow-hidden flex items-center justify-center"
+              style={{ background: 'var(--surface-2)' }}
+            >
+              {avatarSrc ? (
+                <img src={avatarSrc} alt="avatar" className="w-full h-full object-cover" />
+              ) : (
+                <UserCircle size={40} className="text-text-muted" />
+              )}
+            </div>
+            {/* Camera badge */}
+            <label
+              htmlFor="profile-avatar-upload"
+              className="absolute bottom-0 right-0 w-7 h-7 rounded-full bg-accent flex items-center justify-center cursor-pointer border-2 border-surface-1 hover:bg-accent-hover transition-colors"
+              title="Subir foto"
+            >
+              <Camera size={12} className="text-white" />
+            </label>
+            <input
+              id="profile-avatar-upload"
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleFileChange}
+            />
+          </div>
+
+          {/* Actions */}
+          <div className="flex flex-col gap-2 pt-1">
+            <label
+              htmlFor="profile-avatar-upload"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-border text-text-secondary hover:text-text-primary hover:border-accent/50 cursor-pointer transition-colors"
+            >
+              <Upload size={12} /> Subir foto
+            </label>
+
+            {avatarSrc && (
+              <>
+                <button
+                  onClick={() => setShowInspirationModal(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-amber-500/40 text-amber-400 hover:bg-amber-500/10 transition-colors"
+                  title="Generar nueva imagen manteniendo tu apariencia (FaceID)"
+                >
+                  <FlaskConical size={12} /> Inspiración
+                </button>
+                <button
+                  onClick={() => deleteAvatarMut.mutate()}
+                  disabled={deleteAvatarMut.isPending}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors"
+                >
+                  <Trash2 size={12} /> Eliminar foto
+                </button>
+              </>
+            )}
+
+            {(uploadAvatarMut.isPending || deleteAvatarMut.isPending) && (
+              <span className="text-[11px] text-text-muted flex items-center gap-1">
+                <Loader size={10} className="animate-spin" /> Procesando…
+              </span>
+            )}
+            {uploadAvatarMut.isError && (
+              <span className="text-[11px] text-red-400">{(uploadAvatarMut.error as Error).message}</span>
+            )}
+          </div>
+        </div>
+      </Section>
+
+      {/* ── Display name ────────────────────────────────────────────────── */}
+      <Section title="Nombre para la IA">
+        <p className="text-xs text-text-muted mb-3">
+          Este nombre será usado por los personajes para referirse a ti durante las conversaciones.
+        </p>
+        <Input
+          value={displayName}
+          onChange={(e) => { setDisplayName(e.target.value); setSaved(false); }}
+          placeholder="Tu nombre"
+        />
+      </Section>
+
+      {/* ── Appearance description ──────────────────────────────────────── */}
+      <Section title="Descripción de apariencia">
+        <p className="text-xs text-text-muted mb-3">
+          Descripción visual (aspecto físico, ropa habitual, rasgos). Se incluirá al generar imágenes
+          de escena para que puedas aparecer en ellas.
+        </p>
+        <div className="relative">
+          <textarea
+            value={appearance}
+            onChange={(e) => { setAppearance(e.target.value); setSaved(false); }}
+            rows={5}
+            placeholder="Ej: Human male, early 30s, short dark hair, blue eyes, casual jeans and grey hoodie, athletic build..."
+            className="w-full rounded-lg px-3 py-2 text-sm bg-surface-2 border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent resize-y font-mono leading-relaxed"
+          />
+        </div>
+        <div className="flex justify-end mt-2">
+          <button
+            onClick={() => generateDescMut.mutate()}
+            disabled={generateDescMut.isPending}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-violet-500/40 text-violet-400 hover:bg-violet-500/10 disabled:opacity-50 transition-colors"
+            title="La IA genera una descripción de apariencia optimizada para imágenes"
+          >
+            {generateDescMut.isPending
+              ? <><Loader size={11} className="animate-spin" /> Generando…</>
+              : <><Wand2 size={11} /> Describir con IA</>}
+          </button>
+        </div>
+        {generateDescMut.isError && (
+          <p className="text-xs text-red-400 mt-1">{(generateDescMut.error as Error).message}</p>
+        )}
+      </Section>
+
+      {/* ── Save bar ────────────────────────────────────────────────────── */}
+      <div className="flex items-center justify-between pt-1">
+        {updateMut.isError && (
+          <p className="text-xs text-red-400">{(updateMut.error as Error).message}</p>
+        )}
+        <div className="ml-auto">
+          <Button
+            size="sm"
+            onClick={() => updateMut.mutate()}
+            disabled={updateMut.isPending || !displayName.trim() || !isDirty}
+          >
+            {saved
+              ? <><Check size={13} /> Guardado</>
+              : updateMut.isPending
+              ? <><Loader size={13} className="animate-spin" /> Guardando…</>
+              : 'Guardar perfil'}
+          </Button>
+        </div>
+      </div>
+
+      {/* ── Crop modal ──────────────────────────────────────────────────── */}
+      {cropSrc && (
+        <AvatarCropModal
+          imageSrc={cropSrc}
+          onConfirm={handleCropConfirm}
+          onClose={() => { setCropSrc(null); setPendingFile(null); }}
+        />
+      )}
+
+      {/* ── Inspiration modal ───────────────────────────────────────────── */}
+      {showInspirationModal && (
+        <InspirationModal
+          defaultPrompt={appearance}
+          isGenerating={inspirationMut.isPending}
+          error={inspirationMut.isError ? (inspirationMut.error as Error).message : null}
+          resultUrl={inspiredUrl}
+          onGenerate={(prompt) => { setInspiredUrl(null); inspirationMut.mutate(prompt); }}
+          onUseAsAvatar={handleUseInspiredAsAvatar}
+          onClose={() => { setShowInspirationModal(false); setInspiredUrl(null); }}
+          prompt={inspirationPrompt}
+          onPromptChange={setInspirationPrompt}
+        />
+      )}
+    </div>
+  );
+}
+
+// ── Inspiration modal ──────────────────────────────────────────────────────────
+interface InspirationModalProps {
+  defaultPrompt: string;
+  isGenerating: boolean;
+  error: string | null;
+  resultUrl: string | null;
+  prompt: string;
+  onPromptChange: (v: string) => void;
+  onGenerate: (prompt?: string) => void;
+  onUseAsAvatar: () => void;
+  onClose: () => void;
+}
+
+function InspirationModal({
+  defaultPrompt, isGenerating, error, resultUrl,
+  prompt, onPromptChange, onGenerate, onUseAsAvatar, onClose,
+}: InspirationModalProps) {
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.85)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        className="w-full max-w-md rounded-xl border border-border flex flex-col animate-slide-up overflow-hidden"
+        style={{ background: 'var(--surface-1)' }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-center gap-2">
+            <FlaskConical size={15} className="text-amber-400" />
+            <div>
+              <p className="font-semibold text-sm">Inspiración (BETA)</p>
+              <p className="text-[10px] text-text-muted mt-0.5">
+                Genera una imagen nueva manteniendo tu apariencia
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-white/8 text-text-muted hover:text-text-primary">
+            <X size={15} />
+          </button>
+        </div>
+
+        <div className="p-5 space-y-4 flex-1 overflow-y-auto">
+          {/* Prompt */}
+          <div>
+            <label className="text-xs font-medium text-text-secondary block mb-1.5">
+              Descripción / prompt de imagen
+            </label>
+            <textarea
+              value={prompt || defaultPrompt}
+              onChange={(e) => onPromptChange(e.target.value)}
+              rows={4}
+              placeholder={defaultPrompt || 'Describe la imagen que quieres generar…'}
+              className="w-full rounded-lg px-3 py-2 text-sm bg-surface-2 border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent resize-none font-mono"
+            />
+            <p className="text-[10px] text-text-muted mt-1">
+              Deja vacío para usar tu descripción de apariencia guardada.
+            </p>
+          </div>
+
+          {/* Result image */}
+          {resultUrl && (
+            <div className="rounded-xl overflow-hidden border border-border">
+              <img src={resultUrl} alt="Imagen generada" className="w-full object-cover" />
+            </div>
+          )}
+
+          {error && <p className="text-xs text-red-400">{error}</p>}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between gap-2 px-5 py-4 border-t border-border">
+          {resultUrl ? (
+            <button
+              onClick={onUseAsAvatar}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm border border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+            >
+              <Check size={13} /> Usar como avatar
+            </button>
+          ) : <div />}
+          <button
+            onClick={() => onGenerate(prompt || undefined)}
+            disabled={isGenerating}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm bg-amber-500 text-white hover:bg-amber-600 disabled:opacity-50 transition-colors"
+          >
+            {isGenerating
+              ? <><Loader size={13} className="animate-spin" /> Generando…</>
+              : <><Sparkles size={13} /> {resultUrl ? 'Regenerar' : 'Generar'}</>}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Users section ────────────────────────────────────────────────────────────
+
+// Clase base para todos los inputs/selects de esta sección — igual que el componente Input oficial
+const fieldCls = 'w-full rounded-lg px-3 py-1.5 text-sm bg-surface-2 border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent transition-colors';
+
+function UsersSection() {
+  const qc = useQueryClient();
+  const currentUser = useAuthStore((s) => s.user);
+
+  const { data: userList = [], isLoading } = useQuery({
+    queryKey: ['users'],
+    queryFn: usersApi.list,
+  });
+
+  const [creating, setCreating] = useState(false);
+  const [form, setForm] = useState({ username: '', password: '', displayName: '', role: 'user' as 'admin' | 'user' });
+  const [formError, setFormError] = useState('');
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState({ password: '', displayName: '', role: 'user' as 'admin' | 'user' });
+  const [assignId, setAssignId] = useState<string | null>(null);
+
+  const createMut = useMutation({
+    mutationFn: () => usersApi.create({ ...form, role: form.role }),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); setCreating(false); setForm({ username: '', password: '', displayName: '', role: 'user' }); setFormError(''); },
+    onError: (e: Error) => setFormError(e.message),
+  });
+
+  const updateMut = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: { password?: string; displayName?: string; role?: 'admin' | 'user' } }) =>
+      usersApi.update(id, data),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); setEditId(null); },
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => usersApi.delete(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+
+  const toggleActive = useMutation({
+    mutationFn: ({ id, active }: { id: string; active: boolean }) => usersApi.setActive(id, active),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+            <Users size={16} />
+            Gestión de usuarios
+          </h3>
+          <p className="text-xs text-text-muted mt-0.5">Crea y gestiona las cuentas de acceso</p>
+        </div>
+        <Button size="sm" onClick={() => { setCreating(true); setFormError(''); }}>
+          <Plus size={14} className="mr-1" />
+          Nuevo usuario
+        </Button>
+      </div>
+
+      {/* Create form */}
+      {creating && (
+        <div className="border border-border rounded-xl p-4 space-y-3" style={{ background: 'var(--surface-1)' }}>
+          <h4 className="text-sm font-medium text-text-primary">Nuevo usuario</h4>
+          {formError && <p className="text-xs text-red-400">{formError}</p>}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <label className="text-xs text-text-muted">Usuario</label>
+              <input value={form.username} onChange={e => setForm(f => ({ ...f, username: e.target.value }))} className={fieldCls} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-text-muted">Nombre visible</label>
+              <input value={form.displayName} onChange={e => setForm(f => ({ ...f, displayName: e.target.value }))} className={fieldCls} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-text-muted">Contraseña</label>
+              <input type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} className={fieldCls} />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-text-muted">Rol</label>
+              <select value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value as 'admin' | 'user' }))} className={fieldCls}>
+                <option value="user">Usuario</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <Button size="sm" onClick={() => createMut.mutate()} disabled={createMut.isPending || !form.username || !form.password || !form.displayName}>
+              {createMut.isPending ? 'Creando…' : 'Crear'}
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => { setCreating(false); setFormError(''); }}>Cancelar</Button>
+          </div>
+        </div>
+      )}
+
+      {/* User list */}
+      {isLoading ? (
+        <p className="text-sm text-text-muted text-center py-4">Cargando…</p>
+      ) : (
+        <div className="space-y-2">
+          {userList.map((u) => (
+            <div key={u.id} className="border border-border rounded-xl p-4" style={{ background: 'var(--surface-1)' }}>
+              {editId === u.id ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <label className="text-xs text-text-muted">Nombre visible</label>
+                      <input value={editForm.displayName} onChange={e => setEditForm(f => ({ ...f, displayName: e.target.value }))} className={fieldCls} />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-text-muted">Nueva contraseña (opcional)</label>
+                      <input type="password" value={editForm.password} onChange={e => setEditForm(f => ({ ...f, password: e.target.value }))}
+                        placeholder="Sin cambios" className={fieldCls} />
+                    </div>
+                    {u.id !== 'user-admin' && (
+                      <div className="space-y-1">
+                        <label className="text-xs text-text-muted">Rol</label>
+                        <select value={editForm.role} onChange={e => setEditForm(f => ({ ...f, role: e.target.value as 'admin' | 'user' }))} className={fieldCls}>
+                          <option value="user">Usuario</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button size="sm" onClick={() => {
+                      const data: { password?: string; displayName?: string; role?: 'admin' | 'user' } = { displayName: editForm.displayName };
+                      if (editForm.password) data.password = editForm.password;
+                      if (u.id !== 'user-admin') data.role = editForm.role;
+                      updateMut.mutate({ id: u.id, data });
+                    }} disabled={updateMut.isPending}>
+                      {updateMut.isPending ? 'Guardando…' : 'Guardar'}
+                    </Button>
+                    <Button size="sm" variant="ghost" onClick={() => setEditId(null)}>Cancelar</Button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
+                      u.role === 'admin' ? 'bg-accent/20 text-accent' : 'bg-surface-2 text-text-muted'
+                    }`}>
+                      {u.role === 'admin' ? <Shield size={14} /> : <UserCircle size={14} />}
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-text-primary">{u.displayName}
+                        {u.id === currentUser?.id && <span className="ml-1.5 text-xs text-accent">(tú)</span>}
+                      </p>
+                      <p className="text-xs text-text-muted">@{u.username} · {u.role === 'admin' ? 'Administrador' : 'Usuario'}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {u.id !== currentUser?.id && (
+                      <button
+                        onClick={() => toggleActive.mutate({ id: u.id, active: !u.isActive })}
+                        className={`px-2 py-0.5 rounded text-xs transition-colors ${
+                          u.isActive
+                            ? 'bg-green-500/15 text-green-400 hover:bg-red-500/15 hover:text-red-400'
+                            : 'bg-red-500/15 text-red-400 hover:bg-green-500/15 hover:text-green-400'
+                        }`}
+                        title={u.isActive ? 'Desactivar' : 'Activar'}
+                      >
+                        {u.isActive ? 'Activo' : 'Inactivo'}
+                      </button>
+                    )}
+                    {/* Assignment button — only for non-admin users */}
+                    {u.role === 'user' && (
+                      <button
+                        onClick={() => { setAssignId(assignId === u.id ? null : u.id); setEditId(null); }}
+                        className={`p-1.5 rounded transition-colors ${assignId === u.id ? 'text-accent bg-accent/10' : 'text-text-muted hover:text-text-primary hover:bg-white/5'}`}
+                        title="Asignaciones de contenido"
+                      >
+                        <Link2 size={13} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => { setEditId(u.id); setEditForm({ password: '', displayName: u.displayName, role: u.role }); setAssignId(null); }}
+                      className="p-1.5 rounded text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors"
+                      title="Editar"
+                    >
+                      <RefreshCw size={13} />
+                    </button>
+                    {u.id !== 'user-admin' && u.id !== currentUser?.id && (
+                      <button
+                        onClick={() => { if (confirm(`¿Eliminar usuario "${u.displayName}"?`)) deleteMut.mutate(u.id); }}
+                        className="p-1.5 rounded text-text-muted hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        title="Eliminar"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+              {/* Assignments panel — rendered inside the card, below both normal row and edit form */}
+              {assignId === u.id && editId !== u.id && (
+                <UserAssignmentsPanel userId={u.id} userName={u.displayName} />
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── User Assignments Panel ───────────────────────────────────────────────────
+
+function UserAssignmentsPanel({ userId, userName }: { userId: string; userName: string }) {
+  const qc = useQueryClient();
+
+  // All content (admin sees everything)
+  const { data: allChars = [] }   = useQuery({ queryKey: ['characters'], queryFn: () => charactersApi.list() });
+  const { data: allStories = [] } = useQuery({ queryKey: ['stories'],    queryFn: () => storiesApi.list() });
+
+  // Current assignments for this user
+  const { data: charAssign, isLoading: loadingChars } = useQuery({
+    queryKey: ['user-chars', userId],
+    queryFn: () => usersApi.getCharacterIds(userId),
+  });
+  const { data: storyAssign, isLoading: loadingStories } = useQuery({
+    queryKey: ['user-stories', userId],
+    queryFn: () => usersApi.getStoryIds(userId),
+  });
+
+  const [selChars, setSelChars]     = useState<Set<string>>(new Set());
+  const [selStories, setSelStories] = useState<Set<string>>(new Set());
+  const [saving, setSaving]         = useState(false);
+  const [saved, setSaved]           = useState(false);
+
+  // Sync remote data into local state once loaded
+  useEffect(() => {
+    if (charAssign?.characterIds) setSelChars(new Set(charAssign.characterIds));
+  }, [charAssign]);
+  useEffect(() => {
+    if (storyAssign?.storyIds) setSelStories(new Set(storyAssign.storyIds));
+  }, [storyAssign]);
+
+  function toggleChar(id: string) {
+    setSelChars((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setSaved(false);
+  }
+  function toggleStory(id: string) {
+    setSelStories((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
+    setSaved(false);
+  }
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await usersApi.setCharacterIds(userId, [...selChars]);
+      await usersApi.setStoryIds(userId, [...selStories]);
+      qc.invalidateQueries({ queryKey: ['user-chars', userId] });
+      qc.invalidateQueries({ queryKey: ['user-stories', userId] });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const isLoading = loadingChars || loadingStories;
+
+  return (
+    <div className="mt-3 pt-3 border-t border-border">
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs font-medium text-text-secondary flex items-center gap-1.5">
+          <Link2 size={12} className="text-accent" />
+          Contenido accesible para <span className="text-text-primary font-semibold">{userName}</span>
+        </p>
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-colors bg-accent hover:bg-accent-hover text-white disabled:opacity-50"
+        >
+          {saving ? <><Loader size={11} className="animate-spin" /> Guardando…</> : saved ? <><Check size={11} /> Guardado</> : 'Guardar'}
+        </button>
+      </div>
+
+      {isLoading ? (
+        <p className="text-xs text-text-muted py-2">Cargando…</p>
+      ) : (
+        <div className="grid grid-cols-2 gap-4">
+
+          {/* Characters column */}
+          <div>
+            <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-1">
+              <UserCircle size={11} /> Personajes ({selChars.size}/{allChars.length})
+            </p>
+            <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
+              {allChars.length === 0 && <p className="text-xs text-text-muted">Sin personajes</p>}
+              {allChars.map((c) => (
+                <label key={c.id} className="flex items-center gap-2 py-1 px-2 rounded-lg cursor-pointer hover:bg-white/5 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={selChars.has(c.id)}
+                    onChange={() => toggleChar(c.id)}
+                    className="accent-[var(--accent)] w-3.5 h-3.5 rounded flex-shrink-0"
+                  />
+                  <span className={`text-xs truncate ${selChars.has(c.id) ? 'text-text-primary' : 'text-text-muted'}`}>
+                    {c.name}
+                  </span>
+                  {c.userId === userId && (
+                    <span className="ml-auto text-[10px] text-accent flex-shrink-0">propio</span>
+                  )}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Stories column */}
+          <div>
+            <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-1">
+              <BookOpen size={11} /> Historias ({selStories.size}/{allStories.length})
+            </p>
+            <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
+              {allStories.length === 0 && <p className="text-xs text-text-muted">Sin historias</p>}
+              {allStories.map((s) => (
+                <label key={s.id} className="flex items-center gap-2 py-1 px-2 rounded-lg cursor-pointer hover:bg-white/5 transition-colors">
+                  <input
+                    type="checkbox"
+                    checked={selStories.has(s.id)}
+                    onChange={() => toggleStory(s.id)}
+                    className="accent-[var(--accent)] w-3.5 h-3.5 rounded flex-shrink-0"
+                  />
+                  <span className={`text-xs truncate ${selStories.has(s.id) ? 'text-text-primary' : 'text-text-muted'}`}>
+                    {s.name}
+                  </span>
+                  {s.userId === userId && (
+                    <span className="ml-auto text-[10px] text-accent flex-shrink-0">propia</span>
+                  )}
+                </label>
+              ))}
+            </div>
+          </div>
+
+        </div>
+      )}
+      <p className="text-[10px] text-text-muted mt-2">
+        Los administradores siempre ven todo el contenido. Los personajes e historias propios del usuario siempre son visibles independientemente de esta lista.
+      </p>
+    </div>
+  );
+}
+
+// ─── Image Provider Section ────────────────────────────────────────────────────
+
+type ImageProviderType = 'comfyui' | 'pollinations' | 'gemini' | 'fal';
+
+const IMAGE_PROVIDERS: { value: ImageProviderType; label: string; badge: string; desc: string }[] = [
+  { value: 'comfyui',     label: 'ComfyUI (local)',          badge: 'Local',    desc: 'Máximo control y calidad. Requiere instalación local. Soporta FaceID.' },
+  { value: 'pollinations', label: 'Pollinations.ai',         badge: 'Gratis',   desc: 'Completamente gratis y sin API key. FLUX.1, flux-realism, flux-anime…' },
+  { value: 'gemini',      label: 'Google Gemini Imagen 4',   badge: 'De pago',  desc: 'Imagen 4 y modelos Gemini nativos. Requiere cuenta de pago en Google AI (billing activado).' },
+  { value: 'fal',         label: 'Fal.ai',                   badge: 'De pago',  desc: 'FLUX.1-schnell, FLUX.1-dev, SD3… ~$0.003/img. 5 $ de créditos al registrarse.' },
+];
+
+const POLLINATIONS_MODELS = [
+  { value: 'flux',          label: 'FLUX.1 (default)' },
+  { value: 'flux-realism',  label: 'FLUX Realism (fotorrealista)' },
+  { value: 'flux-anime',    label: 'FLUX Anime' },
+  { value: 'flux-3d',       label: 'FLUX 3D' },
+  { value: 'turbo',         label: 'Turbo (más rápido)' },
+];
+
+const GEMINI_MODELS = [
+  { value: 'imagen-4.0-generate-001',        label: 'Imagen 4 (alta calidad)'      },
+  { value: 'imagen-4.0-ultra-generate-001',  label: 'Imagen 4 Ultra (máx calidad)' },
+  { value: 'imagen-4.0-fast-generate-001',   label: 'Imagen 4 Fast (más rápido)'   },
+  { value: 'gemini-2.5-flash-image',         label: 'Gemini 2.5 Flash Image'       },
+  { value: 'gemini-3.1-flash-image-preview', label: 'Gemini 3.1 Flash Image'       },
+  { value: 'gemini-3-pro-image-preview',     label: 'Gemini 3 Pro Image'           },
+  { value: 'nano-banana-pro-preview',        label: 'Nano Banana Pro'              },
+];
+
+const FAL_MODELS = [
+  { value: 'fal-ai/flux/schnell',   label: 'FLUX.1 Schnell (rápido, gratis trial)' },
+  { value: 'fal-ai/flux/dev',       label: 'FLUX.1 Dev (alta calidad)' },
+  { value: 'fal-ai/flux-realism',   label: 'FLUX Realism (fotorrealista)' },
+  { value: 'fal-ai/flux-pro/v1.1',  label: 'FLUX Pro v1.1 (profesional)' },
+];
+
+const BADGE_COLOR: Record<string, string> = {
+  'Local':    'bg-blue-500/15 text-blue-300 border-blue-500/30',
+  'Gratis':   'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+  '1500/día': 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
+  'De pago':  'bg-amber-500/15 text-amber-300 border-amber-500/30',
+};
+
+function ImageProviderSection({
+  draft,
+  update,
+}: {
+  draft: Partial<AppSettings>;
+  update: (k: keyof AppSettings, v: unknown) => void;
+}) {
+  const selected = (draft.imageProvider ?? 'comfyui') as ImageProviderType;
+  const providerInfo = IMAGE_PROVIDERS.find((p) => p.value === selected);
+
+  return (
+    <div className="space-y-4">
+      {/* Provider selector */}
+      <div className="space-y-2">
+        <label className="text-xs font-medium text-text-secondary">Proveedor</label>
+        <div className="grid gap-2">
+          {IMAGE_PROVIDERS.map((p) => (
+            <button
+              key={p.value}
+              onClick={() => update('imageProvider', p.value)}
+              className={`flex items-start gap-3 p-3 rounded-xl border text-left transition-all ${
+                selected === p.value
+                  ? 'border-accent bg-accent/8'
+                  : 'border-border hover:border-accent/40 hover:bg-white/3'
+              }`}
+            >
+              {/* Radio dot */}
+              <div className={`mt-0.5 w-4 h-4 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
+                selected === p.value ? 'border-accent' : 'border-border'
+              }`}>
+                {selected === p.value && <div className="w-2 h-2 rounded-full bg-accent" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-sm font-medium text-text-primary">{p.label}</span>
+                  <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded border ${BADGE_COLOR[p.badge] ?? ''}`}>
+                    {p.badge}
+                  </span>
+                </div>
+                <p className="text-xs text-text-muted mt-0.5 leading-relaxed">{p.desc}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Provider-specific config */}
+      {selected === 'comfyui' && (
+        <Input
+          label="URL del servidor ComfyUI"
+          value={draft.comfyUiUrl ?? 'http://127.0.0.1:8000'}
+          onChange={(e) => update('comfyUiUrl', e.target.value)}
+          placeholder="http://127.0.0.1:8000"
+          hint="Dirección local de ComfyUI. FaceID (imagen de referencia) solo disponible con este proveedor."
+        />
+      )}
+
+      {selected === 'pollinations' && (
+        <div className="space-y-3">
+          <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-300 leading-relaxed">
+            Sin registro ni API key. Tus prompts se envían a pollinations.ai — no lo uses con contenido privado.
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-text-secondary">Modelo</label>
+            <select
+              value={draft.pollinationsModel ?? 'flux'}
+              onChange={(e) => update('pollinationsModel', e.target.value)}
+              className="w-full bg-surface-2 border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+            >
+              {POLLINATIONS_MODELS.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+
+      {selected === 'gemini' && (
+        <div className="space-y-3">
+          <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-300 leading-relaxed">
+            ⚠️ La generación de imágenes con Google AI <strong>requiere billing activado</strong> (no hay tier gratuito para imágenes).
+            Activa la facturación en{' '}
+            <a href="https://ai.dev/projects" target="_blank" rel="noopener noreferrer"
+               className="underline hover:text-amber-200">ai.dev/projects</a>
+            {' '}y obtén tu API key en{' '}
+            <a href="https://aistudio.google.com" target="_blank" rel="noopener noreferrer"
+               className="underline hover:text-amber-200">aistudio.google.com</a>.
+          </div>
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-text-secondary">Modelo</label>
+            <select
+              value={draft.geminiModel ?? 'imagen-3.0-generate-001'}
+              onChange={(e) => update('geminiModel', e.target.value)}
+              className="w-full bg-surface-2 border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+            >
+              {GEMINI_MODELS.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+            <p className="text-[11px] text-text-muted mt-1">
+              Imagen 3 usa el endpoint <code className="font-mono bg-white/8 px-1 rounded">:predict</code>. Gemini 2.0 Flash usa <code className="font-mono bg-white/8 px-1 rounded">:generateContent</code>. Ambos con la misma API key.
+            </p>
+          </div>
+          <Input
+            label="API Key de Google AI Studio"
+            value={draft.imageProviderApiKey ?? ''}
+            onChange={(e) => update('imageProviderApiKey', e.target.value)}
+            placeholder="AIza..."
+            hint="La clave se almacena localmente y solo se envía a generativelanguage.googleapis.com."
+          />
+        </div>
+      )}
+
+      {selected === 'fal' && (
+        <div className="space-y-3">
+          <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 px-3 py-2 text-xs text-amber-300 leading-relaxed">
+            Regístrate en{' '}
+            <a href="https://fal.ai" target="_blank" rel="noopener noreferrer"
+               className="underline hover:text-amber-200">fal.ai</a>
+            {' '}para obtener tu API key. Incluye $5 de crédito gratuito al registrarte.
+          </div>
+          <Input
+            label="API Key de Fal.ai"
+            value={draft.imageProviderApiKey ?? ''}
+            onChange={(e) => update('imageProviderApiKey', e.target.value)}
+            placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx:xxxx..."
+            hint="Encuéntrala en fal.ai/dashboard → API Keys."
+          />
+          <div className="space-y-1">
+            <label className="text-xs font-medium text-text-secondary">Modelo</label>
+            <select
+              value={draft.falModel ?? 'fal-ai/flux/schnell'}
+              onChange={(e) => update('falModel', e.target.value)}
+              className="w-full bg-surface-2 border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+            >
+              {FAL_MODELS.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
+
+      {/* FaceID notice for non-ComfyUI providers */}
+      {selected !== 'comfyui' && (
+        <div className="rounded-lg border border-border bg-white/3 px-3 py-2 text-xs text-text-muted leading-relaxed">
+          ℹ️ FaceID (generación con imagen de referencia) solo está disponible con ComfyUI local. Con el proveedor actual, la función de "Inspiración" y el modo BETA generarán imágenes usando únicamente la descripción de texto.
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Stats Section ─────────────────────────────────────────────────────────────
+function StatsSection() {
+  const { data, isLoading } = useQuery({
+    queryKey: ['conversation-stats'],
+    queryFn: conversationsApi.stats,
+    staleTime: 30_000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center py-16 text-text-muted">
+        <Loader size={20} className="animate-spin mr-2" /> Calculando estadísticas…
+      </div>
+    );
+  }
+
+  if (!data) return null;
+
+  const { global: g, conversations } = data;
+  const cacheRatio = g.totalTokens > 0 ? Math.round(g.cachedTokens / g.totalTokens * 100) : 0;
+
+  const fmt = (n: number) => {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+    return n.toLocaleString('es-ES');
+  };
+
+  // Sort by tokens desc
+  const sorted = [...conversations].sort((a, b) => b.tokens - a.tokens);
+
+  return (
+    <div className="space-y-6">
+      <h3 className="text-sm font-semibold text-text-primary">Estadísticas de uso</h3>
+
+      {/* Global cards */}
+      <div className="grid grid-cols-2 gap-3">
+        <StatCard
+          icon={<Zap size={16} />}
+          label="Tokens totales"
+          value={fmt(g.totalTokens)}
+          sub={g.cachedTokens > 0 ? `${fmt(g.cachedTokens)} en caché (${cacheRatio}%)` : undefined}
+          accent={g.cachedTokens > 0}
+        />
+        <StatCard
+          icon={<BarChart2 size={16} />}
+          label="Mensajes generados"
+          value={fmt(g.totalMessages)}
+          sub={`en ${g.totalConversations} conversaciones`}
+        />
+      </div>
+
+      {/* Per-conversation table */}
+      {sorted.length === 0 ? (
+        <p className="text-sm text-text-muted text-center py-4">No hay conversaciones todavía.</p>
+      ) : (
+        <div className="rounded-xl border border-border overflow-hidden">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="border-b border-border bg-surface-1/50">
+                <th className="text-left px-4 py-2.5 text-text-muted font-medium">Conversación</th>
+                <th className="text-right px-3 py-2.5 text-text-muted font-medium">Tokens</th>
+                <th className="text-right px-3 py-2.5 text-text-muted font-medium">Caché</th>
+                <th className="text-right px-4 py-2.5 text-text-muted font-medium">Mensajes</th>
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((conv, i) => {
+                const convCache = conv.tokens > 0
+                  ? Math.round(conv.cachedTokens / conv.tokens * 100)
+                  : 0;
+                return (
+                  <tr
+                    key={conv.id}
+                    className={`border-b border-border/50 last:border-0 ${i % 2 === 0 ? '' : 'bg-surface-1/30'}`}
+                  >
+                    <td className="px-4 py-2.5 text-text-primary truncate max-w-[180px]">
+                      <span className="truncate block">{conv.title || 'Sin título'}</span>
+                      {conv.isArchived && <span className="text-text-muted">(archivada)</span>}
+                    </td>
+                    <td className="px-3 py-2.5 text-right text-text-secondary tabular-nums">
+                      {fmt(conv.tokens)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {conv.cachedTokens > 0 ? (
+                        <span className="text-emerald-400">{convCache}%</span>
+                      ) : (
+                        <span className="text-text-muted">—</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 text-right text-text-secondary tabular-nums">
+                      {conv.messages}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function StatCard({
+  icon, label, value, sub, accent,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  sub?: string;
+  accent?: boolean;
+}) {
+  return (
+    <div className={`rounded-xl border p-4 flex flex-col gap-1.5 ${accent ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-border bg-surface-1/40'}`}>
+      <div className={`flex items-center gap-1.5 text-xs ${accent ? 'text-emerald-400' : 'text-text-muted'}`}>
+        {icon}
+        <span>{label}</span>
+      </div>
+      <div className="text-2xl font-semibold text-text-primary tabular-nums">{value}</div>
+      {sub && <div className={`text-[11px] ${accent ? 'text-emerald-400/80' : 'text-text-muted'}`}>{sub}</div>}
+    </div>
+  );
+}

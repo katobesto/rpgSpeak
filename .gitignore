@@ -1,0 +1,36 @@
+# ── Dependencies ─────────────────────────────────────────────────────────────
+node_modules/
+
+# ── Build output ──────────────────────────────────────────────────────────────
+dist/
+
+# ── Environment / secrets ─────────────────────────────────────────────────────
+.env
+data/jwt-secret.txt
+server/data/
+
+# ── Database ──────────────────────────────────────────────────────────────────
+*.db
+*.db-shm
+*.db-wal
+*.bak
+
+# ── User-generated data (images, voices, uploaded files) ─────────────────────
+# Note: data/comfy-workflows/ is intentionally tracked (project config files)
+data/images/
+data/tts/
+
+# ── Logs ──────────────────────────────────────────────────────────────────────
+logs/
+*.log
+
+# ── macOS metadata ────────────────────────────────────────────────────────────
+.DS_Store
+._*
+
+# ── TTS service Python venv ───────────────────────────────────────────────────
+tts-service/venv/
+
+# ── Claude Code local files ───────────────────────────────────────────────────
+.claude/settings.local.json
+memory/

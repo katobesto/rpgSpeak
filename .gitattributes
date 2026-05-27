@@ -1,0 +1,20 @@
+# Normalize line endings to LF in the repository (cross-platform safe)
+* text=auto eol=lf
+
+# Shell scripts must stay LF so they're executable on Unix/Mac
+*.sh text eol=lf
+
+# Windows scripts keep CRLF locally on Windows checkouts
+*.ps1 text eol=crlf
+
+# Binary files — no line-ending conversion
+*.db binary
+*.db-shm binary
+*.db-wal binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.webp binary
+*.gif binary
+*.ico binary
+*.node binary

@@ -1,0 +1,731 @@
+import React, { useMemo, useState } from 'react';
+import { marked } from 'marked';
+import DOMPurify from 'dompurify';
+import { Copy, Edit2, RefreshCw, Trash2, Check, Bug, X, Pin, Volume2, VolumeX, Loader, Wand2, Image as ImageIcon, Zap, ChevronDown, RotateCcw } from 'lucide-react';
+import type { Message, ChatMessage } from '@rpgspeak/shared';
+import { Avatar } from '../ui/Avatar.tsx';
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { messagesApi } from '../../api/conversations.ts';
+import { settingsApi } from '../../api/settings.ts';
+import { generateApi } from '../../api/generate.ts';
+import { useChatStore } from '../../stores/chat.store.ts';
+import { useUiStore } from '../../stores/ui.store.ts';
+import { useAuthStore } from '../../stores/auth.store.ts';
+import { SceneDebugModal } from './SceneDebugModal.tsx';
+
+import { useTtsStore } from '../../stores/tts.store.ts';
+
+// Configure marked for safe rendering (marked v12 requires .use() — setOptions is a no-op)
+marked.use({ breaks: true, gfm: true });
+
+interface MessageItemProps {
+  message: Message;
+  characterName?: string;
+  characterAvatar?: string | null;
+  groupCharacters?: import('@rpgspeak/shared').Character[];
+  isStreaming?: boolean;
+  /** When true, the message receives a brief highlight flash (search result). */
+  highlighted?: boolean;
+}
+
+export function MessageItem({ message, characterName, characterAvatar, groupCharacters, isStreaming, highlighted }: MessageItemProps) {
+  const [copied, setCopied] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editContent, setEditContent] = useState(message.content);
+  const [showPrompt, setShowPrompt] = useState(false);
+
+  // Scene image — derived from message.metadata so it survives conversation switches
+  const sceneImageUrl  = (message.metadata?.sceneImageUrl  as string | undefined) ?? null;
+  const sceneDesc      = (message.metadata?.sceneDescription as string | undefined) ?? null;
+  const [showScenePanel,  setShowScenePanel]  = useState(false);
+  const [showSceneDebug,  setShowSceneDebug]  = useState(false);
+  const [editablePrompt,  setEditablePrompt]  = useState('');
+  const [generatingScene, setGeneratingScene] = useState(false);
+  const [sceneError,      setSceneError]      = useState<string | null>(null);
+
+  // Keep editable prompt in sync when sceneDesc changes (e.g. after first generation)
+  React.useEffect(() => {
+    if (sceneDesc) setEditablePrompt(sceneDesc);
+  }, [sceneDesc]);
+
+  const activeConversation = useChatStore((s) => s.activeConversation);
+  const removeMessage = useChatStore((s) => s.removeMessage);
+  const updateMessage = useChatStore((s) => s.updateMessage);
+
+  // TTS — settings leídos de cache (sin petición extra)
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: settingsApi.get });
+  const showTokenCount = useUiStore((s) => s.appearance.showTokenCount);
+  const isAdmin = useAuthStore((s) => s.isAdmin);
+  const { speak, playingId, loadingId } = useTtsStore();
+  const isTtsPlaying = playingId === message.id;
+  const isTtsLoading = loadingId === message.id;
+
+  const isUser = message.role === 'user';
+  const isSystem = message.role === 'system';
+  const isError = Boolean(message.metadata?.isError);
+  const isNarrator = !isUser && Boolean(message.metadata?.narrator);
+
+  // Name → character lookup for speaker-avatar injection
+  const charNameMap = useMemo(() => {
+    const map = new Map<string, { name: string; avatar?: string | null }>();
+    for (const c of groupCharacters ?? []) {
+      map.set(c.name.toLowerCase(), { name: c.name, avatar: c.avatar });
+    }
+    return map;
+  }, [groupCharacters]);
+
+  const html = useMemo(() => {
+    if (!message.content) return '';
+
+    let content = message.content;
+
+    if (isNarrator) {
+      // Fix 1: normalize "**Name: **" → "**Name:**"
+      // The LLM sometimes adds a space before the closing ** which breaks marked's bold parsing.
+      content = content.replace(/\*\*([^*\n]+?):\s*\*\*/g, '**$1:**');
+
+      // Fix 2: normalize "* narration text" / "* narration text *" at line start → "*narration text*"
+      // Asterisk+space at line start is markdown list syntax, but the LLM intends italic.
+      // [^*\n] prevents matching lines that start "* **Name:**" (speaker lines).
+      content = content.replace(
+        /^[ \t]*\* ([^*\n]+?)[ \t]*\*?[ \t]*$/gm,
+        (_, text) => `*${text.trim()}*`,
+      );
+    }
+
+    // Step 1 — parse markdown.
+    // Pass breaks:true explicitly per-call as defence-in-depth (marked.use() above is the primary).
+    // Without breaks:true, lines without blank separators merge into one <p> and break
+    // both the stage-direction CSS rule and the speaker regex below.
+    const parseResult = marked.parse(content, { breaks: true });
+    const raw = typeof parseResult === 'string' ? parseResult : '';
+    if (!raw) return '';
+
+    // Step 2 — sanitize LLM output (strip unsafe tags/attrs)
+    let clean = DOMPurify.sanitize(raw, {
+      ALLOWED_TAGS: ['p','br','strong','em','code','pre','ul','ol','li','blockquote','h1','h2','h3','a','hr'],
+      ALLOWED_ATTR: ['href','target'],
+    });
+
+    // Step 3 — fallback: convert any literal *text* the parser missed.
+    // Uses negative lookahead/lookbehind so it ONLY matches single asterisks,
+    // never touching **bold** patterns that remained as literals.
+    clean = clean.replace(/(?<!\*)\*(?!\*)([^*<>\n]+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
+
+    if (!isNarrator) return clean;
+
+    // Step 4 — for narrator messages: mark stage-direction paragraphs explicitly.
+    // A <p> whose only content is an <em> block gets the class so the CSS rule
+    // (.prose p:has(> em:only-child)) works even in browsers without :has() support,
+    // and survives paragraph merging when breaks:true wasn't applied by the parser.
+    clean = clean.replace(
+      /<p>(\s*<em>[^<]*(?:<\/em>)\s*)<\/p>/gi,
+      '<p class="stage-direction">$1</p>',
+    );
+
+    // Step 5 — inject trusted speaker-avatar markup.
+    // Handles both LLM variants:
+    //   **Name:**  → marked → <strong>Name:</strong>   (colon inside bold — normal)
+    //   **Name**:  → marked → <strong>Name</strong>:   (colon outside bold — LLM variant)
+    return clean.replace(
+      /<p(?:\s[^>]*)?>[ \t]*<strong>([^<:]+?)(?::<\/strong>|<\/strong>:)/gi,
+      (match, rawName) => {
+        const name = rawName.trim();
+        const char = charNameMap.get(name.toLowerCase());
+        const avatarEl = char?.avatar
+          ? `<img src="${char.avatar}" alt="${char.name}" />`
+          : `<span class="speaker-initials">${name.charAt(0).toUpperCase()}</span>`;
+        return `<p class="speaker-line"><span class="speaker-tag">${avatarEl}<strong>${char?.name ?? name}:</strong></span>`;
+      }
+    );
+  }, [message.content, isNarrator, charNameMap]);
+
+  const updateMutation = useMutation({
+    mutationFn: () => messagesApi.update(message.id, editContent),
+    onSuccess: (updated) => {
+      updateMessage(message.id, { content: updated.content });
+      setEditing(false);
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: () => messagesApi.delete(message.id),
+    onSuccess: () => removeMessage(message.id),
+  });
+
+  async function handleGenerateSceneImage(
+    customPrompt?: string,
+    opts?: { useFaceReference?: boolean; referenceCharId?: string },
+  ) {
+    if (!activeConversation?.id) return;
+    setGeneratingScene(true);
+    setSceneError(null);
+    try {
+      const result = await generateApi.sceneImage(
+        activeConversation.id, message.id,
+        undefined, customPrompt,
+        opts?.useFaceReference, opts?.referenceCharId,
+      );
+      updateMessage(message.id, {
+        metadata: {
+          ...(message.metadata ?? {}),
+          sceneImageUrl:     result.imageUrl,
+          sceneDescription:  result.sceneDescription,
+        },
+      });
+      setEditablePrompt(result.sceneDescription);
+      setShowScenePanel(true);
+    } catch (err) {
+      setSceneError(err instanceof Error ? err.message : 'Error desconocido');
+    } finally {
+      setGeneratingScene(false);
+    }
+  }
+
+  async function handleDeleteSceneImage() {
+    if (!activeConversation?.id) return;
+    try {
+      await generateApi.deleteSceneImage(activeConversation.id, message.id);
+      updateMessage(message.id, {
+        metadata: {
+          ...(message.metadata ?? {}),
+          sceneImageUrl:    undefined,
+          sceneDescription: undefined,
+        },
+      });
+      setShowScenePanel(false);
+    } catch (err) {
+      setSceneError(err instanceof Error ? err.message : 'Error al eliminar');
+    }
+  }
+
+  async function copyContent() {
+    await navigator.clipboard.writeText(message.content);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  if (isSystem) {
+    if (message.metadata?.isAnchor) {
+      return (
+        <div className="group mx-2 sm:mx-4 my-3">
+          <div className="rounded-xl border border-accent/30 overflow-hidden" style={{ background: 'rgba(var(--accent-rgb,99,102,241),0.06)' }}>
+            <div className="flex items-center gap-2 px-3 py-2 border-b border-accent/20">
+              <Pin size={11} className="text-accent flex-shrink-0" />
+              <span className="text-[10px] font-semibold text-accent uppercase tracking-wider">Nota de contexto</span>
+              <button
+                onClick={() => deleteMutation.mutate()}
+                className="ml-auto p-0.5 rounded opacity-0 group-hover:opacity-100 text-text-muted hover:text-red-400 transition-all"
+                title="Eliminar nota"
+              >
+                <Trash2 size={10} />
+              </button>
+            </div>
+            <pre className="px-3 py-2.5 text-xs text-text-secondary whitespace-pre-wrap font-mono leading-relaxed">
+              {message.content}
+            </pre>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="flex justify-center my-2">
+        <div className="px-3 py-1 rounded-full text-xs text-text-muted border border-border">
+          {message.content}
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`group flex gap-3 sm:gap-4 px-2 sm:px-4 py-2 sm:py-3 hover:bg-white/2 transition-colors animate-fade-in ${
+        isUser ? 'flex-row-reverse' : ''
+      } ${highlighted ? 'msg-highlight' : ''}`}
+    >
+      {/* Avatar */}
+      <div className="flex-shrink-0 mt-0.5">
+        {isUser ? (
+          <Avatar name="You" size="md" />
+        ) : (
+          <Avatar name={characterName ?? 'AI'} src={characterAvatar} size="md" expandable />
+        )}
+      </div>
+
+      {/* Bubble */}
+      <div className={`flex flex-col gap-1 max-w-[88%] sm:max-w-[75%] min-w-0 ${isUser ? 'items-end' : 'items-start'}`}>
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-medium text-text-secondary">
+            {isUser ? 'You' : (characterName ?? 'Assistant')}
+          </span>
+          {message.metadata?.generationTime && (
+            <span className="text-[10px] text-text-muted">
+              {Math.round((message.metadata.generationTime as number) / 1000 * 10) / 10}s
+            </span>
+          )}
+          {!isUser && showTokenCount && message.tokens > 0 && (
+            <TokenBadge message={message} />
+          )}
+        </div>
+
+        <div
+          className={`relative rounded-2xl px-4 py-2.5 text-sm ${
+            isUser
+              ? 'bubble-user text-white'
+              : isError
+              ? 'bubble-char border border-red-500/40 text-red-400'
+              : 'bubble-char border border-border text-white'
+          }`}
+          style={
+            isUser
+              ? { background: 'var(--accent)' }
+              : isError
+              ? { background: 'rgba(239,68,68,0.08)' }
+              : { background: 'var(--surface-2)' }
+          }
+        >
+          {editing ? (
+            <div className="flex flex-col gap-2">
+              <textarea
+                value={editContent}
+                onChange={(e) => setEditContent(e.target.value)}
+                className="w-full bg-transparent text-sm resize-none focus:outline-none min-w-[200px]"
+                rows={3}
+                autoFocus
+              />
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setEditing(false)}
+                  className="text-xs text-text-muted hover:text-text-primary"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => updateMutation.mutate()}
+                  className="text-xs text-accent hover:text-accent-hover font-medium"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              {isStreaming && !message.content ? (
+                <TypingIndicator />
+              ) : (
+                <div
+                  className={`prose${isNarrator ? ' narrator-content' : ''}`}
+                  dangerouslySetInnerHTML={{ __html: html || message.content }}
+                />
+              )}
+              {isStreaming && message.content && (
+                <span className="inline-block w-0.5 h-4 bg-current opacity-70 animate-pulse ml-0.5 align-middle" />
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Fast LLM debug panel — solo admin */}
+        {isAdmin && !isUser && !isStreaming && message.metadata?.fastLlmDebug != null && (
+          <FastLlmDebugPanel debug={message.metadata.fastLlmDebug as FastLlmDebug} messageId={message.id} />
+        )}
+
+        {/* Actions */}
+        {!isStreaming && (
+          <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <ActionButton icon={copied ? Check : Copy} onClick={copyContent} title="Copy" />
+            <ActionButton icon={Edit2} onClick={() => { setEditContent(message.content); setEditing(true); }} title="Edit" />
+            {isAdmin && !isUser && (
+              <ActionButton
+                icon={isTtsLoading ? Loader : isTtsPlaying ? VolumeX : Volume2}
+                onClick={() => speak(message.id, message.content, {
+                  voiceId:     settings?.ttsSettings?.defaultVoiceId ?? undefined,
+                  speed:       settings?.ttsSettings?.speed,
+                  temperature: settings?.ttsSettings?.temperature,
+                })}
+                title={isTtsPlaying ? 'Detener voz' : 'Reproducir voz'}
+                spin={isTtsLoading}
+              />
+            )}
+            {isAdmin && !isUser && Boolean(message.metadata?.promptMessages) && (
+              <ActionButton icon={Bug} onClick={() => setShowPrompt(true)} title="Debug prompt" />
+            )}
+            {!isUser && (
+              <ActionButton icon={RefreshCw} onClick={() => {}} title="Regenerate" />
+            )}
+            {!isUser && !isError && (
+              <ActionButton
+                icon={generatingScene ? Loader : ImageIcon}
+                onClick={() => setShowSceneDebug(true)}
+                title="Generar imagen de escena"
+                spin={generatingScene}
+              />
+            )}
+            <ActionButton
+              icon={Trash2}
+              onClick={() => deleteMutation.mutate()}
+              title="Delete"
+              danger
+            />
+          </div>
+        )}
+
+        {/* Scene image + panel */}
+        {sceneError && (
+          <p className="text-[11px] text-red-400 mt-1">{sceneError}</p>
+        )}
+        {sceneImageUrl && (
+          <div className="mt-2 max-w-sm space-y-1">
+            {/* Image */}
+            <div className="rounded-xl overflow-hidden border border-border">
+              <img
+                src={sceneImageUrl}
+                alt="Imagen de escena generada"
+                className="w-full h-auto block"
+                onClick={() => window.open(sceneImageUrl, '_blank')}
+                style={{ cursor: 'zoom-in' }}
+              />
+            </div>
+
+            {/* Toggle prompt panel */}
+            <button
+              onClick={() => setShowScenePanel((v) => !v)}
+              className="flex items-center gap-1 text-[10px] text-text-muted hover:text-text-primary transition-colors px-1"
+            >
+              <Wand2 size={9} />
+              {showScenePanel ? 'Ocultar prompt' : 'Ver / editar prompt'}
+            </button>
+
+            {showScenePanel && (
+              <div
+                className="rounded-xl border border-border p-3 space-y-2"
+                style={{ background: 'var(--surface-2)' }}
+              >
+                <textarea
+                  value={editablePrompt}
+                  onChange={(e) => setEditablePrompt(e.target.value)}
+                  rows={5}
+                  className="w-full text-xs bg-transparent border border-border rounded-lg px-2 py-1.5 text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent resize-none font-mono leading-relaxed"
+                  placeholder="Edita el prompt y regenera la imagen..."
+                />
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleGenerateSceneImage(editablePrompt)}
+                    disabled={generatingScene || !editablePrompt.trim()}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium bg-accent text-white hover:bg-accent/80 disabled:opacity-50 transition-colors"
+                  >
+                    {generatingScene
+                      ? <Loader size={11} className="animate-spin" />
+                      : <Wand2 size={11} />}
+                    {generatingScene ? 'Generando...' : 'Regenerar imagen'}
+                  </button>
+                  <button
+                    onClick={handleDeleteSceneImage}
+                    disabled={generatingScene}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs text-red-400 hover:bg-red-500/10 border border-red-500/30 disabled:opacity-50 transition-colors"
+                  >
+                    <Trash2 size={11} />
+                    Eliminar imagen
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Prompt debug modal */}
+        {showPrompt && (
+          <PromptModal
+            messages={message.metadata.promptMessages as ChatMessage[]}
+            model={message.metadata.model as string | undefined}
+            onClose={() => setShowPrompt(false)}
+          />
+        )}
+
+        {/* Scene image debug modal */}
+        {showSceneDebug && activeConversation?.id && (
+          <SceneDebugModal
+            conversationId={activeConversation.id}
+            messageId={message.id}
+            onGenerate={async (imagePrompt, opts) => {
+              await handleGenerateSceneImage(imagePrompt, opts);
+            }}
+            onClose={() => setShowSceneDebug(false)}
+          />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Fast LLM Debug Panel ─────────────────────────────────────────────────────
+
+type FastLlmDebug = { prompt: string; response: string } | string;
+
+function FastLlmDebugPanel({ debug: initialDebug, messageId }: { debug: FastLlmDebug; messageId: string }) {
+  const [open, setOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<'response' | 'prompt'>('response');
+  const [debug, setDebug] = useState(initialDebug);
+  const [retrying, setRetrying] = useState(false);
+  const [retryError, setRetryError] = useState<string | null>(null);
+  const updateCharacterAffinities = useChatStore((s) => s.updateCharacterAffinities);
+
+  // Support both legacy string format and new object format
+  const response = typeof debug === 'string' ? debug : debug.response;
+  const prompt    = typeof debug === 'string' ? null  : debug.prompt;
+  const isPending = response === '(timeout)' || response.startsWith('(error:');
+
+  async function handleRetry() {
+    setRetrying(true);
+    setRetryError(null);
+    try {
+      const result = await generateApi.analyzeMessage(messageId);
+      setDebug({ prompt: result.rawPrompt ?? '', response: result.rawResponse });
+      if (result.affinityUpdates?.length) {
+        updateCharacterAffinities(result.affinityUpdates);
+      }
+      setOpen(true);
+    } catch (err) {
+      setRetryError(err instanceof Error ? err.message : 'Error desconocido');
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  return (
+    <div className="mt-1.5 rounded-lg border border-accent/20 overflow-hidden text-left">
+      {/* Header row */}
+      <div className="flex items-center">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          className="flex-1 flex items-center gap-2 px-3 py-1.5 text-[10px] text-accent/60 hover:text-accent hover:bg-accent/5 transition-colors"
+        >
+          <Zap size={10} />
+          <span className="font-mono">LLM Rápido · análisis</span>
+          {isPending && !retrying && (
+            <span className="ml-1 text-amber-400/80 font-semibold">(timeout)</span>
+          )}
+          <ChevronDown size={10} className={`ml-auto flex-shrink-0 transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
+        </button>
+        {(isPending || retryError) && (
+          <button
+            onClick={handleRetry}
+            disabled={retrying}
+            title="Reintentar análisis"
+            className="flex items-center gap-1 px-2 py-1.5 text-[10px] text-amber-400/80 hover:text-amber-300 hover:bg-amber-400/10 transition-colors disabled:opacity-40 border-l border-accent/20 flex-shrink-0"
+          >
+            <RotateCcw size={10} className={retrying ? 'animate-spin' : ''} />
+            <span className="font-mono">{retrying ? 'Analizando…' : 'Reintentar'}</span>
+          </button>
+        )}
+      </div>
+
+      {retryError && (
+        <p className="px-3 pb-2 text-[10px] text-red-400 font-mono border-t border-accent/10">{retryError}</p>
+      )}
+
+      {open && (
+        <div className="border-t border-accent/10">
+          {/* Tab bar — only show when we have a prompt */}
+          {prompt != null && (
+            <div className="flex border-b border-accent/10">
+              {(['response', 'prompt'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`px-3 py-1 text-[10px] font-mono transition-colors ${
+                    activeTab === tab
+                      ? 'text-accent border-b border-accent -mb-px bg-accent/5'
+                      : 'text-text-muted hover:text-text-primary'
+                  }`}
+                >
+                  {tab === 'response' ? 'Respuesta' : 'Prompt enviado'}
+                </button>
+              ))}
+            </div>
+          )}
+          <pre className="px-3 py-3 text-[10px] text-text-muted font-mono whitespace-pre-wrap leading-relaxed max-h-72 overflow-y-auto">
+            {activeTab === 'prompt' && prompt != null ? prompt : response}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ActionButton({ icon: Icon, onClick, title, danger = false, spin = false }: {
+  icon: React.ElementType; onClick: () => void; title: string; danger?: boolean; spin?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      className={`p-1 rounded transition-colors ${
+        danger
+          ? 'hover:bg-red-500/10 text-text-muted hover:text-red-400'
+          : 'hover:bg-white/8 text-text-muted hover:text-text-primary'
+      }`}
+    >
+      <Icon size={12} className={spin ? 'animate-spin' : undefined} />
+    </button>
+  );
+}
+
+function TypingIndicator() {
+  return (
+    <div className="flex gap-1 items-center py-1">
+      <span className="typing-dot" />
+      <span className="typing-dot" />
+      <span className="typing-dot" />
+    </div>
+  );
+}
+
+const ROLE_STYLES: Record<string, { label: string; badge: string; border: string; bg: string }> = {
+  system:    { label: 'system',    badge: 'bg-purple-500/20 text-purple-300 border border-purple-500/30', border: 'border-purple-500/20', bg: 'bg-purple-500/5' },
+  user:      { label: 'user',      badge: 'bg-blue-500/20 text-blue-300 border border-blue-500/30',       border: 'border-blue-500/20',   bg: 'bg-blue-500/5' },
+  assistant: { label: 'assistant', badge: 'bg-green-500/20 text-green-300 border border-green-500/30',    border: 'border-green-500/20',  bg: 'bg-green-500/5' },
+};
+
+function PromptModal({ messages, model, onClose }: { messages: ChatMessage[]; model?: string; onClose: () => void }) {
+  const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.75)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        className="relative w-full max-w-3xl rounded-xl border border-border flex flex-col animate-slide-up"
+        style={{ background: 'var(--surface-1)', maxHeight: '85vh' }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border flex-shrink-0">
+          <div className="flex items-center gap-2.5">
+            <Bug size={15} className="text-accent" />
+            <span className="font-semibold text-sm">Prompt enviado a la IA</span>
+            {model && (
+              <span className="text-[11px] px-2 py-0.5 rounded-full bg-accent/15 text-accent border border-accent/20 font-mono">
+                {model}
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-[11px] text-text-muted">
+              {messages.length} mensajes · {totalChars.toLocaleString()} chars
+            </span>
+            <button
+              onClick={onClose}
+              className="p-1 rounded-lg hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        </div>
+
+        {/* Scrollable messages */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {messages.map((msg, i) => {
+            const style = ROLE_STYLES[msg.role] ?? ROLE_STYLES.user;
+            return (
+              <div key={i} className={`rounded-lg border ${style.border} ${style.bg} overflow-hidden`}>
+                {/* Role badge */}
+                <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/5">
+                  <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${style.badge}`}>
+                    {style.label}
+                  </span>
+                  <span className="text-[11px] text-text-muted ml-auto">{msg.content.length} chars</span>
+                </div>
+                {/* Content */}
+                <pre className="p-3 text-xs text-text-primary font-mono whitespace-pre-wrap break-words leading-relaxed">
+                  {msg.content}
+                </pre>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end px-5 py-3 border-t border-border flex-shrink-0">
+          <button
+            onClick={() => {
+              const text = messages.map(m => `[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n---\n\n');
+              navigator.clipboard.writeText(text);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary hover:bg-white/8 transition-colors"
+          >
+            <Copy size={12} /> Copiar todo
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Token Badge ──────────────────────────────────────────────────────────────
+function TokenBadge({ message }: { message: Message }) {
+  const [open, setOpen] = useState(false);
+  const total      = message.tokens;
+  const prompt     = (message.metadata?.promptTokens     as number | undefined) ?? 0;
+  const completion = (message.metadata?.completionTokens as number | undefined) ?? 0;
+  const cached     = (message.metadata?.cachedTokens     as number | undefined) ?? 0;
+  const hasCached  = cached > 0;
+
+  const fmt = (n: number) =>
+    n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
+
+  return (
+    <div className="relative inline-flex">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title="Tokens consumidos"
+        className={`flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-full border transition-colors cursor-pointer
+          ${hasCached
+            ? 'text-emerald-400 border-emerald-500/30 bg-emerald-500/5 hover:bg-emerald-500/15'
+            : 'text-text-muted border-border hover:bg-white/6'
+          }`}
+      >
+        <Zap size={9} className={hasCached ? 'text-emerald-400' : 'text-text-muted'} />
+        {fmt(total)}
+        {hasCached && (
+          <span className="text-emerald-400/80">↑{fmt(cached)}</span>
+        )}
+      </button>
+
+      {open && (
+        <div
+          className="absolute bottom-full left-0 mb-1.5 z-50 min-w-[170px] rounded-xl border border-border bg-surface-1 shadow-xl text-xs p-3 flex flex-col gap-1.5"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-center justify-between font-medium text-text-primary mb-0.5">
+            <span>Tokens</span>
+            <button onClick={() => setOpen(false)} className="text-text-muted hover:text-text-primary"><X size={11} /></button>
+          </div>
+          <Row label="Prompt"      value={prompt}     />
+          <Row label="Respuesta"   value={completion} />
+          <div className="border-t border-border/60 my-0.5" />
+          <Row label="Total"       value={total}      bold />
+          {hasCached && (
+            <>
+              <div className="border-t border-border/60 my-0.5" />
+              <Row label="Caché ↑"   value={cached}   color="text-emerald-400" />
+              <Row label="Ahorro"     value={`${Math.round(cached / Math.max(prompt, 1) * 100)}%`} color="text-emerald-400" />
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Row({ label, value, bold, color }: { label: string; value: number | string; bold?: boolean; color?: string }) {
+  return (
+    <div className={`flex items-center justify-between gap-4 ${bold ? 'font-semibold text-text-primary' : 'text-text-secondary'}`}>
+      <span>{label}</span>
+      <span className={color ?? ''}>{typeof value === 'number' ? value.toLocaleString('es-ES') : value}</span>
+    </div>
+  );
+}
