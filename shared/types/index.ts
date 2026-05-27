@@ -131,6 +131,7 @@ export interface StoryEvent {
   id: string;
   title: string;
   description: string;
+  trigger: string;   // What triggers this event (optional, may be empty string)
   timestamp: string;
   importance: number;
 }
@@ -322,6 +323,20 @@ export interface AppSettings {
   fastLlmAnalysisPrompt: string;
   // Inyección de memoria en el contexto del LLM principal
   memoryInjectionPrompt: string;
+  // Embeddings semánticos para el Índice de Contexto
+  embeddingEnabled:    boolean;
+  embeddingProviderId: string | null;
+  embeddingModel:      string | null;   // e.g. "nomic-embed-text"
+  // Inyección del Índice de Contexto en el LLM
+  contextIndexInjectionEnabled:  boolean;
+  contextIndexInjectionMaxItems: number;
+  contextIndexInjectionPrompt:   string;
+  // Prompt de extracción de contexto (Índice de Contexto)
+  contextIndexPrompt: string;
+  // Ventana de contexto (tokens) para la llamada de extracción
+  contextIndexContextSize: number;
+  // Generación de eventos de historia
+  storyEventGenerationPrompt: string;
   // Moderación de contenido
   allowNsfw: boolean;
   nsfwBlockedMessage: string;
@@ -405,6 +420,31 @@ export interface StreamChunk {
   narrator?: boolean;
   /** The characterId stored on the persisted message (null for narrator) */
   characterId?: string | null;
+}
+
+// ─── Context Index Types ──────────────────────────────────────────────────────
+
+export type ContextItemType = 'event' | 'character' | 'place' | 'quest';
+
+export interface ContextItem {
+  id: string;
+  conversationId: string;
+  type: ContextItemType;
+  title: string;
+  description: string;
+  importance: number;       // 1-10
+  messageIndexFrom: number; // inclusive start of batch (0-based, non-system msgs)
+  messageIndexTo: number;   // exclusive end of batch
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ContextExtractResult {
+  items: ContextItem[];
+  batchStart: number;
+  batchEnd: number;
+  totalMessages: number;
 }
 
 // ─── DTO Types (for API input) ────────────────────────────────────────────────

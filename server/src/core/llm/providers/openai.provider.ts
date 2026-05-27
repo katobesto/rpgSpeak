@@ -244,6 +244,20 @@ export class OpenAIProvider implements LLMProvider {
     };
   }
 
+  async embed(texts: string[], model?: string): Promise<number[][]> {
+    const res = await fetch(`${this.baseUrl}/embeddings`, {
+      method: 'POST',
+      headers: this.headers,
+      body: JSON.stringify({ model: model ?? '', input: texts }),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new ProviderError(`OpenAI embeddings error ${res.status}: ${text}`, this.type);
+    }
+    const data = await res.json() as { data: Array<{ embedding: number[] }> };
+    return data.data.map((d) => d.embedding);
+  }
+
   async listModels(): Promise<ProviderModel[]> {
     const res = await fetch(`${this.baseUrl}/models`, {
       headers: this.headers,

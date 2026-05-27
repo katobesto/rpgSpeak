@@ -544,7 +544,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
           metadata: { blocked: true, reason: 'nsfw' },
         });
         onToken(blockedText);
-        onDone({ messageId: blockedMsg.id, tokens: 0, promptMessages: [], affinityUpdates: [], content: blockedText });
+        onDone({ messageId: blockedMsg.id, tokens: 0, tokenBreakdown: { prompt: 0, completion: 0, cached: 0 }, promptMessages: [], affinityUpdates: [], content: blockedText });
         return;
       }
     }
@@ -563,7 +563,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       affinity: conversation.characters.find((l) => l.characterId === c.id)?.affinity ?? 50,
     }));
 
-    const rawContext = buildContext({
+    const rawContext = await buildContext({
       character: character ?? groupCharacters[0],
       stories: linkedStories,
       messages: [...historyForContext, { ...userMsg, role: 'user' as const }],
@@ -582,6 +582,12 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       adventurePrompt: settings.adventurePrompt,
       fastLlmEnabled: useFastLlm,
       memoryInjectionPrompt: settings.memoryInjectionPrompt,
+      contextIndexInjectionEnabled:  settings.contextIndexInjectionEnabled,
+      contextIndexInjectionMaxItems: settings.contextIndexInjectionMaxItems,
+      contextIndexInjectionPrompt:   settings.contextIndexInjectionPrompt,
+      embeddingEnabled:    settings.embeddingEnabled,
+      embeddingProviderId: settings.embeddingProviderId,
+      embeddingModel:      settings.embeddingModel,
     });
 
     // Use character's contextLength, then settings default, then 32768
@@ -857,7 +863,7 @@ async function analyzeExchangeAsync(
       const typeRaw    = match[2].trim().toLowerCase();
       const importance = parseInt(match[3], 10);
       const content    = match[4].trim();
-      if (importance < 7) continue; // hard floor — below 7 means "not worth remembering across sessions"
+      if (importance < 8) continue; // hard floor — below 8 is noise; the prompt eliminates 7 but this is the server backstop
       const found = allCharsInConv.find((c) => c.name.toLowerCase() === charName.toLowerCase());
       if (!found) continue;
       memRepo.create({

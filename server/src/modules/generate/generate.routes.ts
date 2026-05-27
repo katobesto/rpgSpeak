@@ -1,4 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
+import type { MemoryEntry } from '@rpgspeak/shared';
 import { generateStream } from '../../core/conversation/engine.js';
 import { ValidationError, NotFoundError } from '../../shared/errors.js';
 import { z } from 'zod';
@@ -486,15 +487,16 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
 
     // Parse memory entries
     const MEMORY_RE = /\[MEMORIA:([^:]+):([^:]+):(\d+)\]([\s\S]+?)\[\/MEMORIA\]/g;
-    const TYPE_MAP: Record<string, 'event' | 'fact' | 'relationship' | 'preference'> = {
+    const TYPE_MAP: Record<string, MemoryEntry['type']> = {
       evento: 'event', hecho: 'fact', relacion: 'relationship', preferencia: 'preference',
+      ofensa: 'offense', trauma: 'trauma',
     };
     for (const match of [...responseText.matchAll(MEMORY_RE)]) {
       const charName   = match[1].trim();
       const typeRaw    = match[2].trim().toLowerCase();
       const importance = parseInt(match[3], 10);
       const content    = match[4].trim();
-      if (importance < 7) continue;
+      if (importance < 8) continue;
       const found = allCharsInConv.find((c) => c.name.toLowerCase() === charName.toLowerCase());
       if (!found) continue;
       memRepo.create({

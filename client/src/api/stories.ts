@@ -1,5 +1,5 @@
 import { api } from './client.ts';
-import type { Story, CreateStoryDto, UpdateStoryDto } from '@rpgspeak/shared';
+import type { Story, CreateStoryDto, UpdateStoryDto, StoryEvent } from '@rpgspeak/shared';
 
 export const storiesApi = {
   list: (search?: string, characterId?: string) => {
@@ -13,4 +13,6 @@ export const storiesApi = {
   create: (data: CreateStoryDto) => api.post<Story>('/stories', data),
   update: (id: string, data: UpdateStoryDto) => api.patch<Story>(`/stories/${id}`, data),
   delete: (id: string) => api.delete(`/stories/${id}`),
+  generateEvents: (storyId: string, numEvents = 5) =>
+    api.post<{ events: StoryEvent[] }>('/stories/generate-events', { storyId, numEvents }),
 };

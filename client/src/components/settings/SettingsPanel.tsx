@@ -18,12 +18,13 @@ import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
 
 type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats';
 
-const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'memoryInjectionPrompt', 'allowNsfw', 'nsfwBlockedMessage'];
-const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength', 'affinitySystemPrompt'];
+const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'storyEventGenerationPrompt', 'allowNsfw', 'nsfwBlockedMessage'];
+const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel'];
 
 export function SettingsPanel() {
   const [tab, setTab] = useState<STab>('profile');
+  const [genTab, setGenTab] = useState<'llm' | 'fast-llm' | 'embeddings'>('llm');
   const qc = useQueryClient();
   const { appearance, setAppearancePref } = useUiStore();
   const { user: currentUser, isAdmin, clearAuth } = useAuthStore();
@@ -169,144 +170,406 @@ export function SettingsPanel() {
 
           {tab === 'generation' && isAdmin && (
             <>
-              <Section title="Modelo por defecto">
-                <DefaultModelSection
-                  providers={providers}
-                  defaultProviderId={draft.defaultProviderId}
-                  defaultModelId={draft.defaultModelId}
-                  onProviderChange={(v) => update('defaultProviderId', v)}
-                  onModelChange={(v) => update('defaultModelId', v)}
-                />
-              </Section>
+              {/* ── Sub-tab bar ─────────────────────────────────────────────────── */}
+              <div className="flex gap-1 border-b border-border pb-3 -mt-2 mb-5">
+                {([
+                  { id: 'llm', label: 'LLM Principal' },
+                  { id: 'fast-llm', label: 'LLM Rápido' },
+                  { id: 'embeddings', label: 'Embeddings' },
+                ] as const).map((t) => (
+                  <button key={t.id} onClick={() => setGenTab(t.id)}
+                    className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
+                      genTab === t.id
+                        ? 'bg-accent-muted text-accent'
+                        : 'text-text-muted hover:text-text-primary hover:bg-white/5'
+                    }`}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
 
-              <Section title="Entrada">
-                <ToggleRow
-                  label="Enter para enviar" description="Enter envía el mensaje; Shift+Enter para nueva línea"
-                  checked={draft.sendOnEnter} onChange={(v) => update('sendOnEnter', v)} />
-                <ToggleRow
-                  label="Streaming" description="Muestra los tokens según se generan"
-                  checked={draft.streamingEnabled} onChange={(v) => update('streamingEnabled', v)} />
-              </Section>
+              {/* ══ LLM Principal ════════════════════════════════════════════════ */}
+              {genTab === 'llm' && (
+                <>
+                  <p className="text-xs text-text-muted leading-relaxed -mt-2 mb-5 pb-3 border-b border-border/50">
+                    El <strong className="text-text-secondary">motor principal</strong> de la historia.
+                    Recibe el historial completo de la conversación y genera las respuestas de los personajes.
+                    Configura aquí el modelo base, los prompts de personaje y todas las inyecciones de contexto.
+                  </p>
 
-              <Section title="Opciones de API">
-                <ToggleRow
-                  label="Deshabilitar fallbacks de proveedor"
-                  description="Envía allow_fallbacks:false en cada petición. Evita que OpenRouter redirija a servidores alternativos de pago cuando el modelo principal no está disponible."
-                  checked={draft.disableFallbacks ?? false}
-                  onChange={(v) => update('disableFallbacks', v)}
-                />
-              </Section>
+                  <Section title="Modelo por defecto">
+                    <p className="text-xs text-text-muted mb-2 leading-relaxed">
+                      Provider y modelo usados cuando el personaje no tiene configuración propia.
+                    </p>
+                    <DefaultModelSection
+                      providers={providers}
+                      defaultProviderId={draft.defaultProviderId}
+                      defaultModelId={draft.defaultModelId}
+                      onProviderChange={(v) => update('defaultProviderId', v)}
+                      onModelChange={(v) => update('defaultModelId', v)}
+                      hideDescription
+                    />
+                  </Section>
 
-              <Section title="Prompt de sistema global">
-                <Textarea
-                  value={draft.globalSystemPrompt}
-                  onChange={(e) => update('globalSystemPrompt', e.target.value)}
-                  placeholder="Instrucciones añadidas a todas las conversaciones, antes del prompt del personaje..."
-                  rows={5}
-                  hint="Se aplica a todos los personajes. Usar con moderación."
-                />
-              </Section>
+                  <Section title="Entrada">
+                    <ToggleRow
+                      label="Enter para enviar" description="Enter envía el mensaje; Shift+Enter para nueva línea"
+                      checked={draft.sendOnEnter} onChange={(v) => update('sendOnEnter', v)} />
+                    <ToggleRow
+                      label="Streaming" description="Muestra los tokens según se generan"
+                      checked={draft.streamingEnabled} onChange={(v) => update('streamingEnabled', v)} />
+                  </Section>
 
-              <Section title="Formato de respuesta (personaje)">
-                <p className="text-xs text-text-muted mb-1 leading-relaxed">
-                  Instrucción de formato inyectada al final del prompt del personaje. Vacío = sin formato forzado.
-                </p>
-                <RestorablePrompt
-                  settingsKey="responseFormatPrompt"
-                  value={draft.responseFormatPrompt ?? ''}
-                  onChange={(v) => update('responseFormatPrompt', v)}
-                  rows={5}
-                />
-              </Section>
+                  <Section title="Opciones de API">
+                    <ToggleRow
+                      label="Deshabilitar fallbacks de proveedor"
+                      description="Envía allow_fallbacks:false en cada petición. Evita que OpenRouter redirija a servidores alternativos de pago cuando el modelo principal no está disponible."
+                      checked={draft.disableFallbacks ?? false}
+                      onChange={(v) => update('disableFallbacks', v)}
+                    />
+                  </Section>
 
-              <Section title="Prompt del Narrador">
-                <p className="text-xs text-text-muted mb-1 leading-relaxed">
-                  Se usa cuando el modo <strong className="text-text-secondary">Narrador</strong> está activo (sin aventura).
-                  Usa <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{PERSONAJES}}'}</code> donde insertar los bloques de personaje.
-                </p>
-                <RestorablePrompt
-                  settingsKey="narratorPrompt"
-                  value={draft.narratorPrompt ?? ''}
-                  onChange={(v) => update('narratorPrompt', v)}
-                  rows={14}
-                  mono
-                />
-              </Section>
+                  <Section title="Prompt de sistema global">
+                    <p className="text-xs text-text-muted mb-1 leading-relaxed">
+                      <span className="text-accent/70 font-mono text-[10px] mr-1">[SYSTEM]</span>
+                      <strong className="text-text-secondary">Primer mensaje</strong> de la petición, antes del prompt de personaje. Se aplica a todos los personajes y conversaciones.
+                    </p>
+                    <Textarea
+                      value={draft.globalSystemPrompt}
+                      onChange={(e) => update('globalSystemPrompt', e.target.value)}
+                      placeholder="Instrucciones añadidas a todas las conversaciones, antes del prompt del personaje..."
+                      rows={5}
+                      hint="Usar con moderación — se consume en cada petición."
+                    />
+                  </Section>
 
-              <Section title="Prompt del Game Master (Aventura)">
-                <p className="text-xs text-text-muted mb-1 leading-relaxed">
-                  Se usa cuando el modo <strong className="text-text-secondary">Narrador + Aventura</strong> está activo.
-                  Usa <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{PERSONAJES}}'}</code> para los bloques de personaje con sus fichas RPG.
-                </p>
-                <RestorablePrompt
-                  settingsKey="adventurePrompt"
-                  value={draft.adventurePrompt ?? ''}
-                  onChange={(v) => update('adventurePrompt', v)}
-                  rows={14}
-                  mono
-                />
-              </Section>
+                  <Section title="Formato de respuesta (personaje)">
+                    <p className="text-xs text-text-muted mb-1 leading-relaxed">
+                      <span className="text-accent/70 font-mono text-[10px] mr-1">[SYSTEM]</span>
+                      Se añade <strong className="text-text-secondary">al final del prompt del personaje</strong>. Fuerza un estilo de respuesta concreto (sin asteriscos, tercera persona, longitud, etc.). Vacío = sin formato forzado.
+                    </p>
+                    <RestorablePrompt
+                      settingsKey="responseFormatPrompt"
+                      value={draft.responseFormatPrompt ?? ''}
+                      onChange={(v) => update('responseFormatPrompt', v)}
+                      rows={5}
+                    />
+                  </Section>
 
-              <ScenePromptSection
-                value={draft.sceneImagePrompt ?? ''}
-                onChange={(v) => update('sceneImagePrompt', v)}
-              />
+                  <Section title="Prompt del Narrador">
+                    <p className="text-xs text-text-muted mb-1 leading-relaxed">
+                      <span className="text-accent/70 font-mono text-[10px] mr-1">[SYSTEM]</span>
+                      Reemplaza el prompt de personaje cuando el modo <strong className="text-text-secondary">Narrador</strong> está activo (sin aventura).
+                      Usa <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{PERSONAJES}}'}</code> donde insertar los bloques de personaje.
+                    </p>
+                    <RestorablePrompt
+                      settingsKey="narratorPrompt"
+                      value={draft.narratorPrompt ?? ''}
+                      onChange={(v) => update('narratorPrompt', v)}
+                      rows={14}
+                      mono
+                    />
+                  </Section>
 
-              <Section title="LLM Rápido de apoyo">
-                <FastLlmSection
-                  providers={providers}
-                  enabled={draft.fastLlmEnabled ?? false}
-                  providerId={draft.fastLlmProviderId ?? null}
-                  modelId={draft.fastLlmModelId ?? null}
-                  debugMode={draft.fastLlmDebugMode ?? false}
-                  analysisPrompt={draft.fastLlmAnalysisPrompt ?? ''}
-                  onEnabledChange={(v) => update('fastLlmEnabled', v)}
-                  onProviderChange={(v) => update('fastLlmProviderId', v)}
-                  onModelChange={(v) => update('fastLlmModelId', v)}
-                  onDebugModeChange={(v) => update('fastLlmDebugMode', v)}
-                  onAnalysisPromptChange={(v) => update('fastLlmAnalysisPrompt', v)}
-                />
-              </Section>
+                  <Section title="Prompt del Game Master (Aventura)">
+                    <p className="text-xs text-text-muted mb-1 leading-relaxed">
+                      <span className="text-accent/70 font-mono text-[10px] mr-1">[SYSTEM]</span>
+                      Reemplaza el prompt de personaje cuando el modo <strong className="text-text-secondary">Narrador + Aventura</strong> está activo.
+                      Usa <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{PERSONAJES}}'}</code> para los bloques de personaje con sus fichas RPG.
+                    </p>
+                    <RestorablePrompt
+                      settingsKey="adventurePrompt"
+                      value={draft.adventurePrompt ?? ''}
+                      onChange={(v) => update('adventurePrompt', v)}
+                      rows={14}
+                      mono
+                    />
+                  </Section>
 
-              <Section title="Prompt de inyección de memoria">
-                <p className="text-xs text-text-muted mb-1 leading-relaxed">
-                  Se inserta justo antes del último mensaje del usuario.
-                  Usa <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{MEMORIAS}}'}</code> donde quieres que aparezca el bloque de recuerdos activos. Vacío = sin inyección.
-                </p>
-                <RestorablePrompt
-                  settingsKey="memoryInjectionPrompt"
-                  value={draft.memoryInjectionPrompt ?? ''}
-                  onChange={(v) => update('memoryInjectionPrompt', v)}
-                  rows={8}
-                  mono
-                />
-              </Section>
+                  <ScenePromptSection
+                    value={draft.sceneImagePrompt ?? ''}
+                    onChange={(v) => update('sceneImagePrompt', v)}
+                  />
 
-              <Section title="Moderación de contenido">
-                <ToggleRow
-                  label="Permitir contenido adulto (NSFW)"
-                  description="Cuando está desactivado, el sistema detecta y bloquea mensajes con contacto sexual o vocabulario explícito antes de enviarlos al LLM. Si está activado, el LLM principal gestiona el contenido libremente."
-                  checked={draft.allowNsfw ?? false}
-                  onChange={(v) => update('allowNsfw', v)}
-                />
-                {!(draft.allowNsfw) && (
-                  <div className="mt-3 space-y-1">
-                    <p className="text-xs text-text-muted">Mensaje de bloqueo mostrado al jugador</p>
-                    <div className="space-y-1">
-                      <div className="flex justify-end">
-                        <RestoreButton settingsKey="nsfwBlockedMessage" onRestore={(v) => update('nsfwBlockedMessage', v)} />
+                  <Section title="Prompt de inyección de memoria">
+                    <p className="text-xs text-text-muted mb-1 leading-relaxed">
+                      <span className="text-accent/70 font-mono text-[10px] mr-1">[SYSTEM]</span>
+                      Se inserta <strong className="text-text-secondary">justo antes del último mensaje del usuario</strong>, después del índice de contexto (si está activo).
+                      Usa <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{MEMORIAS}}'}</code> donde aparecerá el bloque de recuerdos. Vacío = sin inyección.
+                    </p>
+                    <RestorablePrompt
+                      settingsKey="memoryInjectionPrompt"
+                      value={draft.memoryInjectionPrompt ?? ''}
+                      onChange={(v) => update('memoryInjectionPrompt', v)}
+                      rows={8}
+                      mono
+                    />
+                  </Section>
+
+                  <Section title="Inyección del Índice de Contexto">
+                    <p className="text-xs text-text-muted mb-2 leading-relaxed">
+                      <span className="text-accent/70 font-mono text-[10px] mr-1">[SYSTEM]</span>
+                      Selecciona los ítems más relevantes del índice e inyecta un bloque de sistema <strong className="text-text-secondary">antes de las memorias y el último mensaje</strong>.
+                      Con embeddings activos (pestaña Embeddings) la relevancia es semántica; sin ellos, usa importancia + recencia + palabras clave.
+                      Usa{' '}
+                      <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{CONTEXTO}}'}</code>{' '}
+                      donde aparecerá el bloque agrupado por tipo.
+                    </p>
+                    <ToggleRow
+                      label="Activar inyección de contexto"
+                      description="Requiere que el Índice de Contexto esté generado para la conversación."
+                      checked={draft.contextIndexInjectionEnabled ?? false}
+                      onChange={(v) => update('contextIndexInjectionEnabled', v)}
+                    />
+                    {(draft.contextIndexInjectionEnabled) && (
+                      <div className="mt-3 space-y-3">
+                        <Input
+                          label="Número máximo de ítems"
+                          type="number"
+                          value={draft.contextIndexInjectionMaxItems ?? 10}
+                          onChange={(e) => update('contextIndexInjectionMaxItems', parseInt(e.target.value) || 10)}
+                          min={1}
+                          max={50}
+                          hint="Entre 8 y 15 es un buen equilibrio. Más ítems = más tokens consumidos."
+                        />
+                        <RestorablePrompt
+                          settingsKey="contextIndexInjectionPrompt"
+                          value={draft.contextIndexInjectionPrompt ?? ''}
+                          onChange={(v) => update('contextIndexInjectionPrompt', v)}
+                          rows={8}
+                          mono
+                        />
                       </div>
-                      <textarea
-                        value={draft.nsfwBlockedMessage ?? ''}
-                        onChange={(e) => update('nsfwBlockedMessage', e.target.value)}
-                        rows={2}
-                        className="w-full rounded-lg px-3 py-2 text-xs bg-surface-2 border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent font-mono resize-none"
+                    )}
+                  </Section>
+
+                  <Section title="Prompt de generación de eventos (Historia)">
+                    <p className="text-xs text-text-muted mb-1 leading-relaxed">
+                      Prompt que usa el LLM principal cuando pulsas <strong className="text-text-secondary">Generar con IA</strong> en el editor de historias.
+                      Usa{' '}
+                      <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{NUM_EVENTOS}}'}</code>{' '}
+                      para el número de eventos y{' '}
+                      <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{CONTEXTO_HISTORIA}}'}</code>{' '}
+                      donde se insertará el contexto de la historia (globalContext + worldLore + narrativeRules).
+                    </p>
+                    <RestorablePrompt
+                      settingsKey="storyEventGenerationPrompt"
+                      value={draft.storyEventGenerationPrompt ?? ''}
+                      onChange={(v) => update('storyEventGenerationPrompt', v)}
+                      rows={10}
+                      mono
+                    />
+                  </Section>
+
+                  <Section title="Moderación de contenido">
+                    <ToggleRow
+                      label="Permitir contenido adulto (NSFW)"
+                      description="Cuando está desactivado, el sistema detecta y bloquea mensajes con contacto sexual o vocabulario explícito antes de enviarlos al LLM. Si está activado, el LLM principal gestiona el contenido libremente."
+                      checked={draft.allowNsfw ?? false}
+                      onChange={(v) => update('allowNsfw', v)}
+                    />
+                    {!(draft.allowNsfw) && (
+                      <div className="mt-3 space-y-1">
+                        <p className="text-xs text-text-muted">Mensaje de bloqueo mostrado al jugador</p>
+                        <div className="space-y-1">
+                          <div className="flex justify-end">
+                            <RestoreButton settingsKey="nsfwBlockedMessage" onRestore={(v) => update('nsfwBlockedMessage', v)} />
+                          </div>
+                          <textarea
+                            value={draft.nsfwBlockedMessage ?? ''}
+                            onChange={(e) => update('nsfwBlockedMessage', e.target.value)}
+                            rows={2}
+                            className="w-full rounded-lg px-3 py-2 text-xs bg-surface-2 border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent font-mono resize-none"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </Section>
+
+                  {/* ── Estructura visual del prompt ──────────────────────────── */}
+                  <Section title="Estructura de la petición al LLM">
+                    <p className="text-xs text-text-muted mb-3 leading-relaxed">
+                      Orden en que se ensamblan los mensajes enviados al modelo en cada turno de chat:
+                    </p>
+                    <div className="rounded-lg border border-border bg-surface-2 px-4 py-3 font-mono text-[11px] leading-6 space-y-0.5">
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Prompt de sistema global</span>
+                      </div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Prompt del personaje / Narrador / Game Master</span>
+                      </div>
+                      <div className="pl-11 text-text-muted">
+                        └─ <span className="text-text-muted/70">Formato de respuesta</span>
+                        <span className="text-text-muted/40 ml-1">(al final del prompt de personaje)</span>
+                      </div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Lore e historias vinculadas</span>
+                        <span className="text-text-muted/50 ml-1">(si las hay)</span>
+                      </div>
+                      <div className="text-text-muted/40 py-0.5">···</div>
+                      <div>
+                        <span className="text-amber-400/70">[USER]</span>
+                        <span className="text-text-muted mx-1">/</span>
+                        <span className="text-green-400/70">[ASSISTANT]</span>
+                        <span className="text-text-secondary ml-2">historial de mensajes</span>
+                      </div>
+                      <div className="text-text-muted/40 py-0.5">···</div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Índice de Contexto</span>
+                        <span className="text-text-muted/50 ml-1">(ítems relevantes — si está activado)</span>
+                      </div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Memorias inyectadas</span>
+                        <span className="text-text-muted/50 ml-1">(si está activado)</span>
+                      </div>
+                      <div>
+                        <span className="text-amber-400/70">[USER]</span>
+                        <span className="text-text-secondary ml-2">Último mensaje del jugador</span>
+                        <span className="text-text-muted/50 ml-1">← la generación comienza aquí</span>
+                      </div>
+                    </div>
+                  </Section>
+                </>
+              )}
+
+              {/* ══ LLM Rápido ═══════════════════════════════════════════════════ */}
+              {genTab === 'fast-llm' && (
+                <>
+                  <p className="text-xs text-text-muted leading-relaxed -mt-2 mb-5 pb-3 border-b border-border/50">
+                    Un modelo pequeño que trabaja <strong className="text-text-secondary">en paralelo</strong> al LLM principal.
+                    Se ejecuta después de cada respuesta para generar memorias automáticas y actualizar afinidades,
+                    sin ocupar espacio en el contexto narrativo. Cuando está activo, el LLM principal ya no necesita
+                    emitir etiquetas <code className="bg-surface-3 px-1 rounded text-[10px] text-accent">[AFINIDAD]</code>.
+                    <br />
+                    <span className="text-text-muted/70 mt-1 inline-block">
+                      Recomendado: <strong className="text-text-secondary/70">Qwen2.5 1.5B</strong> · Gemma2 2B · Llama3.2 3B
+                    </span>
+                  </p>
+
+                  <Section title="LLM Rápido de apoyo">
+                    <FastLlmSection
+                      providers={providers}
+                      enabled={draft.fastLlmEnabled ?? false}
+                      providerId={draft.fastLlmProviderId ?? null}
+                      modelId={draft.fastLlmModelId ?? null}
+                      debugMode={draft.fastLlmDebugMode ?? false}
+                      analysisPrompt={draft.fastLlmAnalysisPrompt ?? ''}
+                      onEnabledChange={(v) => update('fastLlmEnabled', v)}
+                      onProviderChange={(v) => update('fastLlmProviderId', v)}
+                      onModelChange={(v) => update('fastLlmModelId', v)}
+                      onDebugModeChange={(v) => update('fastLlmDebugMode', v)}
+                      onAnalysisPromptChange={(v) => update('fastLlmAnalysisPrompt', v)}
+                    />
+                  </Section>
+
+                  {/* Affinity prompt — solo visible cuando el LLM Rápido está desactivado */}
+                  {!(draft.fastLlmEnabled) && (
+                    <Section title="Prompt de Afinidad (LLM Principal)">
+                      <p className="text-xs text-text-muted mb-2 leading-relaxed">
+                        <span className="text-accent/70 font-mono text-[10px] mr-1">[SYSTEM]</span>
+                        Cuando el LLM Rápido está <strong className="text-text-secondary">desactivado</strong>, es el LLM principal quien gestiona la afinidad.
+                        Este prompt se inyecta en el system prompt del personaje para guiar su comportamiento según el nivel de afinidad actual.
+                        El LLM emite etiquetas{' '}
+                        <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">[AFINIDAD:Nombre:±N]</code>{' '}
+                        que el servidor recoge para actualizar los valores.
+                        <br />
+                        <span className="text-text-muted/70 mt-1 inline-block">
+                          Activa el LLM Rápido para delegar esto a un modelo dedicado y liberar contexto del LLM principal.
+                        </span>
+                      </p>
+                      <RestorablePrompt
+                        settingsKey="affinitySystemPrompt"
+                        value={draft.affinitySystemPrompt ?? ''}
+                        onChange={(v) => update('affinitySystemPrompt', v)}
+                        rows={14}
+                        mono
+                      />
+                    </Section>
+                  )}
+                </>
+              )}
+
+              {/* ══ Embeddings ═══════════════════════════════════════════════════ */}
+              {genTab === 'embeddings' && (
+                <>
+                  <p className="text-xs text-text-muted leading-relaxed -mt-2 mb-5 pb-3 border-b border-border/50">
+                    Convierte cada ítem del Índice de Contexto en un <strong className="text-text-secondary">vector semántico</strong>.
+                    Permite encontrar ítems relevantes por significado —"el gran enemigo" localiza "Skareth el dragón"—
+                    en lugar de coincidencia exacta de palabras. Aquí también se configura el LLM
+                    encargado de la <strong className="text-text-secondary">extracción del índice</strong>.
+                  </p>
+
+                  <Section title="Modelo de embeddings">
+                    <p className="text-xs text-text-muted mb-2 leading-relaxed">
+                      Usa un modelo especializado en representaciones vectoriales (distinto al modelo de chat).
+                      En Ollama: <code className="font-mono text-accent/80 text-[11px]">ollama pull nomic-embed-text</code>.
+                      También compatible con cualquier proveedor OpenAI-compatible.
+                    </p>
+                    <ToggleRow
+                      label="Activar embeddings semánticos"
+                      description="Cada extracción guardará un vector por ítem. La inyección usará cosine similarity para seleccionar los más relevantes al mensaje actual."
+                      checked={draft.embeddingEnabled ?? false}
+                      onChange={(v) => update('embeddingEnabled', v)}
+                    />
+                    {(draft.embeddingEnabled) && (
+                      <div className="mt-3">
+                        <DefaultModelSection
+                          providers={providers}
+                          defaultProviderId={draft.embeddingProviderId ?? null}
+                          defaultModelId={draft.embeddingModel ?? null}
+                          onProviderChange={(v) => update('embeddingProviderId', v)}
+                          onModelChange={(v) => update('embeddingModel', v)}
+                          hideDescription
+                        />
+                      </div>
+                    )}
+                  </Section>
+
+                  <Section title="Extracción del Índice de Contexto">
+                    <p className="text-xs text-text-muted mb-2 leading-relaxed">
+                      Instrucciones que el LLM recibe al analizar fragmentos de conversación para extraer
+                      eventos, personajes, lugares y conquistas.{' '}
+                      Variables:{' '}
+                      <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{fragmento}}'}</code>{' '}
+                      <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{desde}}'}</code>{' '}
+                      <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{hasta}}'}</code>{' '}
+                      <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{total}}'}</code>{' '}
+                      <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{personajes_conocidos}}'}</code>{' '}
+                      <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{historias_conocidas}}'}</code>.
+                      {' '}Etiquetas de salida:{' '}
+                      <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">[EVENTO:...|...|N]</code>{' '}
+                      <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">[PERSONAJE:...|...|N]</code>{' '}
+                      <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">[LUGAR:...|...|N]</code>{' '}
+                      <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">[CONQUISTA:...|...|N]</code>.
+                    </p>
+                    <Input
+                      label="Ventana de contexto del LLM (tokens)"
+                      type="number"
+                      value={draft.contextIndexContextSize ?? 8192}
+                      onChange={(e) => update('contextIndexContextSize', parseInt(e.target.value) || 8192)}
+                      min={2048}
+                      max={131072}
+                      hint="Ventana usada al extraer. Auméntala si el modelo admite contexto largo y procesas lotes grandes."
+                    />
+                    <div className="mt-3">
+                      <RestorablePrompt
+                        settingsKey="contextIndexPrompt"
+                        value={draft.contextIndexPrompt ?? ''}
+                        onChange={(v) => update('contextIndexPrompt', v)}
+                        rows={14}
+                        mono
                       />
                     </div>
-                  </div>
-                )}
-              </Section>
+                  </Section>
+                </>
+              )}
 
+              {/* ── Common save bar ───────────────────────────────────────────── */}
               <SaveBar onSave={() => save(GENERATION_KEYS)} isPending={updateSettings.isPending} isSuccess={updateSettings.isSuccess} />
             </>
           )}
@@ -356,21 +619,6 @@ export function SettingsPanel() {
                   onChange={(e) => update('autoSummarizeThreshold', parseInt(e.target.value))} min={5} max={200}
                   hint="Resumir contexto cuando el número de mensajes supera este valor." />
               </Section>
-              {isAdmin && (
-                <Section title="Prompt de Afinidad (Admin)">
-                  <p className="text-xs text-text-muted mb-1">
-                    Instrucciones inyectadas en el system prompt para controlar el comportamiento según el nivel de afinidad.
-                    Incluye el tag <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">[AFINIDAD:Nombre:±N]</code> para actualizaciones automáticas (solo cuando el LLM Rápido no está activo).
-                  </p>
-                  <RestorablePrompt
-                    settingsKey="affinitySystemPrompt"
-                    value={draft.affinitySystemPrompt ?? ''}
-                    onChange={(v) => update('affinitySystemPrompt', v)}
-                    rows={14}
-                    mono
-                  />
-                </Section>
-              )}
               <SaveBar onSave={() => save(CONTEXT_KEYS)} isPending={updateSettings.isPending} isSuccess={updateSettings.isSuccess} />
             </>
           )}
@@ -896,14 +1144,6 @@ function FastLlmSection({
 }) {
   return (
     <div className="space-y-4">
-      <p className="text-xs text-text-muted leading-relaxed">
-        Modelo pequeño y rápido que analiza cada intercambio para crear memorias automáticas y
-        gestionar la afinidad. Cuando está activo, el LLM principal ya no necesita emitir etiquetas{' '}
-        <code className="bg-surface-3 px-1 rounded text-[10px] text-accent">[AFINIDAD]</code>.
-        <br />
-        <span className="text-text-muted/70">Recomendado: Qwen2.5 1.5B · Gemma2 2B · Llama3.2 3B</span>
-      </p>
-
       <ToggleRow
         label="Activar LLM Rápido"
         description="Analiza cada respuesta para generar memorias y actualizar afinidades automáticamente"
@@ -963,12 +1203,14 @@ function DefaultModelSection({
   defaultModelId,
   onProviderChange,
   onModelChange,
+  hideDescription,
 }: {
   providers: Provider[];
   defaultProviderId: string | null;
   defaultModelId: string | null;
   onProviderChange: (v: string | null) => void;
   onModelChange: (v: string | null) => void;
+  hideDescription?: boolean;
 }) {
   const [models, setModels] = React.useState<string[]>([]);
   const [loading, setLoading] = React.useState(false);
@@ -996,9 +1238,11 @@ function DefaultModelSection({
 
   return (
     <div className="space-y-3">
-      <p className="text-xs text-text-muted">
-        Usado cuando el personaje no tiene un provider/modelo propio configurado.
-      </p>
+      {!hideDescription && (
+        <p className="text-xs text-text-muted">
+          Usado cuando el personaje no tiene un provider/modelo propio configurado.
+        </p>
+      )}
       <div className="flex flex-col gap-1">
         <label className="text-xs font-medium text-text-secondary">Provider</label>
         <select

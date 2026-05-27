@@ -5,6 +5,7 @@ const storyEventSchema = z.array(
     id: z.string(),
     title: z.string(),
     description: z.string(),
+    trigger: z.string().default(''),
     timestamp: z.string(),
     importance: z.number().int().min(1).max(10).default(5),
   })

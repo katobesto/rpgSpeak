@@ -147,6 +147,31 @@ export class OllamaProvider implements LLMProvider {
     return finalResponse ?? { content: '', model: request.model, tokens: { prompt: 0, completion: 0, total: 0 }, finishReason: 'stop' };
   }
 
+  async embed(texts: string[], model?: string): Promise<number[][]> {
+    const m = model ?? '';
+    // Try modern Ollama API first (≥ 0.1.26): POST /api/embed with { model, input }
+    try {
+      const data = await this.fetchJson<{ embeddings: number[][] }>('/api/embed', {
+        method: 'POST',
+        body: JSON.stringify({ model: m, input: texts }),
+      });
+      if (Array.isArray(data.embeddings) && data.embeddings.length > 0) {
+        return data.embeddings;
+      }
+    } catch { /* fall through to legacy API */ }
+
+    // Legacy Ollama API (pre-0.1.26): POST /api/embeddings with { model, prompt }, one at a time
+    const results: number[][] = [];
+    for (const text of texts) {
+      const data = await this.fetchJson<{ embedding: number[] }>('/api/embeddings', {
+        method: 'POST',
+        body: JSON.stringify({ model: m, prompt: text }),
+      });
+      results.push(data.embedding);
+    }
+    return results;
+  }
+
   async listModels(): Promise<ProviderModel[]> {
     try {
       const data = await this.fetchJson<{ models: OllamaModel[] }>('/api/tags', { timeoutMs: 10_000 });

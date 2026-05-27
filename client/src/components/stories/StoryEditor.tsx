@@ -7,7 +7,7 @@ import { Button } from '../ui/Button.tsx';
 import { Input, Textarea } from '../ui/Input.tsx';
 import { Avatar } from '../ui/Avatar.tsx';
 import type { Story, CreateStoryDto } from '@rpgspeak/shared';
-import { Plus, Trash2, Search } from 'lucide-react';
+import { Plus, Trash2, Search, Wand2 } from 'lucide-react';
 
 /** crypto.randomUUID() only works in secure contexts (HTTPS / localhost).
  *  When serving from LAN over plain HTTP, fall back to a Math.random UUID v4. */
@@ -81,10 +81,20 @@ export function StoryEditor({ story, open, onClose }: StoryEditorProps) {
     setForm((f) => ({ ...f, [key]: value }));
   }
 
+  const generateEventsMut = useMutation({
+    mutationFn: () => {
+      if (!story) throw new Error('Guarda la historia antes de generar eventos');
+      return storiesApi.generateEvents(story.id, 5);
+    },
+    onSuccess: (result) => {
+      set('persistentEvents', [...form.persistentEvents, ...result.events]);
+    },
+  });
+
   function addEvent() {
     set('persistentEvents', [
       ...form.persistentEvents,
-      { id: randomId(), title: '', description: '', timestamp: new Date().toISOString(), importance: 5 },
+      { id: randomId(), title: '', description: '', trigger: '', timestamp: new Date().toISOString(), importance: 5 },
     ]);
   }
 
@@ -183,7 +193,7 @@ export function StoryEditor({ story, open, onClose }: StoryEditorProps) {
                     <span className="text-xs font-mono text-accent w-32 truncate">{k}</span>
                     <span className="text-xs text-text-secondary flex-1">= {String(v)}</span>
                     <button onClick={() => {
-                      const { [k]: _, ...rest } = form.stateVariables;
+                      const rest = Object.fromEntries(Object.entries(form.stateVariables).filter(([key]) => key !== k));
                       set('stateVariables', rest);
                     }} className="text-text-muted hover:text-red-400"><Trash2 size={12} /></button>
                   </div>
@@ -202,8 +212,32 @@ export function StoryEditor({ story, open, onClose }: StoryEditorProps) {
 
         {tab === 'events' && (
           <div className="space-y-4">
-            <div className="flex justify-end">
-              <Button size="sm" variant="outline" onClick={addEvent}><Plus size={13} /> Add Event</Button>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                {generateEventsMut.isError && (
+                  <span className="text-xs text-red-400">
+                    {(generateEventsMut.error as Error)?.message ?? 'Error al generar'}
+                  </span>
+                )}
+                {!story && (
+                  <span className="text-xs text-text-muted">Guarda la historia primero para generar eventos</span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {story && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => generateEventsMut.mutate()}
+                    loading={generateEventsMut.isPending}
+                    title="Genera 5 eventos con el LLM principal basándose en el contexto de la historia"
+                  >
+                    <Wand2 size={13} />
+                    {generateEventsMut.isPending ? 'Generando…' : 'Generar con IA'}
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" onClick={addEvent}><Plus size={13} /> Add Event</Button>
+              </div>
             </div>
             {form.persistentEvents.map((ev, i) => (
               <div key={ev.id} className="rounded-xl border border-border p-4 space-y-3">
@@ -213,6 +247,12 @@ export function StoryEditor({ story, open, onClose }: StoryEditorProps) {
                     className="text-text-muted hover:text-red-400"><Trash2 size={13} /></button>
                 </div>
                 <Input label="Title" value={ev.title} onChange={(e) => updateEvent(i, 'title', e.target.value)} />
+                <Input
+                  label="Disparador"
+                  value={ev.trigger ?? ''}
+                  onChange={(e) => updateEvent(i, 'trigger', e.target.value)}
+                  placeholder="¿Qué condición activa este evento? (acción del jugador, lugar, tiempo...)"
+                />
                 <Textarea label="Description" value={ev.description} onChange={(e) => updateEvent(i, 'description', e.target.value)} rows={2} />
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-text-secondary">Importance: {ev.importance}</label>

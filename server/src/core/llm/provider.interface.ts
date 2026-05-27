@@ -6,6 +6,8 @@ export interface LLMProvider {
   stream(request: GenerateRequest): AsyncGenerator<string, GenerateResponse, unknown>;
   listModels(): Promise<ProviderModel[]>;
   validate(): Promise<{ valid: boolean; error?: string }>;
+  /** Optional: compute dense embeddings for the given texts using the specified model. */
+  embed?(texts: string[], model?: string): Promise<number[][]>;
 }
 
 export interface ProviderOptions {

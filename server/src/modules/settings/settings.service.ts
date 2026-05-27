@@ -181,79 +181,93 @@ N entre 1 y 15 según la magnitud. No lo menciones en la narrativa.`,
   fastLlmProviderId: null,
   fastLlmModelId: null,
   fastLlmDebugMode: false,
-  fastLlmAnalysisPrompt: `Eres un analizador de relaciones en juego de rol. Eres EXTREMADAMENTE selectivo: la gran mayoría de turnos deben producir NINGUNO. Solo actúas ante eventos que cambiarían la relación de forma permanente e irrevocable.
+  fastLlmAnalysisPrompt: `Eres un analizador de juego de rol. Decides si algo merece ser recordado de forma permanente. Eres BRUTALMENTE selectivo: el 90% de los turnos deben producir NINGUNO.
 
-PERSONAJES PRINCIPALES (ÚNICOS VÁLIDOS — no uses otros):
+PERSONAJES (ÚNICOS VÁLIDOS — no uses otros):
 {{PERSONAJES}}
 
 MENSAJE DEL JUGADOR: {{MENSAJE_JUGADOR}}
 RESPUESTA DEL PERSONAJE: {{RESPUESTA}}
 
-━━━ FILTRO PRINCIPAL ━━━
+━━━ FILTRO ÚNICO ━━━
 
-Antes de analizar nada, hazte esta pregunta:
-"¿Dentro de 10 sesiones, este momento seguirá siendo relevante para entender la relación?"
+Responde esta pregunta antes de analizar nada:
+"¿Cambiaría el comportamiento o las decisiones del personaje en la próxima sesión si no recordara esto?"
 
-Si la respuesta es NO → responde NINGUNO sin más análisis.
-Si la respuesta es SÍ → continúa.
+NO → NINGUNO. Sin más análisis.
+SÍ → continúa solo si el evento aparece en la lista de abajo.
 
-NINGUNO es la respuesta CORRECTA para:
-• Conversación normal, saludos, despedidas
-• Preguntas y respuestas cotidianas
-• Exploración, viajes, descripciones de escenas
-• Combate rutinario sin consecuencias para la relación
-• Pequeños gestos amables o descorteses del día a día
-• Cualquier cosa que ya se pueda deducir del contexto reciente de la conversación
-• Reacciones emocionales del personaje (sorpresa, risa, enfado pasajero) que no dejan huella
+━━━ SIEMPRE ES NINGUNO ━━━
 
-━━━ CUÁNDO SÍ HAY EVENTO ━━━
+• Conversación, saludos, despedidas, preguntas cotidianas
+• Exploración, viajes, descripciones de escenas, combate sin consecuencias permanentes
+• El personaje expresa una opinión, gusto, preferencia o sentimiento (aunque sea importante para él)
+• Reacción emocional pasajera que no deja huella física ni psicológica duradera
+• Cualquier cosa deducible del contexto reciente o de la personalidad/trasfondo del personaje
+• Intercambio que el personaje ya conocía o puede concluir sin haberlo recordado
+• Importancia menor a 8: no existe nivel 7 — si en duda, es NINGUNO
 
-MEMORIAS — solo una de estas situaciones justifica crearla:
-✓ Regalo con valor narrativo real (no "le doy una moneda")
-✓ Acto heroico que salvó la vida del personaje de forma directa
-✓ Declaración explícita de amor, odio o sentimiento profundo
-✓ Promesa o juramento con peso en la historia
-✓ Traición grave o revelación que cambia la percepción del personaje
-✓ Violencia física directa sobre el personaje (golpe, herida)
-✓ Contacto sexual íntimo no consentido
-✓ Cambio físico permanente (cicatriz, objeto que lleva encima, etc.)
-Importancia MÍNIMA aceptada: 7/10. Por debajo de 7, no crear memoria.
+━━━ CUÁNDO CREAR MEMORIA ━━━
 
-AFINIDAD — solo cambia si ocurre algo de los listados abajo. Delta MÍNIMO: ±8.
-No registres cambios de ±2, ±3, ±5 — son ruido, no tienen sentido narrativo.
+Máximo 1 MEMORIA por turno. Solo en estos casos:
 
-Eventos que SÍ cambian afinidad:
-• Violencia física directa: -10 a -15
-• Contacto íntimo sin consentimiento: -10 a -15
-• Insulto grave o humillación pública: -8 a -12
-• Traición de confianza demostrada: -10 a -15
-• Salvar la vida de forma directa: +10 a +15
-• Regalo de alto valor emocional o material: +8 a +12
-• Acto de lealtad demostrado bajo presión: +8 a +12
-• Revelación íntima de gran confianza: +6 a +10
+[evento, imp. 8-10] Objeto entregado y en posesión del personaje, herida o cicatriz, cambio físico permanente y concreto.
+[evento, imp. 8-10] Salvó o puso en riesgo la vida del personaje de forma directa y deliberada.
+[evento, imp. 8-9] Juramento solemne, promesa vinculante, o declaración explícita de amor u odio que cambia la dinámica de forma irreversible.
+[ofensa, imp. 8-10] Violencia física directa al personaje, contacto íntimo no consentido, insulto grave o humillación pública deliberada.
+[trauma, imp. 9-10] Daño psicológico profundo y duradero causado por el jugador (no una reacción pasajera).
+[hecho, imp. 9-10] Secreto exclusivo del personaje revelado por primera vez, cuyo olvido cambiaría la dinámica de la relación.
 
-REGLA DEL SIGNO — ABSOLUTA:
-• Violencia, contacto no consentido, humillación → SIEMPRE negativo, sin excepción
-• La reacción externa del personaje NO importa. La calma es su fachada. El daño interno es real.
-• Si el jugador toca partes íntimas con afinidad < 80 y el LLM da positivo → está EQUIVOCADO.
+PROHIBIDO: no uses los tipos "relacion" ni "preferencia".
 
-━━━ FORMATO DE SALIDA ━━━
+━━━ AFINIDAD ━━━
 
-Si no hay nada que supere el filtro:
+Solo cambia si ocurrió algo de la lista anterior. Delta MÍNIMO ±8 — valores menores son ruido y no deben registrarse.
+
+• Violencia / contacto no consentido / traición: -10 a -15 (SIEMPRE negativo, sin excepción)
+• Insulto grave / humillación deliberada: -8 a -12
+• Salvar la vida directamente / lealtad bajo presión: +10 a +15
+• Regalo de alto valor emocional / confesión de gran confianza: +8 a +12
+
+La reacción externa del personaje NO importa — el impacto interno es real aunque lo disimule.
+Si el jugador actúa con intención sexual o agresiva y la afinidad es < 80, el delta es NEGATIVO.
+
+━━━ FORMATO ━━━
+
+Sin nada que registrar:
 NINGUNO
 
-Si hay evento (usar solo si todo lo anterior se cumple):
-[MEMORIA:NombrePersonaje:tipo:importancia]descripción concreta en tercera persona[/MEMORIA]
+Con evento (solo si cumple todo lo anterior):
+[MEMORIA:NombrePersonaje:tipo:importancia]descripción concisa en tercera persona, hechos concretos[/MEMORIA]
 [AFINIDAD:NombrePersonaje:+N o -N]
 
-TIPOS: evento · hecho · relacion · preferencia · ofensa (mín. imp. 7) · trauma (mín. imp. 8)`,
-  memoryInjectionPrompt: `## Recuerdos de sesiones anteriores
+TIPOS válidos: evento · hecho · ofensa · trauma`,
+  // Embeddings semánticos para el Índice de Contexto
+  embeddingEnabled:    false,
+  embeddingProviderId: null,
+  embeddingModel:      null,
+  // Inyección del Índice de Contexto en el LLM
+  contextIndexInjectionEnabled:  false,
+  contextIndexInjectionMaxItems: 10,
+  contextIndexInjectionPrompt: `## Índice de contexto — Estado del mundo
 
-Los siguientes hechos ocurrieron en sesiones previas con este personaje. Son detalles establecidos que deben reflejarse de forma coherente en tu respuesta:
+Los siguientes elementos del mundo, personajes y eventos son relevantes para este momento de la historia. Úsalos como referencia de fondo para mantener coherencia narrativa:
+
+{{CONTEXTO}}
+
+Ten en cuenta esta información al responder. No la menciones explícitamente salvo que el diálogo lo requiera.`,
+  memoryInjectionPrompt: `## Hechos establecidos
+
+Los siguientes eventos ocurrieron con este jugador y son hechos irrevocables. Refléjalos de forma coherente sin mencionarlos explícitamente salvo que el diálogo lo exija:
 
 {{MEMORIAS}}
 
-Actúa de forma natural y coherente con estos recuerdos: si se te dio un objeto, lo tienes; si algo ocurrió físicamente, así está ahora; si se hizo una promesa, la recuerdas. Mantén tu personalidad intacta — los recuerdos complementan quién eres, no lo reemplazan. No los menciones explícitamente salvo que el diálogo lo requiera.`,
+Reglas de coherencia:
+— Si se te entregó un objeto, lo tienes encima ahora mismo.
+— Si ocurrió algo físico (herida, cicatriz, cambio de estado), así estás en este momento.
+— Si hiciste una promesa o juraste algo, lo recuerdas y actúas en consecuencia.
+— Si sufriste una ofensa o trauma, tu tono y disposición lo reflejan — no lo olvides ni lo perdones a la ligera.
+Estos hechos son parte de tu realidad presente, no del pasado. No rompas la coherencia de lo que ocurrió.`,
   sceneImagePrompt: `You are a visual scene director writing prompts for a Stable Diffusion image generator.
 Based on the character descriptions and the recent conversation below, write ONE detailed image prompt in English.
 
@@ -274,6 +288,51 @@ CHARACTERS:
 
 RECENT SCENE:
 {{messages}}`,
+  // Prompt de extracción del Índice de Contexto
+  contextIndexPrompt: `Eres un cronista de historias de rol. Analiza el siguiente fragmento de conversación y extrae SOLO los elementos genuinamente importantes para recordar a largo plazo: eventos que cambian la trama, personajes con nombre y rol definidos, lugares relevantes para la historia, y conquistas o revelaciones clave (misiones completadas, objetos importantes obtenidos, secretos descubiertos).
+
+PERSONAJES YA CONOCIDOS EN ESTA CONVERSACIÓN (no los re-extraigas salvo que haya información nueva relevante):
+{{personajes_conocidos}}
+
+HISTORIAS / MUNDOS VINCULADOS (sus lugares y eventos de lore ya están registrados):
+{{historias_conocidas}}
+
+FRAGMENTO (mensajes {{desde}}–{{hasta}} de {{total}} totales):
+---
+{{fragmento}}
+---
+
+Responde ÚNICAMENTE con etiquetas en este formato exacto, una por línea. Sin texto adicional antes ni después.
+
+[EVENTO:título corto del evento|descripción en 1-2 frases de qué ocurrió y por qué importa|importancia del 1 al 10]
+[PERSONAJE:nombre completo|quién es, su rol y cualquier dato clave nuevo que deba recordarse|importancia del 1 al 10]
+[LUGAR:nombre del lugar|descripción y por qué es relevante para la historia|importancia del 1 al 10]
+[CONQUISTA:nombre de la misión, objeto o revelación|qué se logró, obtuvo o descubrió y su relevancia para la historia|importancia del 1 al 10]
+
+Reglas estrictas:
+- Solo incluye elementos con importancia ≥ 6
+- Máximo 6 entradas por tipo
+- Si no hay elementos de un tipo, omite completamente esas etiquetas
+- PERSONAJE: omite personajes ya conocidos salvo que el fragmento revele datos nuevos y relevantes
+- CONQUISTA: solo para misiones completadas/activas, objetos con peso narrativo, o revelaciones que cambian la historia
+- No inventes ni extrapoles — solo lo que está explícito en el fragmento`,
+  contextIndexContextSize: 8192,
+  // Generación de eventos de historia
+  storyEventGenerationPrompt: `Eres un diseñador narrativo de juegos de rol. A partir del contexto de la historia que se te proporciona, genera exactamente {{NUM_EVENTOS}} eventos narrativos relevantes y concretos para esta historia.
+
+CONTEXTO DE LA HISTORIA:
+{{CONTEXTO_HISTORIA}}
+
+INSTRUCCIONES:
+- Cada evento debe encajar de forma natural en el mundo y tono de la historia
+- El campo "disparador" describe QUÉ CONDICIÓN o ACCIÓN desencadena el evento (puede ser una decisión del jugador, llegar a un lugar, un umbral de tiempo, etc.)
+- El campo "descripción" narra QUÉ OCURRE cuando el evento se activa (2-4 frases vívidas y concretas)
+- La importancia (1-10) refleja el impacto narrativo: 8-10 para eventos cruciales de trama, 5-7 para subtramas, 1-4 para eventos de ambiente
+- Varía los tipos: incluye conflictos, revelaciones, encuentros, cambios de estado del mundo, consecuencias de elecciones
+
+Responde ÚNICAMENTE con etiquetas en este formato exacto, una por línea. Sin texto adicional antes ni después.
+
+[EVENTO:título corto y evocador|disparador que activa el evento|descripción de lo que ocurre cuando se activa|importancia del 1 al 10]`,
   // Content moderation
   allowNsfw: false,
   nsfwBlockedMessage: `*[Moderación: el contenido de tu mensaje no está permitido con el modo NSFW desactivado. Si deseas este tipo de interacciones, activa "Permitir contenido adulto" en Ajustes → Generación.]*`,

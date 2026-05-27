@@ -3,6 +3,7 @@ import { MessageList, type MessageListHandle } from './MessageList.tsx';
 import { MessageInput } from './MessageInput.tsx';
 import { GroupPanel } from './GroupPanel.tsx';
 import { SummaryModal } from './SummaryModal.tsx';
+import { ContextModal } from './ContextModal.tsx';
 import { StatsModal } from './StatsModal.tsx';
 import { ChatSearchModal } from './ChatSearchModal.tsx';
 import { useChatStore } from '../../stores/chat.store.ts';
@@ -40,6 +41,7 @@ export function ChatWindow() {
   const [groupPanelOpen, setGroupPanelOpen] = useState(false);
   const [summaryModalOpen, setSummaryModalOpen] = useState(false);
   const [statsModalOpen, setStatsModalOpen] = useState(false);
+  const [contextModalOpen, setContextModalOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [anchorModalOpen, setAnchorModalOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -277,6 +279,13 @@ export function ChatWindow() {
                   <span className="text-xs text-text-primary">Resumen de sucesos</span>
                 </button>
                 <button
+                  onClick={() => { setContextModalOpen(true); setMoreMenuOpen(false); }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-white/5 text-left"
+                >
+                  <Zap size={13} className="text-text-muted" />
+                  <span className="text-xs text-text-primary">Índice de Contexto</span>
+                </button>
+                <button
                   onClick={() => { setStatsModalOpen(true); setMoreMenuOpen(false); }}
                   className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-white/5 text-left"
                 >
@@ -324,6 +333,13 @@ export function ChatWindow() {
         open={statsModalOpen}
         onClose={() => setStatsModalOpen(false)}
         conversation={activeConversation}
+        messages={messages}
+      />
+
+      <ContextModal
+        open={contextModalOpen}
+        onClose={() => setContextModalOpen(false)}
+        conversationId={convId!}
         messages={messages}
       />
 

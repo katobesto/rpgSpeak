@@ -1,4 +1,4 @@
-import { sqliteTable, text, integer, real, primaryKey } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, blob, primaryKey } from 'drizzle-orm/sqlite-core';
 
 // ─── Users ────────────────────────────────────────────────────────────────────
 
@@ -206,8 +206,27 @@ export const userStories = sqliteTable(
   (t) => ({ pk: primaryKey({ columns: [t.userId, t.storyId] }) })
 );
 
+// ─── Context Items ────────────────────────────────────────────────────────────
+
+export const contextItems = sqliteTable('context_items', {
+  id:               text('id').primaryKey(),
+  conversationId:   text('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  type:             text('type').notNull(),   // 'event' | 'character' | 'place' | 'quest'
+  title:            text('title').notNull(),
+  description:      text('description').notNull().default(''),
+  importance:       integer('importance').notNull().default(5),
+  messageIndexFrom: integer('message_index_from').notNull().default(0),
+  messageIndexTo:   integer('message_index_to').notNull().default(0),
+  isActive:         integer('is_active', { mode: 'boolean' }).notNull().default(true),
+  embedding:        blob('embedding'),          // Float32Array bytes, nullable
+  embeddingModel:   text('embedding_model'),    // e.g. "nomic-embed-text", nullable
+  createdAt:        text('created_at').notNull(),
+  updatedAt:        text('updated_at').notNull(),
+});
+
 // ─── Type exports for Drizzle inference ───────────────────────────────────────
 
+export type DbContextItem = typeof contextItems.$inferSelect;
 export type DbCharacter = typeof characters.$inferSelect;
 export type DbStory = typeof stories.$inferSelect;
 export type DbConversation = typeof conversations.$inferSelect;

@@ -1,7 +1,12 @@
-import type { ChatMessage, Character, Story, Message, MemoryEntry } from '@rpgspeak/shared';
+import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem } from '@rpgspeak/shared';
 import { MemoryRepository } from '../memory/memory.repository.js';
+import { ContextRepository, type ContextItemWithEmbedding } from '../../modules/context/context.repository.js';
+import { ProviderRepository } from '../../modules/providers/provider.repository.js';
+import { createProvider } from '../llm/provider.factory.js';
 
-const memRepo = new MemoryRepository();
+const memRepo  = new MemoryRepository();
+const ctxRepo  = new ContextRepository();
+const provRepo = new ProviderRepository();
 
 export interface BuildContextOptions {
   character: Character;
@@ -22,6 +27,14 @@ export interface BuildContextOptions {
   adventurePrompt?: string;       // narrator mode + adventure: GM instructions; use {{PERSONAJES}}
   fastLlmEnabled?: boolean;   // when true, skip affinity tag instructions (fast LLM handles it)
   memoryInjectionPrompt?: string; // template with {{MEMORIAS}} — injected just before last user message
+  // Context index injection
+  contextIndexInjectionEnabled?:  boolean;
+  contextIndexInjectionMaxItems?: number;
+  contextIndexInjectionPrompt?:   string;
+  // Embedding config (for semantic scoring)
+  embeddingEnabled?:    boolean;
+  embeddingProviderId?: string | null;
+  embeddingModel?:      string | null;
 }
 
 // ── Aviso de aventura para modo personaje individual (sin narrador) ─────────
@@ -32,7 +45,7 @@ Eres consciente de tu ficha RPG (stats, habilidades, inventario). Actúa de form
  * Assembles the full context array to send to the LLM.
  * Order: global prompt → character system prompt → story context → memory → summary → conversation history
  */
-export function buildContext(opts: BuildContextOptions): ChatMessage[] {
+export async function buildContext(opts: BuildContextOptions): Promise<ChatMessage[]> {
   const {
     character,
     stories,
@@ -52,6 +65,12 @@ export function buildContext(opts: BuildContextOptions): ChatMessage[] {
     adventurePrompt,
     fastLlmEnabled = false,
     memoryInjectionPrompt,
+    contextIndexInjectionEnabled = false,
+    contextIndexInjectionMaxItems = 10,
+    contextIndexInjectionPrompt,
+    embeddingEnabled = false,
+    embeddingProviderId,
+    embeddingModel,
   } = opts;
 
   const systemParts: string[] = [];
@@ -125,10 +144,17 @@ export function buildContext(opts: BuildContextOptions): ChatMessage[] {
     }
   }
 
-  // ── Affinity + consent directive — injected AFTER the character block ────────
-  // Critical: placing this AFTER the character description ensures it overrides
-  // the character's base personality (e.g. "madly in love") instead of being
-  // overridden by it.
+  // ── Affinity + consent directive — built here, injected LATE (see below) ────
+  // Kept OUT of systemParts so the large static system message (character, stories…)
+  // can be fully cached by the KV cache across turns. The directive contains the
+  // current affinity numbers which change whenever the fast LLM (or main LLM) updates
+  // them; embedding dynamic values inside the first SYSTEM message would invalidate
+  // the cache on every affinity update.
+  //
+  // Placing it late (after history, just before the last user message) also increases
+  // its authority: LLMs weight content closer to the generation point more heavily,
+  // so it overrides the character's base description even more effectively than before.
+  let affinityBlock: string | null = null;
   if (characterAffinities?.length) {
     const consentLines = characterAffinities.map(({ name, affinity }) => {
       if (affinity >= 80) {
@@ -158,11 +184,9 @@ export function buildContext(opts: BuildContextOptions): ChatMessage[] {
       `• PROHIBIDO mostrar curiosidad o atracción ante ese contacto\n` +
       `• afinidad < 40 = enfado explícito o rechazo duro; 40-60 = rechazo firme; 61-79 = rechazo claro con herida`;
 
-    if (!fastLlmEnabled && affinitySystemPrompt?.trim()) {
-      systemParts.push(`${affinitySystemPrompt.trim()}\n\n${consentDirective}`);
-    } else {
-      systemParts.push(consentDirective);
-    }
+    affinityBlock = !fastLlmEnabled && affinitySystemPrompt?.trim()
+      ? `${affinitySystemPrompt.trim()}\n\n${consentDirective}`
+      : consentDirective;
   }
   // ─────────────────────────────────────────────────────────────────────────────
 
@@ -217,23 +241,102 @@ export function buildContext(opts: BuildContextOptions): ChatMessage[] {
     });
   }
 
-  // Inject memories just before the last user message when a template is configured.
-  // This positions them at maximum recency so the LLM prioritises them over the system prompt.
+  // ── Context index injection (world-state background, further from generation) ──
+  let contextIndexBlock: string | null = null;
+  if (contextIndexInjectionEnabled && contextIndexInjectionPrompt?.trim()) {
+    const allItems = ctxRepo.findByConversationWithEmbeddings(conversationId);
+    if (allItems.length > 0) {
+      const totalNonSys     = messages.filter((m) => m.role !== 'system').length;
+      const lastUserContent = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+      const userWords       = lastUserContent.toLowerCase().split(/\W+/).filter((w) => w.length > 3);
+
+      // Try embedding-based scoring
+      let queryVec: Float32Array | null = null;
+      if (embeddingEnabled && embeddingProviderId && embeddingModel) {
+        const embProv = provRepo.findById(embeddingProviderId);
+        if (embProv?.isEnabled) {
+          const embLlm = createProvider(embProv);
+          if (embLlm.embed) {
+            try {
+              const vecs = await embLlm.embed([lastUserContent], embeddingModel);
+              if (vecs[0]?.length > 0) queryVec = new Float32Array(vecs[0]);
+            } catch (e) {
+              console.warn('[context-index] Embedding query failed, using heuristic fallback:', e);
+            }
+          }
+        }
+      }
+
+      const scored = allItems
+        .map((item) => {
+          let score: number;
+          if (queryVec && item.embeddingVec && item.embeddingModel === embeddingModel) {
+            // Semantic: cosine similarity dominates (60%), importance (30%), recency (10%)
+            const sim   = cosineSim(queryVec, item.embeddingVec);
+            const imp   = (item.importance / 10) * 0.30;
+            const ratio = totalNonSys > 0 ? item.messageIndexTo / totalNonSys : 0;
+            const rec   = (ratio >= 0.5 ? ratio : ratio * 0.5) * 0.10;
+            score = sim * 0.60 + imp + rec;
+          } else {
+            score = scoreByHeuristic(item, totalNonSys, userWords);
+          }
+          return { item, score };
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, contextIndexInjectionMaxItems)
+        .map((s) => s.item);
+
+      if (scored.length > 0) {
+        contextIndexBlock = buildContextIndexBlock(scored, contextIndexInjectionPrompt);
+        const semCount = scored.filter((i) => i.embeddingVec !== null && i.embeddingModel === embeddingModel).length;
+        console.log(`[context-index] Injecting ${scored.length}/${allItems.length} items (${semCount} semantic, ${scored.length - semCount} heuristic)`);
+      }
+    }
+  }
+
+  // ── Late injections — all share the same "hold the last user message" split ──
+  //
+  // Injection order (furthest → closest to the generation point):
+  //   1. Context index   — world-state background knowledge
+  //   2. Memories        — character-specific past events, may include emotional coloring
+  //   3. Affinity block  — current relationship state + consent rules (most authoritative)
+  //   4. [Last user msg] ← generation starts here
+  //   5. Turn directive  ← injected by engine.ts after this function returns
+  //
+  // Keeping these OUT of the first SYSTEM message means the large static prefix
+  // (character prompt + stories) can be fully reused by the KV cache across turns,
+  // even when affinity values or memory sets change.
   const shouldInjectMemories = allMemories.length > 0 && memoryInjectionPrompt?.trim();
-  const historyBody  = shouldInjectMemories ? trimmedMessages.slice(0, -1) : trimmedMessages;
-  const lastMessage  = shouldInjectMemories ? trimmedMessages[trimmedMessages.length - 1] : null;
+  const needsSplit = shouldInjectMemories || Boolean(contextIndexBlock) || Boolean(affinityBlock);
+  const historyBody = needsSplit ? trimmedMessages.slice(0, -1) : trimmedMessages;
+  const lastMessage = needsSplit ? trimmedMessages[trimmedMessages.length - 1] : null;
 
   for (const m of historyBody) {
     history.push({ role: m.role, content: m.content });
   }
 
+  // 1. Context index (world background — furthest from generation)
+  if (contextIndexBlock) {
+    history.push({ role: 'system', content: contextIndexBlock });
+  }
+
+  // 2. Memories (character-specific state)
   if (shouldInjectMemories && lastMessage) {
     const injectionBlock = buildMemoryInjectionBlock(allMemories, charNameMap, memoryInjectionPrompt!);
     console.log(`[memory] Injecting ${allMemories.length} memories for conv ${conversationId} (${charNameMap.size} chars)`);
     history.push({ role: 'system', content: injectionBlock });
-    history.push({ role: lastMessage.role, content: lastMessage.content });
   } else if (allMemories.length > 0) {
     console.log(`[memory] Skipped injection — memories: ${allMemories.length}, prompt set: ${Boolean(memoryInjectionPrompt?.trim())}`);
+  }
+
+  // 3. Affinity + consent directive (closest to generation — highest override authority)
+  if (affinityBlock && needsSplit) {
+    history.push({ role: 'system', content: affinityBlock });
+  }
+
+  // 4. Last user message (generation point)
+  if (needsSplit && lastMessage) {
+    history.push({ role: lastMessage.role, content: lastMessage.content });
   }
 
   return [systemMessage, ...fewShot, ...history];
@@ -421,4 +524,54 @@ function buildMemoryInjectionBlock(
 
 function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// ── Context index helpers ─────────────────────────────────────────────────────
+
+function cosineSim(a: Float32Array, b: Float32Array): number {
+  let dot = 0, na = 0, nb = 0;
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    dot += a[i] * b[i];
+    na  += a[i] * a[i];
+    nb  += b[i] * b[i];
+  }
+  const denom = Math.sqrt(na) * Math.sqrt(nb);
+  return denom === 0 ? 0 : dot / denom;
+}
+
+function scoreByHeuristic(
+  item: ContextItemWithEmbedding,
+  totalNonSys: number,
+  userWords: string[],
+): number {
+  const imp   = (item.importance / 10) * 0.60;
+  const ratio = totalNonSys > 0 ? item.messageIndexTo / totalNonSys : 0;
+  const rec   = (ratio >= 0.5 ? ratio : ratio * 0.5) * 0.35;
+  const kw    = userWords.some((w) => item.title.toLowerCase().includes(w)) ? 0.05 : 0;
+  return imp + rec + kw;
+}
+
+const CTX_TYPE_LABELS: Record<string, string> = {
+  event: 'Eventos', character: 'Personajes', place: 'Lugares', quest: 'Misiones',
+};
+
+function buildContextIndexBlock(items: ContextItem[], template: string): string {
+  const ORDER = ['event', 'character', 'place', 'quest'] as const;
+  const grouped = new Map<string, ContextItem[]>();
+  for (const item of items) {
+    if (!grouped.has(item.type)) grouped.set(item.type, []);
+    grouped.get(item.type)!.push(item);
+  }
+  const sections = ORDER
+    .filter((t) => grouped.has(t))
+    .map((t) => {
+      const label = CTX_TYPE_LABELS[t] ?? capitalize(t);
+      const lines = grouped.get(t)!.map(
+        (i) => `— [${i.importance}/10] ${i.title}: ${i.description}`,
+      );
+      return `**${label}:**\n${lines.join('\n')}`;
+    });
+  const text = sections.length > 0 ? '\n\n' + sections.join('\n\n') : ' (sin elementos)';
+  return template.replace('{{CONTEXTO}}', text);
 }
