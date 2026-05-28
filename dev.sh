@@ -70,33 +70,49 @@ fi
 
 cd "$(dirname "$0")"
 
-# ── Verificar binarios nativos (detecta binarios de Windows/Linux y los recompila) ─
+# ── Verificar binarios nativos ────────────────────────────────────────────────
 NATIVE_BIN="node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+ARCH="$(uname -m)"   # arm64 en M1-M5, x86_64 en Intel
+
 if [ ! -d "node_modules" ]; then
   echo "❌  node_modules no encontrado. Ejecuta ./install.sh primero."
   exit 1
 fi
+
 NEEDS_REBUILD=0
 if [ -f "$NATIVE_BIN" ]; then
   BIN_INFO=$(file "$NATIVE_BIN" 2>/dev/null || echo "unknown")
+
   if ! echo "$BIN_INFO" | grep -q "Mach-O"; then
-    echo "⚠️   Binario de otra plataforma detectado (Windows/Linux). Recompilando para Mac..."
+    # Binario de Windows (PE/MZ) o Linux (ELF) en un Mac
+    echo "⚠️   Binario de otra plataforma detectado (Windows/Linux). Recompilando para Mac ${ARCH}..."
+    NEEDS_REBUILD=1
+  elif [ "$ARCH" = "arm64" ] && ! echo "$BIN_INFO" | grep -q "arm64"; then
+    # Binario x86_64 en un Mac Apple Silicon
+    echo "⚠️   Binario x86_64 en Mac Apple Silicon (${ARCH}). Recompilando..."
+    NEEDS_REBUILD=1
+  elif [ "$ARCH" = "x86_64" ] && echo "$BIN_INFO" | grep -q "arm64" && ! echo "$BIN_INFO" | grep -q "x86_64"; then
+    # Binario arm64 puro en un Mac Intel
+    echo "⚠️   Binario arm64 en Mac Intel. Recompilando..."
+    NEEDS_REBUILD=1
+  elif ! node -e "require('better-sqlite3')" 2>/dev/null; then
+    # El binario existe y es Mach-O del arco correcto, pero no carga (ABI de Node distinto)
+    echo "⚠️   Módulo nativo incompatible con esta versión de Node $(node -v). Recompilando..."
     NEEDS_REBUILD=1
   fi
 else
-  echo "⚠️   Binario nativo no encontrado. Compilando..."
+  echo "⚠️   Binario nativo no encontrado. Compilando para Mac ${ARCH}..."
   NEEDS_REBUILD=1
 fi
+
 if [ $NEEDS_REBUILD -eq 1 ]; then
-  # npm rebuild fuerza recompilacion del modulo nativo para la plataforma actual.
-  # Requiere Python 3 y Xcode Command Line Tools (xcode-select --install).
-  npm rebuild better-sqlite3
-  if [ $? -ne 0 ]; then
-    echo "❌  Recompilacion fallida."
-    echo "    Asegurate de tener Xcode CLI Tools: xcode-select --install"
+  npm rebuild better-sqlite3 2>/dev/null || npm rebuild better-sqlite3 --build-from-source
+  if [ $? -ne 0 ] || ! node -e "require('better-sqlite3')" 2>/dev/null; then
+    echo "❌  Recompilación fallida."
+    echo "    Asegúrate de tener Xcode CLI Tools: xcode-select --install"
     exit 1
   fi
-  echo "✅  Binario Mac compilado correctamente."
+  echo "✅  Binario Mac ${ARCH} compilado correctamente."
   echo ""
 fi
 

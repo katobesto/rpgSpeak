@@ -27,6 +27,21 @@ echo -e "${NC}"
 echo -e "${BOLD}  Local AI Character Roleplay Platform${NC}"
 echo ""
 
+# ─── Detectar arquitectura ────────────────────────────────────────────────────
+ARCH="$(uname -m)"   # arm64 en M1/M2/M3/M4/M5, x86_64 en Intel
+echo -e "${CYAN}→ Plataforma: macOS $(uname -r) — ${ARCH}${NC}"
+
+# ─── Verificar Xcode Command Line Tools (necesario para compilar módulos nativos) ─
+echo -e "${CYAN}→ Verificando Xcode Command Line Tools...${NC}"
+if ! xcode-select -p &>/dev/null; then
+  echo -e "${YELLOW}⚠ Xcode CLI Tools no encontradas. Instalando...${NC}"
+  echo -e "${YELLOW}  (aparecerá un diálogo del sistema — acepta la instalación)${NC}"
+  xcode-select --install 2>/dev/null || true
+  echo -e "${RED}✗ Vuelve a ejecutar ./install.sh después de que termine la instalación de Xcode CLI Tools.${NC}"
+  exit 1
+fi
+echo -e "${GREEN}✓ Xcode CLI Tools: $(xcode-select -p)${NC}"
+
 # ─── Check Node.js version ────────────────────────────────────────────────────
 echo -e "${CYAN}→ Verificando Node.js...${NC}"
 if ! command -v node &>/dev/null; then
@@ -34,12 +49,11 @@ if ! command -v node &>/dev/null; then
   exit 1
 fi
 
-NODE_VERSION=$(node -e "process.exit(parseInt(process.versions.node.split('.')[0]) < 20 ? 1 : 0)" 2>/dev/null && echo "ok" || echo "fail")
-if [ "$NODE_VERSION" = "fail" ]; then
+if ! node -e "process.exit(parseInt(process.versions.node.split('.')[0]) < 20 ? 1 : 0)" 2>/dev/null; then
   echo -e "${RED}✗ Node.js >= 20 requerido. Encontrado: $(node -v)${NC}"
   exit 1
 fi
-echo -e "${GREEN}✓ Node.js $(node -v)${NC}"
+echo -e "${GREEN}✓ Node.js $(node -v) — ABI $(node -e 'console.log(process.versions.modules)')${NC}"
 
 # ─── Verificar Python (opcional, necesario para TTS) ──────────────────────────
 echo -e "${CYAN}→ Verificando Python...${NC}"
@@ -69,20 +83,48 @@ echo -e "${CYAN}→ Instalando dependencias npm...${NC}"
 npm install
 echo -e "${GREEN}✓ Dependencias instaladas${NC}"
 
-# ─── Compilar módulos nativos para Mac ────────────────────────────────────────
-# npm install no re-compila si el paquete ya existe en node_modules.
-# npm rebuild fuerza la recompilacion del binario nativo (.node) para la
-# plataforma actual, independientemente de lo que haya antes.
-# Requiere: Python 3 (ya verificado arriba) + Xcode Command Line Tools.
-# Si falta: xcode-select --install
-echo -e "${CYAN}→ Compilando módulos nativos para Mac (better-sqlite3)...${NC}"
-npm rebuild better-sqlite3
-if [ $? -ne 0 ]; then
-  echo -e "${RED}✗ La compilación de better-sqlite3 falló.${NC}"
-  echo -e "${YELLOW}  Necesitas Xcode Command Line Tools: xcode-select --install${NC}"
+# ─── Compilar módulos nativos para Mac ───────────────────────────────────────
+# En Apple Silicon (M1-M5) los binarios pre-compilados de better-sqlite3 pueden
+# no coincidir con el ABI de Node.js instalado, causando errores ESMloader en
+# tiempo de ejecución. Se fuerza la compilación desde fuente para garantizar
+# compatibilidad exacta con la plataforma y versión de Node actual.
+echo -e "${CYAN}→ Compilando módulos nativos para Mac ${ARCH} (better-sqlite3)...${NC}"
+
+# Intentar primero la compilación estándar (usa binarios pre-construidos si existen)
+if ! npm rebuild better-sqlite3 2>/dev/null; then
+  echo -e "${YELLOW}⚠ Compilación estándar falló. Intentando desde fuente...${NC}"
+  npm rebuild better-sqlite3 --build-from-source
+fi
+
+# Verificar que el binario resultante carga correctamente en Node
+echo -e "${CYAN}→ Verificando que el módulo nativo funciona...${NC}"
+if ! node -e "require('better-sqlite3')" 2>/dev/null; then
+  echo -e "${YELLOW}⚠ Binario estándar no carga. Recompilando desde fuente...${NC}"
+  npm rebuild better-sqlite3 --build-from-source
+  if ! node -e "require('better-sqlite3')" 2>/dev/null; then
+    echo -e "${RED}✗ No se pudo compilar better-sqlite3.${NC}"
+    echo -e "${RED}  Asegúrate de tener Xcode CLI Tools actualizados: xcode-select --install${NC}"
+    echo -e "${RED}  Si el problema persiste, prueba: sudo xcode-select --reset${NC}"
+    exit 1
+  fi
+fi
+
+# Verificar arquitectura del binario generado
+NATIVE_BIN="node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+if [ -f "$NATIVE_BIN" ]; then
+  BIN_INFO=$(file "$NATIVE_BIN")
+  echo -e "${GREEN}✓ Módulo nativo: ${BIN_INFO##*: }${NC}"
+  # Advertir si la arquitectura no coincide (p.ej. x86_64 en un Mac arm64)
+  if [ "$ARCH" = "arm64" ] && ! echo "$BIN_INFO" | grep -q "arm64"; then
+    echo -e "${YELLOW}⚠ El binario no es arm64. Forzando recompilación para Apple Silicon...${NC}"
+    npm rebuild better-sqlite3 --build-from-source
+  fi
+else
+  echo -e "${RED}✗ Binario nativo no encontrado tras la compilación.${NC}"
   exit 1
 fi
-echo -e "${GREEN}✓ Módulos nativos compilados para Mac${NC}"
+
+echo -e "${GREEN}✓ Módulos nativos compilados correctamente para Mac ${ARCH}${NC}"
 
 # ─── Create data directory ────────────────────────────────────────────────────
 mkdir -p data
@@ -96,11 +138,8 @@ if [ -f "tts-service/tts_server.py" ]; then
 
     # Si existe un venv de Windows (no tiene bin/python), lo eliminamos
     # para crear uno Mac/Linux nativo.
-    # Guarda explícita: solo actúa si la variable apunta a una ruta con
-    # al menos dos componentes (evita rm -rf accidentales sobre / o "").
     if [ -d "$TTS_VENV" ] && [ ! -f "$TTS_VENV/bin/python" ]; then
       echo -e "${YELLOW}⚠ Detectado venv de otra plataforma (Windows). Recreando para Mac/Linux...${NC}"
-      # Verificar que la ruta no está vacía y contiene al menos un '/'
       if [[ -n "$TTS_VENV" && "$TTS_VENV" == */* ]]; then
         rm -rf -- "$TTS_VENV"
       fi
@@ -128,9 +167,6 @@ echo -e "  ${CYAN}./dev.sh${NC}"
 echo ""
 echo -e "  ${BOLD}Compilar para produccion:${NC}"
 echo -e "  ${CYAN}npm run build && npm start${NC}"
-echo ""
-echo -e "  ${BOLD}O usar Docker:${NC}"
-echo -e "  ${CYAN}docker-compose up -d${NC}"
 echo ""
 echo -e "  La app estara disponible en: ${BOLD}http://localhost:5173${NC} (dev)"
 echo ""
