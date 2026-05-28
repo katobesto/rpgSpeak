@@ -2,6 +2,9 @@
 # Uso: .\install.ps1
 
 $root = $PSScriptRoot
+# Ejecutar siempre desde el directorio del script para que todas las rutas
+# relativas posteriores sean correctas, independientemente del CWD inicial.
+Set-Location $root
 
 function Write-Step($msg) { Write-Host "-> $msg" -ForegroundColor Cyan }
 function Write-OK($msg)   { Write-Host "v  $msg" -ForegroundColor Green }
@@ -53,7 +56,6 @@ if (-not (Test-Path (Join-Path $root ".env"))) {
 
 # ── Instalar dependencias npm ─────────────────────────────────────────────────
 Write-Step "Instalando dependencias npm..."
-Set-Location $root
 npm install
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "npm install fallo. Revisa los errores de arriba."
@@ -97,7 +99,11 @@ if (Test-Path $ttsScript) {
         # para crear uno Windows nativo.
         if ((Test-Path $ttsVenv) -and -not (Test-Path (Join-Path $ttsVenv "Scripts\python.exe"))) {
             Write-Warn "Detectado venv de otra plataforma (Mac/Linux). Recreando para Windows..."
-            Remove-Item $ttsVenv -Recurse -Force
+            # Guarda: verificar que la ruta es absoluta y apunta dentro del proyecto
+            # antes de borrar, para evitar eliminaciones accidentales.
+            if ($ttsVenv.StartsWith($root) -and $ttsVenv.Length -gt $root.Length) {
+                Remove-Item $ttsVenv -Recurse -Force
+            }
         }
 
         if (-not (Test-Path $ttsVenv)) {

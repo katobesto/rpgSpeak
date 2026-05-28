@@ -22,9 +22,9 @@ interface SidebarProps {
 
 const NAV = [
   { icon: MessageSquare, label: 'Chats',      path: '/' },
-  { icon: Users,         label: 'Characters', path: '/characters' },
-  { icon: BookOpen,      label: 'Stories',    path: '/stories' },
-  { icon: Settings,      label: 'Settings',   path: '/settings' },
+  { icon: Users,         label: 'Personajes', path: '/characters' },
+  { icon: BookOpen,      label: 'Historias',  path: '/stories' },
+  { icon: Settings,      label: 'Ajustes',    path: '/settings' },
 ];
 
 export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
@@ -68,7 +68,7 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
   ) ?? false;
 
   const createConv = useMutation({
-    mutationFn: () => conversationsApi.create({ title: 'New Conversation' }),
+    mutationFn: () => conversationsApi.create({ title: 'Nueva conversación' }),
     onSuccess: (conv) => {
       qc.invalidateQueries({ queryKey: ['conversations'] });
       setActiveConversation(conv);
@@ -138,11 +138,11 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
       {!collapsed && location.pathname === '/' && (
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
           <div className="flex items-center justify-between px-3 py-2">
-            <span className="text-xs font-medium text-text-muted uppercase tracking-wider">Conversations</span>
+            <span className="text-xs font-medium text-text-muted uppercase tracking-wider">Conversaciones</span>
             <button
               onClick={() => createConv.mutate()}
               className="p-1 rounded hover:bg-white/8 text-text-muted hover:text-accent transition-colors"
-              title="New conversation"
+              title="Nueva conversación"
             >
               <Plus size={14} />
             </button>
@@ -168,9 +168,9 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
             ))}
             {conversations.length === 0 && (
               <div className="py-8 text-center text-xs text-text-muted">
-                No conversations yet.
+                Aún no hay conversaciones.
                 <br />
-                Click + to start one.
+                Pulsa + para empezar.
               </div>
             )}
           </div>

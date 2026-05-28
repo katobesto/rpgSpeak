@@ -32,5 +32,7 @@ logs/
 tts-service/venv/
 
 # ── Claude Code local files ───────────────────────────────────────────────────
+# /memory/ (barra inicial) solo ignora el directorio memory/ en la raíz del
+# proyecto, sin afectar a server/src/core/memory/ ni a ningún subdirectorio.
 .claude/settings.local.json
-memory/
+/memory/

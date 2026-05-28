@@ -4,6 +4,11 @@
 # simplemente re-ejecuta el instalador de la plataforma destino.
 set -euo pipefail
 
+# Siempre ejecutar desde el directorio donde está este script,
+# independientemente de desde dónde se llame.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
 BOLD='\033[1m'
 GREEN='\033[0;32m'
 CYAN='\033[0;36m'
@@ -91,9 +96,14 @@ if [ -f "tts-service/tts_server.py" ]; then
 
     # Si existe un venv de Windows (no tiene bin/python), lo eliminamos
     # para crear uno Mac/Linux nativo.
+    # Guarda explícita: solo actúa si la variable apunta a una ruta con
+    # al menos dos componentes (evita rm -rf accidentales sobre / o "").
     if [ -d "$TTS_VENV" ] && [ ! -f "$TTS_VENV/bin/python" ]; then
       echo -e "${YELLOW}⚠ Detectado venv de otra plataforma (Windows). Recreando para Mac/Linux...${NC}"
-      rm -rf "$TTS_VENV"
+      # Verificar que la ruta no está vacía y contiene al menos un '/'
+      if [[ -n "$TTS_VENV" && "$TTS_VENV" == */* ]]; then
+        rm -rf -- "$TTS_VENV"
+      fi
     fi
 
     if [ ! -d "$TTS_VENV" ]; then
