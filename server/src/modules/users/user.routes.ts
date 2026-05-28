@@ -14,6 +14,7 @@ const createSchema = z.object({
 });
 
 const updateSchema = z.object({
+  username:    z.string().min(2).max(40).regex(/^[a-zA-Z0-9_.-]+$/, 'Solo letras, números y _ . -').optional(),
   password:    z.string().min(4).max(100).optional(),
   displayName: z.string().min(1).max(80).optional(),
   role:        z.enum(['admin', 'user']).optional(),
@@ -56,10 +57,23 @@ export const userRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // PATCH /api/users/:id
-  app.patch('/:id', async (req) => {
+  app.patch('/:id', async (req, reply) => {
     const { id } = req.params as { id: string };
     const result = updateSchema.safeParse(req.body);
     if (!result.success) throw new ValidationError(result.error.issues[0].message);
+
+    // Prevent username collision
+    if (result.data.username) {
+      const existing = repo.findByUsername(result.data.username);
+      if (existing && existing.id !== id) {
+        return reply.status(409).send({
+          success: false,
+          error: 'USERNAME_TAKEN',
+          message: 'Ese nombre de usuario ya está en uso',
+          statusCode: 409,
+        });
+      }
+    }
 
     // Prevent removing the last admin
     if (result.data.role === 'user') {

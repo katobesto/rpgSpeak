@@ -40,7 +40,7 @@ export type CreateUserDto = {
   role: UserRole;
 };
 
-export type UpdateUserDto = Partial<Omit<CreateUserDto, 'username'>>;
+export type UpdateUserDto = Partial<CreateUserDto>;
 
 // ─── Core Domain Types ────────────────────────────────────────────────────────
 

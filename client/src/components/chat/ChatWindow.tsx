@@ -23,9 +23,12 @@ import {
   X,
   Sword,
   Search,
+  Clock,
+  MessagesSquare,
+  ChevronRight,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar.tsx';
-import type { Character, Story } from '@rpgspeak/shared';
+import type { Character, Story, Conversation } from '@rpgspeak/shared';
 
 export function ChatWindow() {
   const {
@@ -125,6 +128,11 @@ export function ChatWindow() {
     queryFn: () => storiesApi.list(),
   });
 
+  const { data: allConversations = [] } = useQuery({
+    queryKey: ['conversations'],
+    queryFn: () => conversationsApi.list(),
+  });
+
   const charIds = activeConversation?.characters.map((c) => c.characterId) ?? [];
   const characters: Character[] = charIds.length > 0
     ? allCharacters.filter((c) => charIds.includes(c.id))
@@ -185,10 +193,13 @@ export function ChatWindow() {
   if (!activeConversation) {
     return (
       <EmptyState
+        conversations={allConversations}
+        onSelectConversation={(c) => setActiveConversation(c)}
         characters={allCharacters}
         onStartChat={(c) => startChat.mutate(c)}
         stories={allStories}
         onStartAdventure={(s) => startAdventure.mutate(s)}
+        allCharacters={allCharacters}
       />
     );
   }
@@ -451,100 +462,338 @@ function ContextAnchorModal({ onClose, onSubmit }: {
   );
 }
 
-// ─── Empty state ──────────────────────────────────────────────────────────────
+// ─── Conversation Summary Popup ───────────────────────────────────────────────
+
+function ConvSummaryPopup({
+  conv,
+  onClose,
+  onOpen,
+}: {
+  conv: Conversation;
+  onClose: () => void;
+  onOpen: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.65)' }}
+      onClick={onClose}
+    >
+      <div
+        className="w-full max-w-lg rounded-2xl border border-border shadow-2xl flex flex-col animate-fade-in"
+        style={{ background: 'var(--surface-1)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+          <div className="flex items-center gap-2 min-w-0">
+            <BookOpen size={15} className="text-accent flex-shrink-0" />
+            <p className="font-semibold text-sm truncate">{conv.title}</p>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors flex-shrink-0 ml-2"
+          >
+            <X size={15} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="px-5 py-4 overflow-y-auto max-h-[60vh]">
+          <p className="text-[13px] text-text-secondary leading-relaxed whitespace-pre-wrap">
+            {conv.summary}
+          </p>
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-2 px-5 py-4 border-t border-border">
+          <button
+            onClick={onClose}
+            className="px-3 py-1.5 text-sm text-text-muted hover:text-text-primary transition-colors"
+          >
+            Cerrar
+          </button>
+          <button
+            onClick={onOpen}
+            className="flex items-center gap-1.5 px-4 py-1.5 text-sm rounded-lg font-medium text-white transition-colors"
+            style={{ background: 'var(--accent)' }}
+          >
+            <MessagesSquare size={13} />
+            Abrir conversación
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function relativeTime(iso: string): string {
+  const diff = Date.now() - new Date(iso).getTime();
+  const mins  = Math.floor(diff / 60_000);
+  const hours = Math.floor(diff / 3_600_000);
+  const days  = Math.floor(diff / 86_400_000);
+  if (mins  <  1) return 'ahora mismo';
+  if (mins  < 60) return `hace ${mins} min`;
+  if (hours < 24) return `hace ${hours}h`;
+  if (days  <  7) return `hace ${days}d`;
+  return new Date(iso).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
+}
+
+function SectionHeader({ icon, title, count }: { icon: React.ReactNode; title: string; count?: number }) {
+  return (
+    <div className="flex items-center gap-2.5 mb-4">
+      <div className="text-accent">{icon}</div>
+      <h2 className="text-sm font-semibold text-text-primary tracking-tight">{title}</h2>
+      {count !== undefined && (
+        <span className="ml-1 text-[11px] text-text-muted bg-surface-2 border border-border px-1.5 py-0.5 rounded-full tabular-nums">
+          {count}
+        </span>
+      )}
+      <div className="flex-1 h-px ml-2" style={{ background: 'var(--border)' }} />
+    </div>
+  );
+}
+
+// ─── Empty state / Home screen ────────────────────────────────────────────────
 
 function EmptyState({
+  conversations,
+  onSelectConversation,
   characters,
   onStartChat,
   stories,
   onStartAdventure,
+  allCharacters,
 }: {
+  conversations: Conversation[];
+  onSelectConversation: (c: Conversation) => void;
   characters: Character[];
   onStartChat: (c: Character) => void;
   stories: Story[];
   onStartAdventure: (s: Story) => void;
+  allCharacters: Character[];
 }) {
+  const [summaryPopupConv, setSummaryPopupConv] = useState<Conversation | null>(null);
+
+  // Sort conversations by updatedAt desc (most recent first)
+  const sortedConvs = [...conversations]
+    .filter((c) => !c.isArchived)
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+
   return (
-    <div className="flex-1 overflow-y-auto flex flex-col items-center gap-8 p-8">
-      <div className="text-center space-y-2 mt-4">
-        <div className="flex items-center justify-center gap-2 mb-3">
-          <Zap size={22} className="text-accent" />
-          <h2 className="text-xl font-bold">rpgSpeak</h2>
-        </div>
-        <p className="text-text-muted text-sm max-w-xs">
-          Elige un personaje para conversar o una historia para iniciar una aventura.
-        </p>
+    <div className="flex-1 overflow-y-auto">
+      <div className="max-w-4xl mx-auto px-6 py-8 space-y-10">
+
+        {/* ── 1. Historias comenzadas ──────────────────────────────────────── */}
+        <section>
+          <SectionHeader
+            icon={<MessagesSquare size={16} />}
+            title="Historias comenzadas"
+            count={sortedConvs.length}
+          />
+
+          {sortedConvs.length === 0 ? (
+            <div className="rounded-xl border border-dashed border-border px-6 py-10 text-center space-y-2">
+              <MessagesSquare size={28} className="text-text-muted mx-auto mb-1 opacity-40" />
+              <p className="text-sm text-text-muted">Aún no has comenzado ninguna historia.</p>
+              <p className="text-xs text-text-muted opacity-70">
+                Elige un personaje o una historia de las secciones de abajo para empezar.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {sortedConvs.map((conv) => {
+                const convChars = conv.characters
+                  .map((l) => allCharacters.find((c) => c.id === l.characterId))
+                  .filter(Boolean) as Character[];
+                const hasStory = conv.stories.length > 0;
+
+                return (
+                  <div
+                    key={conv.id}
+                    onClick={() => onSelectConversation(conv)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelectConversation(conv); }}
+                    className="flex flex-col gap-3 p-4 rounded-xl border border-border hover:border-accent/50 hover:bg-accent/5 transition-all text-left group cursor-pointer"
+                    style={{ background: 'var(--surface-1)' }}
+                  >
+                    {/* Avatars + mode badge */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center">
+                        {convChars.length > 0 ? (
+                          <div className="flex -space-x-2">
+                            {convChars.slice(0, 3).map((c, i) => (
+                              <div key={c.id} style={{ zIndex: 3 - i }}>
+                                <Avatar name={c.name} src={c.avatar} size="sm" />
+                              </div>
+                            ))}
+                            {convChars.length > 3 && (
+                              <div className="w-7 h-7 rounded-full bg-surface-2 border-2 border-surface-1 flex items-center justify-center text-[9px] text-text-muted font-medium" style={{ zIndex: 0 }}>
+                                +{convChars.length - 3}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="w-7 h-7 rounded-full bg-surface-2 flex items-center justify-center">
+                            {hasStory
+                              ? <Sword size={12} className="text-accent" />
+                              : <BookOpen size={12} className="text-text-muted" />
+                            }
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1 text-[10px] text-text-muted">
+                        <Clock size={10} />
+                        <span>{relativeTime(conv.updatedAt)}</span>
+                      </div>
+                    </div>
+
+                    {/* Title */}
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-sm group-hover:text-accent transition-colors line-clamp-2 leading-snug">
+                        {conv.title || 'Sin título'}
+                      </p>
+                      {convChars.length > 0 && (
+                        <p className="text-[11px] text-text-muted mt-0.5 truncate">
+                          {convChars.map((c) => c.name).join(', ')}
+                        </p>
+                      )}
+                    </div>
+
+                    {/* Summary snippet */}
+                    {conv.summary && (
+                      <div className="mt-0.5">
+                        <p className="text-[11px] text-text-muted leading-relaxed line-clamp-2">
+                          {conv.summary}
+                        </p>
+                        {conv.summary.length > 150 && (
+                          <button
+                            onClick={(e) => { e.stopPropagation(); setSummaryPopupConv(conv); }}
+                            className="mt-0.5 text-[10px] text-accent/70 hover:text-accent font-medium transition-colors"
+                          >
+                            Ver más
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Footer */}
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] text-text-muted tabular-nums">
+                        {conv.messageCount} {conv.messageCount === 1 ? 'mensaje' : 'mensajes'}
+                      </span>
+                      <ChevronRight size={13} className="text-text-muted group-hover:text-accent transition-colors flex-shrink-0" />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+
+        {/* ── 2. Personajes para comenzar una charla ──────────────────────── */}
+        {characters.length > 0 && (
+          <section>
+            <SectionHeader
+              icon={<Users size={16} />}
+              title="Personajes para comenzar una charla"
+              count={characters.length}
+            />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {characters.map((char) => (
+                <button
+                  key={char.id}
+                  onClick={() => onStartChat(char)}
+                  className="flex items-center gap-3 p-3.5 rounded-xl border border-border hover:border-accent/50 hover:bg-accent/5 transition-all text-left group"
+                  style={{ background: 'var(--surface-1)' }}
+                >
+                  <Avatar name={char.name} src={char.avatar} size="md" expandable />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm group-hover:text-accent transition-colors truncate">
+                      {char.name}
+                    </p>
+                    {char.description && (
+                      <p className="text-xs text-text-muted line-clamp-2 leading-relaxed mt-0.5">
+                        {char.description.slice(0, 80)}{char.description.length > 80 ? '…' : ''}
+                      </p>
+                    )}
+                  </div>
+                  <MessageSquarePlus size={14} className="text-text-muted group-hover:text-accent flex-shrink-0 transition-colors" />
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* ── 3. Historias para empezar algo nuevo ────────────────────────── */}
+        {stories.length > 0 && (
+          <section>
+            <SectionHeader
+              icon={<BookOpen size={16} />}
+              title="Historias para empezar algo nuevo"
+              count={stories.length}
+            />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {stories.map((story) => (
+                <button
+                  key={story.id}
+                  onClick={() => onStartAdventure(story)}
+                  className="flex items-center gap-3 p-3.5 rounded-xl border border-border hover:border-accent/50 hover:bg-accent/5 transition-all text-left group"
+                  style={{ background: 'var(--surface-1)' }}
+                >
+                  <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center flex-shrink-0">
+                    {story.adventureMode
+                      ? <Sword size={16} className="text-accent" />
+                      : <BookOpen size={16} className="text-accent" />
+                    }
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm group-hover:text-accent transition-colors truncate">
+                      {story.name}
+                    </p>
+                    {story.description && (
+                      <p className="text-xs text-text-muted line-clamp-2 leading-relaxed mt-0.5">
+                        {story.description.slice(0, 80)}{story.description.length > 80 ? '…' : ''}
+                      </p>
+                    )}
+                    {story.adventureMode && (
+                      <span className="inline-flex items-center gap-1 mt-1 text-[10px] text-accent/80">
+                        <Sword size={9} /> Modo Aventura
+                      </span>
+                    )}
+                  </div>
+                  <ChevronRight size={14} className="text-text-muted group-hover:text-accent flex-shrink-0 transition-colors" />
+                </button>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Estado completamente vacío */}
+        {characters.length === 0 && stories.length === 0 && sortedConvs.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
+            <Zap size={36} className="text-accent opacity-60" />
+            <div>
+              <h2 className="text-lg font-bold mb-1">Bienvenido a rpgSpeak</h2>
+              <p className="text-sm text-text-muted max-w-xs">
+                Crea personajes y mundos en las páginas de Personajes e Historias para comenzar a jugar.
+              </p>
+            </div>
+          </div>
+        )}
+
       </div>
 
-      {/* Personajes */}
-      {characters.length > 0 && (
-        <div className="w-full max-w-lg space-y-3">
-          <p className="text-xs font-medium text-text-muted uppercase tracking-wider text-center">
-            Personajes disponibles
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {characters.slice(0, 6).map((char) => (
-              <button
-                key={char.id}
-                onClick={() => onStartChat(char)}
-                className="flex items-center gap-3 p-3 rounded-xl border border-border hover:border-accent/50 hover:bg-accent-muted transition-all text-left group"
-                style={{ background: 'var(--surface-1)' }}
-              >
-                <Avatar name={char.name} src={char.avatar} size="md" expandable />
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm group-hover:text-accent transition-colors truncate">
-                    {char.name}
-                  </p>
-                  <p className="text-xs text-text-muted truncate leading-relaxed">
-                    {char.description.slice(0, 60)}
-                    {char.description.length > 60 ? '…' : ''}
-                  </p>
-                </div>
-                <MessageSquarePlus size={14} className="text-text-muted group-hover:text-accent flex-shrink-0 transition-colors" />
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Historias */}
-      {stories.length > 0 && (
-        <div className="w-full max-w-lg space-y-3">
-          <div className="flex items-center justify-center gap-2">
-            <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
-            <p className="text-xs font-medium text-text-muted uppercase tracking-wider px-3">
-              Historias
-            </p>
-            <div className="flex-1 h-px" style={{ background: 'var(--border)' }} />
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {stories.slice(0, 6).map((story) => (
-              <button
-                key={story.id}
-                onClick={() => onStartAdventure(story)}
-                className="flex items-center gap-3 p-3 rounded-xl border border-border hover:border-accent/50 hover:bg-accent-muted transition-all text-left group"
-                style={{ background: 'var(--surface-1)' }}
-              >
-                <div className="w-9 h-9 rounded-lg bg-accent-muted flex items-center justify-center flex-shrink-0">
-                  {story.adventureMode
-                    ? <Sword size={15} className="text-accent group-hover:scale-110 transition-transform" />
-                    : <BookOpen size={15} className="text-accent group-hover:scale-110 transition-transform" />
-                  }
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm group-hover:text-accent transition-colors truncate">
-                    {story.name}
-                  </p>
-                  <p className="text-xs text-text-muted truncate leading-relaxed">
-                    {story.description.slice(0, 55)}
-                    {story.description.length > 55 ? '…' : ''}
-                  </p>
-                </div>
-                <Sword size={14} className="text-text-muted group-hover:text-accent flex-shrink-0 transition-colors" />
-              </button>
-            ))}
-          </div>
-        </div>
+      {/* Summary popup */}
+      {summaryPopupConv && (
+        <ConvSummaryPopup
+          conv={summaryPopupConv}
+          onClose={() => setSummaryPopupConv(null)}
+          onOpen={() => { onSelectConversation(summaryPopupConv); setSummaryPopupConv(null); }}
+        />
       )}
     </div>
   );

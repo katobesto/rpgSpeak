@@ -12,7 +12,7 @@ import { useAuthStore } from './stores/auth.store.ts';
 
 export default function App() {
   const { theme, initForUser } = useUiStore();
-  const { isAuthenticated, user } = useAuthStore();
+  const { isAuthenticated, user, clearAuth } = useAuthStore();
 
   // Load per-user appearance settings (localStorage) on login / page refresh
   useEffect(() => {
@@ -20,6 +20,14 @@ export default function App() {
       initForUser(user.id);
     }
   }, [isAuthenticated, user?.id]);
+
+  // Global 401 interceptor — fired by client.ts when the server rejects the token.
+  // Clears Zustand auth state so the component tree immediately renders <LoginPage>.
+  useEffect(() => {
+    const handle = () => clearAuth();
+    window.addEventListener('rpgspeak:unauthorized', handle);
+    return () => window.removeEventListener('rpgspeak:unauthorized', handle);
+  }, [clearAuth]);
 
   // Apply persisted theme class on initial render (before initForUser fires)
   useEffect(() => {

@@ -286,7 +286,7 @@ export const contextRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // PATCH /context/:id — edit title / description / importance
-  app.patch<{ Params: { id: string } }>('/:id', async (req, reply) => {
+  app.patch<{ Params: { id: string } }>('/:id', async (req, _reply) => {
     const schema = z.object({
       title:       z.string().min(1).max(200).optional(),
       description: z.string().max(2000).optional(),

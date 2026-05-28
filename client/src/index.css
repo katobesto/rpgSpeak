@@ -139,6 +139,19 @@ body {
 .typing-dot:nth-child(2) { animation-delay: 0.2s; }
 .typing-dot:nth-child(3) { animation-delay: 0.4s; }
 
+/* ─── Prevent iOS Safari auto-zoom on input focus ───────────────────────────── */
+/*
+  iOS Safari zooms in when the user taps an input whose font-size is < 16px.
+  This rule forces 16px on all touch devices, overriding Tailwind's text-sm/text-xs.
+  The media query (hover: none) and (pointer: coarse) targets touch screens only,
+  leaving desktop layout untouched.
+*/
+@media (hover: none) and (pointer: coarse) {
+  input, textarea, select {
+    font-size: 16px !important;
+  }
+}
+
 /* ─── Dynamic viewport height (shrinks with virtual keyboard on mobile) ─────── */
 /*
   100vh is fixed on Android Chrome — it doesn't shrink when the soft keyboard

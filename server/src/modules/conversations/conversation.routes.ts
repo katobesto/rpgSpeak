@@ -1,10 +1,12 @@
 import type { FastifyPluginAsync } from 'fastify';
 import { z } from 'zod';
+import { sql } from 'drizzle-orm';
 import { ConversationService } from './conversation.service.js';
 import { ConversationRepository } from './conversation.repository.js';
 import { MessageRepository } from '../messages/message.repository.js';
 import { createConversationSchema, updateConversationSchema } from './conversation.schema.js';
 import { ValidationError, NotFoundError } from '../../shared/errors.js';
+import { getDb } from '../../db/index.js';
 
 const service = new ConversationService();
 const convRepo = new ConversationRepository();
@@ -60,45 +62,63 @@ export const conversationRoutes: FastifyPluginAsync = async (app) => {
   );
 
   // GET /api/conversations/stats — global + per-conversation token stats
+  // Query params: filterUserId (admin only) — restrict results to a single user
   app.get('/stats', async (req, reply) => {
     const { userId, role } = (req as any).authUser ?? {};
     const isAdmin = role === 'admin';
+    const { filterUserId } = req.query as { filterUserId?: string };
 
-    // All conversations this user can see
-    const conversations = service.list(true, userId, isAdmin); // include archived
+    // Single SQL query: conversations + user display name, filtered at DB level
+    // Admin sees all (optionally filtered); non-admin sees only their own
+    const db = getDb();
+    type RawConvRow = {
+      id: string; title: string; token_count: number; message_count: number;
+      updated_at: string; is_archived: number; user_id: string | null; display_name: string | null;
+    };
 
-    // Build per-conversation rows; enrich with cached token sum from messages
-    const rows = conversations.map((conv) => {
-      const messages = msgRepo.findByConversation(conv.id);
-      const assistantMsgs = messages.filter((m) => m.role === 'assistant');
+    const COLS = sql`c.id, c.title, c.token_count, c.message_count, c.updated_at, c.is_archived, c.user_id, u.display_name`;
+    const FROM  = sql`FROM conversations c LEFT JOIN users u ON c.user_id = u.id`;
 
+    let rawRows: RawConvRow[];
+    if (isAdmin && filterUserId) {
+      rawRows = db.all<RawConvRow>(sql`SELECT ${COLS} ${FROM} WHERE c.user_id = ${filterUserId} ORDER BY c.updated_at DESC`);
+    } else if (isAdmin) {
+      rawRows = db.all<RawConvRow>(sql`SELECT ${COLS} ${FROM} ORDER BY c.updated_at DESC`);
+    } else {
+      rawRows = db.all<RawConvRow>(sql`SELECT ${COLS} ${FROM} WHERE c.user_id = ${userId ?? ''} ORDER BY c.updated_at DESC`);
+    }
+
+    // Enrich with cached token sum from messages metadata
+    const convRows = rawRows.map((row) => {
+      const messages = msgRepo.findByConversation(row.id);
       let cachedTokens = 0;
-      for (const m of assistantMsgs) {
+      for (const m of messages) {
+        if (m.role !== 'assistant') continue;
         const meta = m.metadata as Record<string, unknown> | null;
         if (meta?.cachedTokens && typeof meta.cachedTokens === 'number') {
           cachedTokens += meta.cachedTokens;
         }
       }
-
       return {
-        id:           conv.id,
-        title:        conv.title,
-        tokens:       conv.tokenCount,
-        messages:     conv.messageCount,
+        id:           row.id,
+        title:        row.title,
+        tokens:       row.token_count,
+        messages:     row.message_count,
         cachedTokens,
-        updatedAt:    conv.updatedAt,
-        isArchived:   conv.isArchived ?? false,
+        updatedAt:    row.updated_at,
+        isArchived:   Boolean(row.is_archived),
+        userName:     row.display_name ?? null,
       };
     });
 
-    // Global totals
+    // Global totals (reflect active filter)
     const global = {
-      totalTokens:  rows.reduce((s, r) => s + r.tokens,       0),
-      totalMessages: rows.reduce((s, r) => s + r.messages,    0),
-      totalConversations: rows.length,
-      cachedTokens: rows.reduce((s, r) => s + r.cachedTokens, 0),
+      totalTokens:        convRows.reduce((s, r) => s + r.tokens,       0),
+      totalMessages:      convRows.reduce((s, r) => s + r.messages,     0),
+      totalConversations: convRows.length,
+      cachedTokens:       convRows.reduce((s, r) => s + r.cachedTokens, 0),
     };
 
-    return reply.send({ success: true, data: { global, conversations: rows } });
+    return reply.send({ success: true, data: { global, conversations: convRows } });
   });
 };

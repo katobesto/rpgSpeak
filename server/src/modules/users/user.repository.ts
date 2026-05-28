@@ -66,6 +66,9 @@ export class UserRepository {
   update(id: string, dto: UpdateUserDto): User | null {
     const ts = now();
 
+    if (dto.username !== undefined) {
+      this.db.run(sql`UPDATE users SET username = ${dto.username}, updated_at = ${ts} WHERE id = ${id}`);
+    }
     if (dto.password !== undefined) {
       const hash = hashSync(dto.password, 10);
       this.db.run(sql`UPDATE users SET password_hash = ${hash}, updated_at = ${ts} WHERE id = ${id}`);

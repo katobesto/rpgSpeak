@@ -9,7 +9,7 @@ import { charactersApi } from '../../api/characters.ts';
 import { storiesApi } from '../../api/stories.ts';
 import { Button } from '../ui/Button.tsx';
 import { Input, Textarea } from '../ui/Input.tsx';
-import { Plus, Trash2, RefreshCw, Check, X, Volume2, Wifi, WifiOff, Download, CheckCircle2, Play, Square, Loader, LogOut, Users, Shield, UserCircle, RotateCcw, AlertCircle, BarChart2, Zap, Camera, Sparkles, Wand2, FlaskConical, Upload, Link2, BookOpen } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, Check, X, Volume2, Wifi, WifiOff, Download, CheckCircle2, Play, Square, Loader, LogOut, Users, Shield, UserCircle, RotateCcw, AlertCircle, BarChart2, Zap, Camera, Sparkles, Wand2, FlaskConical, Upload, Link2, BookOpen, Pencil } from 'lucide-react';
 import type { Provider, CreateProviderDto, AppSettings, TtsSettings, TtsVoice } from '@rpgspeak/shared';
 import { useUiStore } from '../../stores/ui.store.ts';
 import { useAuthStore } from '../../stores/auth.store.ts';
@@ -1314,7 +1314,6 @@ const PROVIDER_TYPES = [
 
 function ProvidersSection({ providers }: { providers: Provider[] }) {
   const [adding, setAdding] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
   const qc = useQueryClient();
 
   const DEFAULT_NEW: CreateProviderDto = {
@@ -1797,6 +1796,8 @@ function InspirationModal({
 // Clase base para todos los inputs/selects de esta sección — igual que el componente Input oficial
 const fieldCls = 'w-full rounded-lg px-3 py-1.5 text-sm bg-surface-2 border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent transition-colors';
 
+type UpdateUserPayload = { username?: string; password?: string; displayName?: string; role?: 'admin' | 'user' };
+
 function UsersSection() {
   const qc = useQueryClient();
   const currentUser = useAuthStore((s) => s.user);
@@ -1810,7 +1811,8 @@ function UsersSection() {
   const [form, setForm] = useState({ username: '', password: '', displayName: '', role: 'user' as 'admin' | 'user' });
   const [formError, setFormError] = useState('');
   const [editId, setEditId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState({ password: '', displayName: '', role: 'user' as 'admin' | 'user' });
+  const [editForm, setEditForm] = useState({ username: '', password: '', displayName: '', role: 'user' as 'admin' | 'user' });
+  const [editError, setEditError] = useState('');
   const [assignId, setAssignId] = useState<string | null>(null);
 
   const createMut = useMutation({
@@ -1820,9 +1822,10 @@ function UsersSection() {
   });
 
   const updateMut = useMutation({
-    mutationFn: ({ id, data }: { id: string; data: { password?: string; displayName?: string; role?: 'admin' | 'user' } }) =>
+    mutationFn: ({ id, data }: { id: string; data: UpdateUserPayload }) =>
       usersApi.update(id, data),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); setEditId(null); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['users'] }); setEditId(null); setEditError(''); },
+    onError: (e: Error) => setEditError(e.message),
   });
 
   const deleteMut = useMutation({
@@ -1895,15 +1898,34 @@ function UsersSection() {
             <div key={u.id} className="border border-border rounded-xl p-4" style={{ background: 'var(--surface-1)' }}>
               {editId === u.id ? (
                 <div className="space-y-3">
+                  {editError && (
+                    <p className="text-xs text-red-400 bg-red-500/8 border border-red-500/20 rounded-lg px-3 py-2">{editError}</p>
+                  )}
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
                       <label className="text-xs text-text-muted">Nombre visible</label>
                       <input value={editForm.displayName} onChange={e => setEditForm(f => ({ ...f, displayName: e.target.value }))} className={fieldCls} />
                     </div>
                     <div className="space-y-1">
-                      <label className="text-xs text-text-muted">Nueva contraseña (opcional)</label>
-                      <input type="password" value={editForm.password} onChange={e => setEditForm(f => ({ ...f, password: e.target.value }))}
-                        placeholder="Sin cambios" className={fieldCls} />
+                      <label className="text-xs text-text-muted">Usuario (login)</label>
+                      <input
+                        value={editForm.username}
+                        onChange={e => setEditForm(f => ({ ...f, username: e.target.value }))}
+                        className={fieldCls}
+                        placeholder="Sin cambios"
+                        autoComplete="off"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-xs text-text-muted">Nueva contraseña</label>
+                      <input
+                        type="password"
+                        value={editForm.password}
+                        onChange={e => setEditForm(f => ({ ...f, password: e.target.value }))}
+                        placeholder="Sin cambios"
+                        className={fieldCls}
+                        autoComplete="new-password"
+                      />
                     </div>
                     {u.id !== 'user-admin' && (
                       <div className="space-y-1">
@@ -1917,14 +1939,18 @@ function UsersSection() {
                   </div>
                   <div className="flex gap-2">
                     <Button size="sm" onClick={() => {
-                      const data: { password?: string; displayName?: string; role?: 'admin' | 'user' } = { displayName: editForm.displayName };
+                      setEditError('');
+                      const data: UpdateUserPayload = {};
+                      if (editForm.displayName.trim()) data.displayName = editForm.displayName.trim();
+                      if (editForm.username.trim()) data.username = editForm.username.trim();
                       if (editForm.password) data.password = editForm.password;
                       if (u.id !== 'user-admin') data.role = editForm.role;
+                      if (Object.keys(data).length === 0) { setEditId(null); return; }
                       updateMut.mutate({ id: u.id, data });
-                    }} disabled={updateMut.isPending}>
+                    }} disabled={updateMut.isPending || !editForm.displayName.trim()}>
                       {updateMut.isPending ? 'Guardando…' : 'Guardar'}
                     </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setEditId(null)}>Cancelar</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setEditId(null); setEditError(''); }}>Cancelar</Button>
                   </div>
                 </div>
               ) : (
@@ -1967,11 +1993,11 @@ function UsersSection() {
                       </button>
                     )}
                     <button
-                      onClick={() => { setEditId(u.id); setEditForm({ password: '', displayName: u.displayName, role: u.role }); setAssignId(null); }}
+                      onClick={() => { setEditId(u.id); setEditForm({ username: '', password: '', displayName: u.displayName, role: u.role }); setEditError(''); setAssignId(null); }}
                       className="p-1.5 rounded text-text-muted hover:text-text-primary hover:bg-white/5 transition-colors"
-                      title="Editar"
+                      title="Editar usuario"
                     >
-                      <RefreshCw size={13} />
+                      <Pencil size={13} />
                     </button>
                     {u.id !== 'user-admin' && u.id !== currentUser?.id && (
                       <button
@@ -2187,7 +2213,6 @@ function ImageProviderSection({
   update: (k: keyof AppSettings, v: unknown) => void;
 }) {
   const selected = (draft.imageProvider ?? 'comfyui') as ImageProviderType;
-  const providerInfo = IMAGE_PROVIDERS.find((p) => p.value === selected);
 
   return (
     <div className="space-y-4">
@@ -2334,11 +2359,27 @@ function ImageProviderSection({
 
 // ─── Stats Section ─────────────────────────────────────────────────────────────
 function StatsSection() {
+  const { isAdmin } = useAuthStore();
+  const [filterUserId, setFilterUserId] = useState<string>('');
+
+  // User list for the filter dropdown (admin only)
+  const { data: userList = [] } = useQuery({
+    queryKey: ['users'],
+    queryFn: usersApi.list,
+    enabled: isAdmin,
+  });
+
   const { data, isLoading } = useQuery({
-    queryKey: ['conversation-stats'],
-    queryFn: conversationsApi.stats,
+    queryKey: ['conversation-stats', filterUserId],
+    queryFn: () => conversationsApi.stats(filterUserId || undefined),
     staleTime: 30_000,
   });
+
+  const fmt = (n: number) => {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
+    return n.toLocaleString('es-ES');
+  };
 
   if (isLoading) {
     return (
@@ -2352,25 +2393,51 @@ function StatsSection() {
 
   const { global: g, conversations } = data;
   const cacheRatio = g.totalTokens > 0 ? Math.round(g.cachedTokens / g.totalTokens * 100) : 0;
-
-  const fmt = (n: number) => {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(2)}M`;
-    if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-    return n.toLocaleString('es-ES');
-  };
+  const selectedUser = userList.find((u) => u.id === filterUserId);
 
   // Sort by tokens desc
   const sorted = [...conversations].sort((a, b) => b.tokens - a.tokens);
 
+  // Show user column when admin and not filtering (multiple users visible)
+  const showUserCol = isAdmin && !filterUserId;
+
   return (
     <div className="space-y-6">
-      <h3 className="text-sm font-semibold text-text-primary">Estadísticas de uso</h3>
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-sm font-semibold text-text-primary">Estadísticas de uso</h3>
+
+        {/* User filter — admin only */}
+        {isAdmin && userList.length > 1 && (
+          <div className="flex items-center gap-2">
+            <Users size={13} className="text-text-muted flex-shrink-0" />
+            <select
+              value={filterUserId}
+              onChange={(e) => setFilterUserId(e.target.value)}
+              className="rounded-lg px-2.5 py-1.5 text-xs bg-surface-2 border border-border text-text-primary focus:outline-none focus:ring-1 focus:ring-accent transition-colors"
+            >
+              <option value="">Todos los usuarios</option>
+              {userList.map((u) => (
+                <option key={u.id} value={u.id}>{u.displayName} (@{u.username})</option>
+              ))}
+            </select>
+            {filterUserId && (
+              <button
+                onClick={() => setFilterUserId('')}
+                className="p-1 rounded text-text-muted hover:text-text-primary transition-colors"
+                title="Quitar filtro"
+              >
+                <X size={13} />
+              </button>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Global cards */}
       <div className="grid grid-cols-2 gap-3">
         <StatCard
           icon={<Zap size={16} />}
-          label="Tokens totales"
+          label={selectedUser ? `Tokens — ${selectedUser.displayName}` : 'Tokens totales'}
           value={fmt(g.totalTokens)}
           sub={g.cachedTokens > 0 ? `${fmt(g.cachedTokens)} en caché (${cacheRatio}%)` : undefined}
           accent={g.cachedTokens > 0}
@@ -2392,9 +2459,12 @@ function StatsSection() {
             <thead>
               <tr className="border-b border-border bg-surface-1/50">
                 <th className="text-left px-4 py-2.5 text-text-muted font-medium">Conversación</th>
+                {showUserCol && (
+                  <th className="text-left px-3 py-2.5 text-text-muted font-medium">Usuario</th>
+                )}
                 <th className="text-right px-3 py-2.5 text-text-muted font-medium">Tokens</th>
                 <th className="text-right px-3 py-2.5 text-text-muted font-medium">Caché</th>
-                <th className="text-right px-4 py-2.5 text-text-muted font-medium">Mensajes</th>
+                <th className="text-right px-4 py-2.5 text-text-muted font-medium">Msgs</th>
               </tr>
             </thead>
             <tbody>
@@ -2407,10 +2477,15 @@ function StatsSection() {
                     key={conv.id}
                     className={`border-b border-border/50 last:border-0 ${i % 2 === 0 ? '' : 'bg-surface-1/30'}`}
                   >
-                    <td className="px-4 py-2.5 text-text-primary truncate max-w-[180px]">
+                    <td className="px-4 py-2.5 text-text-primary max-w-[160px]">
                       <span className="truncate block">{conv.title || 'Sin título'}</span>
-                      {conv.isArchived && <span className="text-text-muted">(archivada)</span>}
+                      {conv.isArchived && <span className="text-[10px] text-text-muted">(archivada)</span>}
                     </td>
+                    {showUserCol && (
+                      <td className="px-3 py-2.5 text-text-muted max-w-[120px]">
+                        <span className="truncate block">{conv.userName ?? '—'}</span>
+                      </td>
+                    )}
                     <td className="px-3 py-2.5 text-right text-text-secondary tabular-nums">
                       {fmt(conv.tokens)}
                     </td>

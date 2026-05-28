@@ -114,7 +114,12 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
           return (
             <button
               key={path}
-              onClick={() => { navigate(path); if (isMobile && path !== '/') setMobileSidebarOpen(false); }}
+              onClick={() => {
+                navigate(path);
+                // Clicking the Chats nav item always goes to the home screen
+                if (path === '/') setActiveConversation(null);
+                if (isMobile) setMobileSidebarOpen(false);
+              }}
               className={`w-full flex items-center gap-3 px-2.5 py-2.5 rounded-lg text-sm transition-colors
                 ${active
                   ? 'bg-accent-muted text-accent'

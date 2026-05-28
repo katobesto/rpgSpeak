@@ -17,10 +17,10 @@ export const conversationsApi = {
     api.patch<Conversation>(`/conversations/${id}`, data),
   delete: (id: string) => api.delete(`/conversations/${id}`),
   summarize: (id: string) => api.post<Conversation>(`/conversations/${id}/summarize`, {}),
-  stats: () => api.get<{
+  stats: (filterUserId?: string) => api.get<{
     global: { totalTokens: number; totalMessages: number; totalConversations: number; cachedTokens: number };
-    conversations: Array<{ id: string; title: string; tokens: number; messages: number; cachedTokens: number; updatedAt: string; isArchived: boolean }>;
-  }>('/conversations/stats'),
+    conversations: Array<{ id: string; title: string; tokens: number; messages: number; cachedTokens: number; updatedAt: string; isArchived: boolean; userName: string | null }>;
+  }>(`/conversations/stats${filterUserId ? `?filterUserId=${encodeURIComponent(filterUserId)}` : ''}`),
   updateCharacterAffinity: (convId: string, charId: string, affinity: number) =>
     api.patch<{ affinity: number }>(`/conversations/${convId}/characters/${charId}/affinity`, { affinity }),
 };

@@ -12,6 +12,16 @@ export function getAuthHeader(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
+/** Called by the 401 interceptor below — clears stored credentials without
+ *  importing the Zustand store (avoids circular deps) and dispatches an event
+ *  so App.tsx can react and show the login screen immediately. */
+function handleUnauthorized(): void {
+  localStorage.removeItem('rpgspeak_token');
+  localStorage.removeItem('rpgspeak_user');
+  // Signal App-level listeners so the React tree re-evaluates isAuthenticated
+  window.dispatchEvent(new Event('rpgspeak:unauthorized'));
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   // For FormData let the browser set Content-Type (includes multipart boundary)
   const hasJsonBody = init?.body !== undefined && !(init.body instanceof FormData);
@@ -29,6 +39,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const json = await res.json().catch(() => ({ success: false, message: res.statusText }));
 
   if (!res.ok) {
+    if (res.status === 401) {
+      // Token missing, expired, or signed with a different secret (e.g. fresh DB).
+      // Clear credentials so the app falls back to the login screen on next render.
+      handleUnauthorized();
+    }
     throw new ApiError(res.status, json.message ?? 'Request failed');
   }
 
@@ -92,6 +107,7 @@ export async function streamGenerate(
       });
 
       if (!res.ok || !res.body) {
+        if (res.status === 401) handleUnauthorized();
         throw new Error(`Stream error: ${res.status}`);
       }
 
