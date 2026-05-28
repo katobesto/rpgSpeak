@@ -10,6 +10,7 @@ interface DbUserRow {
   password_hash: string;
   display_name: string;
   appearance: string;
+  avatar: string | null;
   role: string;
   is_active: number;
   created_at: string;
@@ -22,6 +23,7 @@ function rowToUser(row: DbUserRow): User {
     username:    row.username,
     displayName: row.display_name,
     appearance:  row.appearance ?? '',
+    avatar:      row.avatar ?? null,
     role:        row.role as UserRole,
     isActive:    Boolean(row.is_active),
     createdAt:   row.created_at,

@@ -266,7 +266,8 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       const llm = createProvider(providerRecord);
       const llmResponse = await llm.generate({
         messages: [{ role: 'user', content: scenePrompt }],
-        model:    defaultModelId ?? undefined,
+        model:    defaultModelId ?? '',
+        stream:   false,
         temperature: 0.7,
       });
 
@@ -390,7 +391,8 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
     const llm = createProvider(providerRecord);
     const llmResponse = await llm.generate({
       messages:    [{ role: 'user', content: prompt }],
-      model:       defaultModelId ?? undefined,
+      model:       defaultModelId ?? '',
+      stream:      false,
       temperature: 0.7,
     });
 

@@ -372,7 +372,7 @@ export interface PaginatedResponse<T> {
 
 export interface GenerateRequest {
   messages: ChatMessage[];
-  model: string;
+  model?: string;
   temperature?: number;
   maxTokens?: number;
   contextSize?: number;   // ventana de contexto total para el proveedor (input + output)

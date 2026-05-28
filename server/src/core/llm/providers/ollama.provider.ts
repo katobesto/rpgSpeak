@@ -48,7 +48,7 @@ export class OllamaProvider implements LLMProvider {
 
   async generate(request: GenerateRequest): Promise<GenerateResponse> {
     const body = {
-      model: request.model,
+      model: request.model ?? '',
       messages: request.messages,
       stream: false,
       options: {
@@ -69,7 +69,7 @@ export class OllamaProvider implements LLMProvider {
 
     return {
       content: data.message.content,
-      model: request.model,
+      model: request.model ?? '',
       tokens: {
         prompt: data.prompt_eval_count ?? 0,
         completion: data.eval_count ?? 0,
@@ -81,7 +81,7 @@ export class OllamaProvider implements LLMProvider {
 
   async *stream(request: GenerateRequest): AsyncGenerator<string, GenerateResponse, unknown> {
     const body = {
-      model: request.model,
+      model: request.model ?? '',
       messages: request.messages,
       stream: true,
       options: {
@@ -129,7 +129,7 @@ export class OllamaProvider implements LLMProvider {
           if (chunk.done) {
             finalResponse = {
               content: '',
-              model: request.model,
+              model: request.model ?? '',
               tokens: {
                 prompt: chunk.prompt_eval_count ?? 0,
                 completion: chunk.eval_count ?? 0,
@@ -144,7 +144,7 @@ export class OllamaProvider implements LLMProvider {
       }
     }
 
-    return finalResponse ?? { content: '', model: request.model, tokens: { prompt: 0, completion: 0, total: 0 }, finishReason: 'stop' };
+    return finalResponse ?? { content: '', model: request.model ?? '', tokens: { prompt: 0, completion: 0, total: 0 }, finishReason: 'stop' };
   }
 
   async embed(texts: string[], model?: string): Promise<number[][]> {

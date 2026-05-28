@@ -448,7 +448,8 @@ const TYPE_LABELS: Record<string, string> = {
 function buildMemoryBlock(memories: MemoryEntry[], charNameMap: Map<string, string>): string {
   const grouped = new Map<string, MemoryEntry[]>();
   for (const m of memories) {
-    (grouped.get(m.characterId) ?? (grouped.set(m.characterId, []) && grouped.get(m.characterId)))!.push(m);
+    const key = m.characterId ?? '';
+    (grouped.get(key) ?? (grouped.set(key, []) && grouped.get(key)))!.push(m);
   }
   const parts = ['## Memorias activas'];
   for (const [charId, entries] of grouped.entries()) {
@@ -470,9 +471,10 @@ function buildMemoryInjectionBlock(
 ): string {
   const grouped = new Map<string, MemoryEntry[]>();
   for (const m of memories) {
-    const arr = grouped.get(m.characterId);
+    const key = m.characterId ?? '';
+    const arr = grouped.get(key);
     if (arr) arr.push(m);
-    else grouped.set(m.characterId, [m]);
+    else grouped.set(key, [m]);
   }
 
   const blocks: string[] = [];

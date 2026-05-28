@@ -539,7 +539,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
           conversationId,
           role: 'assistant',
           content: blockedText,
-          characterId: character?.id ?? null,
+          characterId: character?.id ?? undefined,
           branchId,
           metadata: { blocked: true, reason: 'nsfw' },
         });

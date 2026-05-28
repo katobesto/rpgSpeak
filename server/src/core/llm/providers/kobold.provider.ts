@@ -49,7 +49,7 @@ export class KoboldProvider implements LLMProvider {
 
     return {
       content,
-      model: request.model,
+      model: request.model ?? '',
       tokens: { prompt: 0, completion: 0, total: 0 },
       finishReason: 'stop',
     };
@@ -108,7 +108,7 @@ export class KoboldProvider implements LLMProvider {
 
     return {
       content: totalContent,
-      model: request.model,
+      model: request.model ?? '',
       tokens: { prompt: 0, completion: 0, total: 0 },
       finishReason: 'stop',
     };

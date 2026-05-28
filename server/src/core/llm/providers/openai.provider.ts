@@ -25,7 +25,7 @@ export class OpenAIProvider implements LLMProvider {
 
   private buildBody(request: GenerateRequest, stream: boolean) {
     return {
-      model: request.model,
+      model: request.model ?? '',
       messages: request.messages,
       stream,
       temperature: request.temperature,
@@ -238,7 +238,7 @@ export class OpenAIProvider implements LLMProvider {
 
     return {
       content: cleanContent,
-      model: request.model,
+      model: request.model ?? '',
       tokens: { prompt: usage.prompt, completion: usage.completion, total: usage.total, cached: usage.cached },
       finishReason: 'stop',
     };
