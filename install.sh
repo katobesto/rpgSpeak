@@ -90,37 +90,38 @@ echo -e "${GREEN}✓ Dependencias instaladas${NC}"
 # compatibilidad exacta con la plataforma y versión de Node actual.
 echo -e "${CYAN}→ Compilando módulos nativos para Mac ${ARCH} (better-sqlite3)...${NC}"
 
-# IMPORTANTE: en Mac SIEMPRE compilamos desde fuente con --build-from-source.
-# "npm rebuild" sin ese flag puede descargar un prebuild que aterriza en
-# prebuilds/darwin-arm64/ — node-gyp-build lo encuentra y el check pasa,
-# pero bindings.js (que usa la app real) solo mira build/Release/ y falla.
-# Compilar desde fuente garantiza que el .node acabe en build/Release/.
+# better-sqlite3 v12 usa "prebuild-install || node-gyp rebuild --release".
+# prebuild-install puede descargar un prebuild que node-gyp-build encuentra
+# pero bindings.js NO (bindings solo mira build/Release/).
+# La variable npm_config_build_from_source=true hace que prebuild-install
+# salte la descarga y node-gyp compile directamente en build/Release/.
 echo "  Compilando desde fuente para Mac ${ARCH} (puede tardar ~1 min la primera vez)..."
-npm rebuild better-sqlite3 --build-from-source
+npm_config_build_from_source=true npm rebuild better-sqlite3
 REBUILD_EXIT=$?
 
-if [ $REBUILD_EXIT -ne 0 ]; then
+NATIVE_BIN="node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+
+if [ $REBUILD_EXIT -ne 0 ] || [ ! -f "$NATIVE_BIN" ]; then
+  # Fallback: invocar node-gyp directamente (salta prebuild-install por completo)
+  echo -e "${YELLOW}⚠ Reintentando con node-gyp directamente...${NC}"
+  (cd node_modules/better-sqlite3 && node "$(node -e 'process.stdout.write(require.resolve("node-gyp/bin/node-gyp"))')" rebuild --release 2>&1)
+  REBUILD_EXIT=$?
+fi
+
+if [ $REBUILD_EXIT -ne 0 ] || [ ! -f "$NATIVE_BIN" ]; then
   echo -e "${RED}✗ No se pudo compilar better-sqlite3.${NC}"
   echo -e "${RED}  Asegúrate de tener Xcode CLI Tools actualizados: xcode-select --install${NC}"
   echo -e "${RED}  Si el problema persiste, prueba: sudo xcode-select --reset${NC}"
   exit 1
 fi
 
-# Verificar que el binario quedó en build/Release/ (donde bindings.js lo busca)
-NATIVE_BIN="node_modules/better-sqlite3/build/Release/better_sqlite3.node"
-if [ -f "$NATIVE_BIN" ]; then
-  BIN_INFO=$(file "$NATIVE_BIN")
-  echo -e "${GREEN}✓ Módulo nativo: better_sqlite3.node — ${BIN_INFO##*: }${NC}"
+BIN_INFO=$(file "$NATIVE_BIN")
+echo -e "${GREEN}✓ Módulo nativo: better_sqlite3.node — ${BIN_INFO##*: }${NC}"
 
-  # Verificar arquitectura en Apple Silicon
-  if [ "$ARCH" = "arm64" ] && ! echo "$BIN_INFO" | grep -q "arm64"; then
-    echo -e "${RED}✗ El binario compilado no es arm64. Arquitectura inesperada.${NC}"
-    echo -e "${RED}  Prueba: sudo xcode-select --reset && ./install.sh${NC}"
-    exit 1
-  fi
-else
-  echo -e "${RED}✗ El binario no apareció en build/Release/ tras la compilación.${NC}"
-  echo -e "${RED}  Verifica que Xcode CLI Tools estén instalados: xcode-select -p${NC}"
+# Verificar arquitectura en Apple Silicon
+if [ "$ARCH" = "arm64" ] && ! echo "$BIN_INFO" | grep -q "arm64"; then
+  echo -e "${RED}✗ El binario compilado no es arm64. Arquitectura inesperada.${NC}"
+  echo -e "${RED}  Prueba: sudo xcode-select --reset && ./install.sh${NC}"
   exit 1
 fi
 
