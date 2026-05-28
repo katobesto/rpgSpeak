@@ -84,29 +84,26 @@ npm install
 echo -e "${GREEN}✓ Dependencias instaladas${NC}"
 
 # ─── Compilar módulos nativos para Mac ───────────────────────────────────────
-# En Apple Silicon (M1-M5) los binarios pre-compilados de better-sqlite3 pueden
-# no coincidir con el ABI de Node.js instalado, causando errores ESMloader en
-# tiempo de ejecución. Se fuerza la compilación desde fuente para garantizar
-# compatibilidad exacta con la plataforma y versión de Node actual.
+# better-sqlite3 v12 usa prebuild-install para descargar binarios precompilados.
+# En Node 24 (npm 11) la variable npm_config_build_from_source ya no funciona,
+# y prebuild-install puede fallar silenciosamente sin dejar ningún .node.
+# Solución: usar el node-gyp que viene empaquetado con npm para compilar desde fuente.
 echo -e "${CYAN}→ Compilando módulos nativos para Mac ${ARCH} (better-sqlite3)...${NC}"
-
-# better-sqlite3 v12 usa "prebuild-install || node-gyp rebuild --release".
-# prebuild-install puede descargar un prebuild que node-gyp-build encuentra
-# pero bindings.js NO (bindings solo mira build/Release/).
-# La variable npm_config_build_from_source=true hace que prebuild-install
-# salte la descarga y node-gyp compile directamente en build/Release/.
-echo "  Compilando desde fuente para Mac ${ARCH} (puede tardar ~1 min la primera vez)..."
-npm_config_build_from_source=true npm rebuild better-sqlite3
-REBUILD_EXIT=$?
+echo "  (puede tardar ~1 min la primera vez)..."
 
 NATIVE_BIN="node_modules/better-sqlite3/build/Release/better_sqlite3.node"
 
-if [ $REBUILD_EXIT -ne 0 ] || [ ! -f "$NATIVE_BIN" ]; then
-  # Fallback: invocar node-gyp directamente (salta prebuild-install por completo)
-  echo -e "${YELLOW}⚠ Reintentando con node-gyp directamente...${NC}"
-  (cd node_modules/better-sqlite3 && node "$(node -e 'process.stdout.write(require.resolve("node-gyp/bin/node-gyp"))')" rebuild --release 2>&1)
-  REBUILD_EXIT=$?
+# Localizar el node-gyp empaquetado con npm (disponible en todas las instalaciones)
+NPM_NODE_GYP="$(npm config get prefix)/lib/node_modules/npm/node_modules/node-gyp/bin/node-gyp.js"
+
+if [ ! -f "$NPM_NODE_GYP" ]; then
+  echo -e "${RED}✗ No se encontró node-gyp en $(dirname "$NPM_NODE_GYP")${NC}"
+  echo -e "${RED}  Prueba: npm install -g node-gyp${NC}"
+  exit 1
 fi
+
+(cd node_modules/better-sqlite3 && node "$NPM_NODE_GYP" rebuild --release 2>&1)
+REBUILD_EXIT=$?
 
 if [ $REBUILD_EXIT -ne 0 ] || [ ! -f "$NATIVE_BIN" ]; then
   echo -e "${RED}✗ No se pudo compilar better-sqlite3.${NC}"
