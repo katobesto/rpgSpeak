@@ -90,53 +90,38 @@ echo -e "${GREEN}✓ Dependencias instaladas${NC}"
 # compatibilidad exacta con la plataforma y versión de Node actual.
 echo -e "${CYAN}→ Compilando módulos nativos para Mac ${ARCH} (better-sqlite3)...${NC}"
 
-# Función auxiliar: busca el .node en cualquier subdirectorio del paquete
-# (puede estar en build/Release/ o en prebuilds/darwin-arm64/, según la versión)
-find_node_binary() {
-  find node_modules/better-sqlite3 -name "*.node" 2>/dev/null | head -1
-}
-
-# Función auxiliar: prueba que el módulo carga realmente en Node
-sqlite3_loads() {
-  node -e "require('better-sqlite3')" 2>/dev/null
-}
-
-# 1. Compilación estándar (descarga pre-built si está disponible, sino compila)
-npm rebuild better-sqlite3
+# IMPORTANTE: en Mac SIEMPRE compilamos desde fuente con --build-from-source.
+# "npm rebuild" sin ese flag puede descargar un prebuild que aterriza en
+# prebuilds/darwin-arm64/ — node-gyp-build lo encuentra y el check pasa,
+# pero bindings.js (que usa la app real) solo mira build/Release/ y falla.
+# Compilar desde fuente garantiza que el .node acabe en build/Release/.
+echo "  Compilando desde fuente para Mac ${ARCH} (puede tardar ~1 min la primera vez)..."
+npm rebuild better-sqlite3 --build-from-source
 REBUILD_EXIT=$?
 
-# 2. Si falla o el módulo no carga, forzar compilación desde fuente
-if [ $REBUILD_EXIT -ne 0 ] || ! sqlite3_loads; then
-  echo -e "${YELLOW}⚠ Compilación estándar no funcionó. Recompilando desde fuente (puede tardar ~1 min)...${NC}"
-  npm rebuild better-sqlite3 --build-from-source
-  if ! sqlite3_loads; then
-    echo -e "${RED}✗ No se pudo compilar better-sqlite3.${NC}"
-    echo -e "${RED}  Asegúrate de tener Xcode CLI Tools actualizados: xcode-select --install${NC}"
-    echo -e "${RED}  Si el problema persiste, prueba: sudo xcode-select --reset${NC}"
-    exit 1
-  fi
+if [ $REBUILD_EXIT -ne 0 ]; then
+  echo -e "${RED}✗ No se pudo compilar better-sqlite3.${NC}"
+  echo -e "${RED}  Asegúrate de tener Xcode CLI Tools actualizados: xcode-select --install${NC}"
+  echo -e "${RED}  Si el problema persiste, prueba: sudo xcode-select --reset${NC}"
+  exit 1
 fi
 
-# 3. Localizar el binario (puede estar en build/Release/ o prebuilds/darwin-*/
-NATIVE_BIN="$(find_node_binary)"
-if [ -n "$NATIVE_BIN" ]; then
+# Verificar que el binario quedó en build/Release/ (donde bindings.js lo busca)
+NATIVE_BIN="node_modules/better-sqlite3/build/Release/better_sqlite3.node"
+if [ -f "$NATIVE_BIN" ]; then
   BIN_INFO=$(file "$NATIVE_BIN")
-  echo -e "${GREEN}✓ Módulo nativo: $(basename "$NATIVE_BIN") — ${BIN_INFO##*: }${NC}"
+  echo -e "${GREEN}✓ Módulo nativo: better_sqlite3.node — ${BIN_INFO##*: }${NC}"
 
-  # Si estamos en Apple Silicon y el binario no es arm64, recompilar desde fuente
+  # Verificar arquitectura en Apple Silicon
   if [ "$ARCH" = "arm64" ] && ! echo "$BIN_INFO" | grep -q "arm64"; then
-    echo -e "${YELLOW}⚠ Binario no es arm64. Forzando recompilación para Apple Silicon...${NC}"
-    npm rebuild better-sqlite3 --build-from-source
-    if ! sqlite3_loads; then
-      echo -e "${RED}✗ No se pudo generar un binario arm64.${NC}"
-      exit 1
-    fi
-    NATIVE_BIN="$(find_node_binary)"
-    echo -e "${GREEN}✓ Recompilado: $(file "$NATIVE_BIN" | sed 's/.*: //')${NC}"
+    echo -e "${RED}✗ El binario compilado no es arm64. Arquitectura inesperada.${NC}"
+    echo -e "${RED}  Prueba: sudo xcode-select --reset && ./install.sh${NC}"
+    exit 1
   fi
 else
-  # El módulo carga pero no encontramos el .node — raro pero no es error fatal
-  echo -e "${YELLOW}⚠ No se encontró el archivo .node, pero el módulo carga correctamente.${NC}"
+  echo -e "${RED}✗ El binario no apareció en build/Release/ tras la compilación.${NC}"
+  echo -e "${RED}  Verifica que Xcode CLI Tools estén instalados: xcode-select -p${NC}"
+  exit 1
 fi
 
 echo -e "${GREEN}✓ Módulos nativos listos para Mac ${ARCH}${NC}"

@@ -106,9 +106,12 @@ else
 fi
 
 if [ $NEEDS_REBUILD -eq 1 ]; then
-  npm rebuild better-sqlite3 2>/dev/null || npm rebuild better-sqlite3 --build-from-source
-  if [ $? -ne 0 ] || ! node -e "require('better-sqlite3')" 2>/dev/null; then
-    echo "❌  Recompilación fallida."
+  # Siempre --build-from-source: asegura que el .node acabe en build/Release/
+  # donde bindings.js lo busca. Sin esta flag, npm puede descargar un prebuild
+  # en prebuilds/darwin-arm64/ que no es encontrado por la app en tiempo de ejecución.
+  npm rebuild better-sqlite3 --build-from-source
+  if [ $? -ne 0 ] || [ ! -f "$NATIVE_BIN" ]; then
+    echo "❌  Recompilación fallida o binario no encontrado en build/Release/."
     echo "    Asegúrate de tener Xcode CLI Tools: xcode-select --install"
     exit 1
   fi
