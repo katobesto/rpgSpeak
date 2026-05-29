@@ -13,21 +13,23 @@ interface DbUserRow {
   avatar: string | null;
   role: string;
   is_active: number;
+  narration_style: string;
   created_at: string;
   updated_at: string;
 }
 
 function rowToUser(row: DbUserRow): User {
   return {
-    id:          row.id,
-    username:    row.username,
-    displayName: row.display_name,
-    appearance:  row.appearance ?? '',
-    avatar:      row.avatar ?? null,
-    role:        row.role as UserRole,
-    isActive:    Boolean(row.is_active),
-    createdAt:   row.created_at,
-    updatedAt:   row.updated_at,
+    id:             row.id,
+    username:       row.username,
+    displayName:    row.display_name,
+    appearance:     row.appearance ?? '',
+    avatar:         row.avatar ?? null,
+    role:           row.role as UserRole,
+    isActive:       Boolean(row.is_active),
+    narrationStyle: (row.narration_style ?? 'normal') as User['narrationStyle'],
+    createdAt:      row.created_at,
+    updatedAt:      row.updated_at,
   };
 }
 

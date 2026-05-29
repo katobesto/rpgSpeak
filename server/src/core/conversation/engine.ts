@@ -10,6 +10,7 @@ import { ConversationRepository } from '../../modules/conversations/conversation
 import { SettingsService } from '../../modules/settings/settings.service.js';
 import { MemoryRepository } from '../memory/memory.repository.js';
 import { NotFoundError, ProviderError } from '../../shared/errors.js';
+import { getUserById } from '../../modules/auth/auth.service.js';
 
 const providerRepo = new ProviderRepository();
 const charRepo = new CharacterRepository();
@@ -563,6 +564,14 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       affinity: conversation.characters.find((l) => l.characterId === c.id)?.affinity ?? 50,
     }));
 
+    // Resolve narration style prompt for the conversation owner
+    const convOwner = conversation.userId ? getUserById(conversation.userId) : null;
+    const ownerStyle = convOwner?.narrationStyle ?? 'normal';
+    const narrationStylePrompt =
+      ownerStyle === 'short'  ? (settings.narrationShortPrompt  || undefined) :
+      ownerStyle === 'medium' ? (settings.narrationMediumPrompt || undefined) :
+      undefined;
+
     const rawContext = await buildContext({
       character: character ?? groupCharacters[0],
       stories: linkedStories,
@@ -588,6 +597,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       embeddingEnabled:    settings.embeddingEnabled,
       embeddingProviderId: settings.embeddingProviderId,
       embeddingModel:      settings.embeddingModel,
+      narrationStylePrompt,
     });
 
     // Use character's contextLength, then settings default, then 32768

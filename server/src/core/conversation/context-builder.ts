@@ -35,6 +35,8 @@ export interface BuildContextOptions {
   embeddingEnabled?:    boolean;
   embeddingProviderId?: string | null;
   embeddingModel?:      string | null;
+  // Estilo de narración del usuario: prompt inyectado justo antes del último mensaje
+  narrationStylePrompt?: string;
 }
 
 // ── Aviso de aventura para modo personaje individual (sin narrador) ─────────
@@ -71,6 +73,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
     embeddingEnabled = false,
     embeddingProviderId,
     embeddingModel,
+    narrationStylePrompt,
   } = opts;
 
   const systemParts: string[] = [];
@@ -307,7 +310,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
   // (character prompt + stories) can be fully reused by the KV cache across turns,
   // even when affinity values or memory sets change.
   const shouldInjectMemories = allMemories.length > 0 && memoryInjectionPrompt?.trim();
-  const needsSplit = shouldInjectMemories || Boolean(contextIndexBlock) || Boolean(affinityBlock);
+  const needsSplit = shouldInjectMemories || Boolean(contextIndexBlock) || Boolean(affinityBlock) || Boolean(narrationStylePrompt?.trim());
   const historyBody = needsSplit ? trimmedMessages.slice(0, -1) : trimmedMessages;
   const lastMessage = needsSplit ? trimmedMessages[trimmedMessages.length - 1] : null;
 
@@ -329,12 +332,17 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
     console.log(`[memory] Skipped injection — memories: ${allMemories.length}, prompt set: ${Boolean(memoryInjectionPrompt?.trim())}`);
   }
 
-  // 3. Affinity + consent directive (closest to generation — highest override authority)
+  // 3. Affinity + consent directive
   if (affinityBlock && needsSplit) {
     history.push({ role: 'system', content: affinityBlock });
   }
 
-  // 4. Last user message (generation point)
+  // 4. Narration style directive (user preference — overrides default verbosity)
+  if (narrationStylePrompt?.trim() && needsSplit) {
+    history.push({ role: 'system', content: narrationStylePrompt.trim() });
+  }
+
+  // 5. Last user message (generation point)
   if (needsSplit && lastMessage) {
     history.push({ role: lastMessage.role, content: lastMessage.content });
   }

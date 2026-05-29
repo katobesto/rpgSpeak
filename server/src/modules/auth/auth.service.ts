@@ -46,17 +46,19 @@ interface DbUserRow {
   avatar: string | null;
   role: string;
   is_active: number;
+  narration_style: string;
   created_at: string;
   updated_at: string;
 }
 
 function rowToUser(row: DbUserRow): User {
   return {
-    id:          row.id,
-    username:    row.username,
-    displayName: row.display_name,
-    appearance:  row.appearance ?? '',
-    avatar:      row.avatar ?? null,
+    id:             row.id,
+    username:       row.username,
+    displayName:    row.display_name,
+    appearance:     row.appearance ?? '',
+    avatar:         row.avatar ?? null,
+    narrationStyle: (row.narration_style ?? 'normal') as User['narrationStyle'],
     role:        row.role as UserRole,
     isActive:    Boolean(row.is_active),
     createdAt:   row.created_at,
@@ -106,7 +108,7 @@ export function updateDisplayName(userId: string, displayName: string): { token:
 
 export function updateProfile(
   userId: string,
-  updates: { displayName?: string; appearance?: string },
+  updates: { displayName?: string; appearance?: string; narrationStyle?: string },
 ): { token: string; user: User } | null {
   const db = getDb();
   const ts = new Date().toISOString();
@@ -115,6 +117,9 @@ export function updateProfile(
   }
   if (updates.appearance !== undefined) {
     db.run(sql`UPDATE users SET appearance = ${updates.appearance}, updated_at = ${ts} WHERE id = ${userId}`);
+  }
+  if (updates.narrationStyle !== undefined) {
+    db.run(sql`UPDATE users SET narration_style = ${updates.narrationStyle}, updated_at = ${ts} WHERE id = ${userId}`);
   }
   const user = getUserById(userId);
   if (!user) return null;

@@ -18,7 +18,7 @@ import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
 
 type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats';
 
-const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'storyEventGenerationPrompt', 'allowNsfw', 'nsfwBlockedMessage'];
+const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'storyEventGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel'];
 
@@ -31,7 +31,7 @@ export function SettingsPanel() {
 
   const STABS: { id: STab; label: string }[] = [
     { id: 'profile', label: 'Perfil' },
-    { id: 'appearance', label: 'Apariencia' },
+    { id: 'appearance', label: 'Preferencias' },
     ...(isAdmin ? [
       { id: 'generation' as STab, label: 'Generación' },
       { id: 'context' as STab, label: 'Contexto' },
@@ -119,6 +119,8 @@ export function SettingsPanel() {
 
           {tab === 'appearance' && (
             <>
+              <NarrationStyleSection />
+
               <Section title="Tema">
                 <div className="flex gap-2">
                   {(['dark', 'light'] as const).map((t) => (
@@ -359,6 +361,38 @@ export function SettingsPanel() {
                       rows={10}
                       mono
                     />
+                  </Section>
+
+                  <Section title="Estilo de narración — prompts de longitud">
+                    <p className="text-xs text-text-muted mb-3 leading-relaxed">
+                      Cuando un usuario elige "Corto" o "Moderado" en sus Preferencias, se inyecta el prompt correspondiente justo antes de cada turno de generación. Si elige "Normal" no se inyecta nada.
+                    </p>
+                    <div className="space-y-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-medium text-text-secondary">Prompt estilo Moderado</label>
+                          <RestoreButton settingsKey="narrationMediumPrompt" onRestore={(v) => update('narrationMediumPrompt', v)} />
+                        </div>
+                        <textarea
+                          value={draft.narrationMediumPrompt ?? ''}
+                          onChange={(e) => update('narrationMediumPrompt', e.target.value)}
+                          rows={3}
+                          className="w-full rounded-lg px-3 py-2 text-xs bg-surface-2 border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent font-mono resize-none"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex items-center justify-between">
+                          <label className="text-xs font-medium text-text-secondary">Prompt estilo Corto</label>
+                          <RestoreButton settingsKey="narrationShortPrompt" onRestore={(v) => update('narrationShortPrompt', v)} />
+                        </div>
+                        <textarea
+                          value={draft.narrationShortPrompt ?? ''}
+                          onChange={(e) => update('narrationShortPrompt', e.target.value)}
+                          rows={3}
+                          className="w-full rounded-lg px-3 py-2 text-xs bg-surface-2 border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent font-mono resize-none"
+                        />
+                      </div>
+                    </div>
                   </Section>
 
                   <Section title="Moderación de contenido">
@@ -1457,6 +1491,63 @@ function ProviderRow({ provider, onDelete }: { provider: Provider; onDelete: () 
 }
 
 // ─── Profile section ─────────────────────────────────────────────────────────
+
+// ─── Narration Style Section ──────────────────────────────────────────────────
+
+function NarrationStyleSection() {
+  const { user, setAuth } = useAuthStore();
+  const current = (user?.narrationStyle ?? 'normal') as 'normal' | 'medium' | 'short';
+  const [saving, setSaving] = useState(false);
+  const [saved,  setSaved]  = useState(false);
+
+  async function select(style: 'normal' | 'medium' | 'short') {
+    if (style === current) return;
+    setSaving(true);
+    try {
+      const data = await authApi.updateProfile({ narrationStyle: style });
+      setAuth(data.token, data.user);
+      setSaved(true);
+      setTimeout(() => setSaved(false), 1500);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const options: { id: 'normal' | 'medium' | 'short'; label: string; desc: string }[] = [
+    { id: 'normal', label: 'Normal',   desc: 'Respuestas completas y detalladas (por defecto)' },
+    { id: 'medium', label: 'Moderado', desc: 'Respuestas más cortas, equilibradas' },
+    { id: 'short',  label: 'Corto',    desc: 'Respuestas concisas y directas' },
+  ];
+
+  return (
+    <Section title="Estilo de narración">
+      <p className="text-xs text-text-muted mb-3 leading-relaxed">
+        Controla la longitud de las respuestas del narrador. El administrador puede personalizar qué se le dice al modelo para cada estilo.
+      </p>
+      <div className="flex gap-2">
+        {options.map((opt) => (
+          <button
+            key={opt.id}
+            disabled={saving}
+            onClick={() => select(opt.id)}
+            title={opt.desc}
+            className={`flex-1 py-2.5 px-3 rounded-lg text-sm border transition-colors ${
+              current === opt.id
+                ? 'border-accent bg-accent-muted text-accent font-medium'
+                : 'border-border text-text-secondary hover:border-accent/40 hover:text-text-primary'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-text-muted mt-2 italic">
+        {options.find(o => o.id === current)?.desc}
+        {saved && <span className="ml-2 text-emerald-400">✓ Guardado</span>}
+      </p>
+    </Section>
+  );
+}
 
 function ProfileSection() {
   const { user, setAuth } = useAuthStore();

@@ -333,6 +333,11 @@ INSTRUCCIONES:
 Responde ÚNICAMENTE con etiquetas en este formato exacto, una por línea. Sin texto adicional antes ni después.
 
 [EVENTO:título corto y evocador|disparador que activa el evento|descripción de lo que ocurre cuando se activa|importancia del 1 al 10]`,
+  // Estilo de narración — inyectados justo antes del último mensaje cuando el usuario elige medium/short
+  narrationMediumPrompt: `## Estilo de respuesta: MODERADO
+Mantén respuestas de longitud moderada: 3-4 párrafos como máximo. Balancea diálogo y descripción sin extenderte. Evita introducciones largas y cierra cada escena con concisión.`,
+  narrationShortPrompt: `## Estilo de respuesta: CONCISO
+Responde de forma breve y directa: máximo 2 párrafos cortos. Ve al punto esencial. Prioriza el diálogo y la acción sobre la descripción ambiental. Nada de florituras.`,
   // Content moderation
   allowNsfw: false,
   nsfwBlockedMessage: `*[Moderación: el contenido de tu mensaje no está permitido con el modo NSFW desactivado. Si deseas este tipo de interacciones, activa "Permitir contenido adulto" en Ajustes → Generación.]*`,

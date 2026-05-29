@@ -34,7 +34,7 @@ export const authApi = {
       body: JSON.stringify({ currentPassword, newPassword }),
     }),
 
-  updateProfile: (updates: { displayName?: string; appearance?: string }) =>
+  updateProfile: (updates: { displayName?: string; appearance?: string; narrationStyle?: string }) =>
     authRequest<LoginResponse>('/auth/me', {
       method: 'PATCH',
       body: JSON.stringify(updates),

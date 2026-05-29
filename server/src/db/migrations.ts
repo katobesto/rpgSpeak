@@ -198,6 +198,9 @@ export function runMigrations(db: Db): void {
   try { db.run(sql`ALTER TABLE context_items ADD COLUMN embedding BLOB`); } catch { /* already exists */ }
   try { db.run(sql`ALTER TABLE context_items ADD COLUMN embedding_model TEXT`); } catch { /* already exists */ }
 
+  // ─── Users — narration style preference ──────────────────────────────────
+  try { db.run(sql`ALTER TABLE users ADD COLUMN narration_style TEXT NOT NULL DEFAULT 'normal'`); } catch { /* already exists */ }
+
   // ─── User content assignments ─────────────────────────────────────────────
   db.run(sql`
     CREATE TABLE IF NOT EXISTS user_characters (

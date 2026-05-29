@@ -24,8 +24,9 @@ const changePasswordSchema = z.object({
 });
 
 const updateProfileSchema = z.object({
-  displayName: z.string().min(1, 'El nombre no puede estar vacío').max(50).optional(),
-  appearance:  z.string().max(2000).optional(),
+  displayName:    z.string().min(1, 'El nombre no puede estar vacío').max(50).optional(),
+  appearance:     z.string().max(2000).optional(),
+  narrationStyle: z.enum(['normal', 'medium', 'short']).optional(),
 });
 
 function isLocalhost(ip: string | undefined): boolean {
@@ -110,9 +111,10 @@ export const authRoutes: FastifyPluginAsync = async (app) => {
     const result = updateProfileSchema.safeParse(req.body);
     if (!result.success) throw new ValidationError(result.error.issues[0].message);
 
-    const updates: { displayName?: string; appearance?: string } = {};
-    if (result.data.displayName !== undefined) updates.displayName = result.data.displayName.trim();
-    if (result.data.appearance  !== undefined) updates.appearance  = result.data.appearance;
+    const updates: { displayName?: string; appearance?: string; narrationStyle?: string } = {};
+    if (result.data.displayName    !== undefined) updates.displayName    = result.data.displayName.trim();
+    if (result.data.appearance     !== undefined) updates.appearance     = result.data.appearance;
+    if (result.data.narrationStyle !== undefined) updates.narrationStyle = result.data.narrationStyle;
 
     const auth = updateProfile(userId, updates);
     if (!auth) throw new UnauthorizedError();

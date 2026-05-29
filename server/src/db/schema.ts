@@ -3,15 +3,16 @@ import { sqliteTable, text, integer, real, blob, primaryKey } from 'drizzle-orm/
 // ─── Users ────────────────────────────────────────────────────────────────────
 
 export const users = sqliteTable('users', {
-  id:           text('id').primaryKey(),
-  username:     text('username').notNull().unique(),
-  passwordHash: text('password_hash').notNull(),
-  displayName:  text('display_name').notNull(),
-  appearance:   text('appearance').notNull().default(''),  // visual description for image generation
-  role:         text('role').notNull().default('user'), // 'admin' | 'user'
-  isActive:     integer('is_active', { mode: 'boolean' }).notNull().default(true),
-  createdAt:    text('created_at').notNull(),
-  updatedAt:    text('updated_at').notNull(),
+  id:              text('id').primaryKey(),
+  username:        text('username').notNull().unique(),
+  passwordHash:    text('password_hash').notNull(),
+  displayName:     text('display_name').notNull(),
+  appearance:      text('appearance').notNull().default(''),  // visual description for image generation
+  role:            text('role').notNull().default('user'), // 'admin' | 'user'
+  isActive:        integer('is_active', { mode: 'boolean' }).notNull().default(true),
+  narrationStyle:  text('narration_style').notNull().default('normal'), // 'normal' | 'medium' | 'short'
+  createdAt:       text('created_at').notNull(),
+  updatedAt:       text('updated_at').notNull(),
 });
 
 export type DbUser = typeof users.$inferSelect;

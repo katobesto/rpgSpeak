@@ -2,6 +2,8 @@
 
 export type UserRole = 'admin' | 'user';
 
+export type NarrationStyle = 'normal' | 'medium' | 'short';
+
 export interface User {
   id: string;
   username: string;
@@ -10,6 +12,7 @@ export interface User {
   avatar: string | null;   // path to profile photo, e.g. /images/users/{id}/avatar.jpg
   role: UserRole;
   isActive: boolean;
+  narrationStyle: NarrationStyle;
   createdAt: string;
   updatedAt: string;
 }
@@ -339,6 +342,9 @@ export interface AppSettings {
   contextIndexContextSize: number;
   // Generación de eventos de historia
   storyEventGenerationPrompt: string;
+  // Estilo de narración — prompts inyectados cuando el usuario elige Medium o Short
+  narrationMediumPrompt: string;
+  narrationShortPrompt:  string;
   // Moderación de contenido
   allowNsfw: boolean;
   nsfwBlockedMessage: string;
