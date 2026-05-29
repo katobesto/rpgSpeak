@@ -2,10 +2,12 @@ import { api } from './client.ts';
 import type { Story, CreateStoryDto, UpdateStoryDto, StoryEvent } from '@rpgspeak/shared';
 
 export const storiesApi = {
-  list: (search?: string, characterId?: string) => {
+  list: (filters: { search?: string; text?: string; characterId?: string; filterUserId?: string } = {}) => {
     const params = new URLSearchParams();
-    if (search) params.set('search', search);
-    if (characterId) params.set('characterId', characterId);
+    if (filters.search)       params.set('search', filters.search);
+    if (filters.text)         params.set('text', filters.text);
+    if (filters.characterId)  params.set('characterId', filters.characterId);
+    if (filters.filterUserId) params.set('filterUserId', filters.filterUserId);
     const qs = params.toString();
     return api.get<Story[]>(`/stories${qs ? `?${qs}` : ''}`);
   },

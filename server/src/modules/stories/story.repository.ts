@@ -54,20 +54,51 @@ export class StoryRepository {
       .map((r) => ({ characterId: r.characterId, role: r.role, notes: r.notes }));
   }
 
-  findAll(search?: string, userId?: string, isAdmin = false, characterId?: string): Story[] {
+  findAll(params: {
+    search?: string;       // búsqueda por título
+    text?: string;         // búsqueda en contenido (descripción, contexto, lore, reglas)
+    userId?: string;       // usuario actual (para filtrar visibilidad)
+    isAdmin?: boolean;
+    characterId?: string;  // filtrar por personaje vinculado
+    filterUserId?: string; // solo admin: filtrar por propietario específico
+  } = {}): Story[] {
+    const { search, text, userId, isAdmin = false, characterId, filterUserId } = params;
     const conds = [];
+
+    // Filtro por título
     if (search) conds.push(like(stories.name, `%${search}%`));
+
+    // Búsqueda aproximada en campos de contenido
+    if (text) {
+      const pat = `%${text}%`;
+      conds.push(sql`(
+        ${stories.name}            LIKE ${pat} OR
+        ${stories.description}     LIKE ${pat} OR
+        ${stories.globalContext}   LIKE ${pat} OR
+        ${stories.worldLore}       LIKE ${pat} OR
+        ${stories.narrativeRules}  LIKE ${pat}
+      )`);
+    }
+
+    // Visibilidad: admin ve todo; usuario normal solo ve lo suyo
     if (!isAdmin && userId) {
-      // own stories OR stories explicitly assigned by admin
       conds.push(sql`(${stories.userId} = ${userId} OR ${stories.id} IN (
         SELECT story_id FROM user_stories WHERE user_id = ${userId}
       ))`);
     }
+
+    // Filtro de propietario (solo admin)
+    if (isAdmin && filterUserId) {
+      conds.push(sql`${stories.userId} = ${filterUserId}`);
+    }
+
+    // Filtro por personaje vinculado
     if (characterId) {
       conds.push(sql`${stories.id} IN (
         SELECT story_id FROM story_characters WHERE character_id = ${characterId}
       )`);
     }
+
     let query = this.db.select().from(stories).$dynamic();
     if (conds.length === 1) query = query.where(conds[0]);
     else if (conds.length > 1) query = query.where(and(...conds));

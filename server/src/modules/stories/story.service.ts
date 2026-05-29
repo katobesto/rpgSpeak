@@ -6,8 +6,15 @@ import type { CreateStoryInput, UpdateStoryInput } from './story.schema.js';
 const repo = new StoryRepository();
 
 export class StoryService {
-  list(search?: string, userId?: string, isAdmin = false, characterId?: string): Story[] {
-    return repo.findAll(search, userId, isAdmin, characterId);
+  list(params: {
+    search?: string;
+    text?: string;
+    userId?: string;
+    isAdmin?: boolean;
+    characterId?: string;
+    filterUserId?: string;
+  } = {}): Story[] {
+    return repo.findAll(params);
   }
 
   get(id: string): Story {

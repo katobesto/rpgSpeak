@@ -29,9 +29,21 @@ function parseGeneratedEvents(text: string): Omit<StoryEvent, 'id' | 'timestamp'
 
 export const storyRoutes: FastifyPluginAsync = async (app) => {
   app.get('/', async (req) => {
-    const { search, characterId } = req.query as { search?: string; characterId?: string };
+    const { search, text, characterId, filterUserId } =
+      req.query as { search?: string; text?: string; characterId?: string; filterUserId?: string };
     const { userId, role } = (req as any).authUser ?? {};
-    return { success: true, data: service.list(search, userId, role === 'admin', characterId) };
+    const isAdmin = role === 'admin';
+    return {
+      success: true,
+      data: service.list({
+        search,
+        text,
+        userId,
+        isAdmin,
+        characterId,
+        filterUserId: isAdmin ? filterUserId : undefined, // solo admins
+      }),
+    };
   });
 
   app.get<{ Params: { id: string } }>('/:id', async (req) => {

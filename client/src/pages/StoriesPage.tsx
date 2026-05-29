@@ -1,20 +1,39 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { storiesApi } from '../api/stories.ts';
 import { charactersApi } from '../api/characters.ts';
+import { api } from '../api/client.ts';
 import { StoryEditor } from '../components/stories/StoryEditor.tsx';
 import { Avatar } from '../components/ui/Avatar.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { Modal } from '../components/ui/Modal.tsx';
-import { Plus, Edit2, Trash2, BookOpen, ToggleLeft, ToggleRight, UserCircle, Lock, Eye, Users, X } from 'lucide-react';
-import type { Story } from '@rpgspeak/shared';
+import { Plus, Edit2, Trash2, BookOpen, ToggleLeft, ToggleRight, UserCircle, Lock, Eye, Users, X, Search, FileText, Filter } from 'lucide-react';
+import type { Story, User } from '@rpgspeak/shared';
 import { useAuthStore } from '../stores/auth.store.ts';
+
+function useDebounce<T>(value: T, delay = 350): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
 
 export function StoriesPage() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingStory, setEditingStory] = useState<Story | null>(null);
   const [previewStory, setPreviewStory] = useState<Story | null>(null);
-  const [charFilter, setCharFilter] = useState('');
+
+  // Filtros
+  const [searchInput, setSearchInput]       = useState('');
+  const [textInput, setTextInput]           = useState('');
+  const [charFilter, setCharFilter]         = useState('');
+  const [userFilter, setUserFilter]         = useState('');
+
+  const search = useDebounce(searchInput);
+  const text   = useDebounce(textInput);
+
   const qc = useQueryClient();
   const isAdmin = useAuthStore((s) => s.isAdmin);
   const currentUserId = useAuthStore((s) => s.user?.id);
@@ -24,10 +43,30 @@ export function StoriesPage() {
     queryFn: () => charactersApi.list(),
   });
 
-  const { data: stories = [], isLoading } = useQuery({
-    queryKey: ['stories', charFilter],
-    queryFn: () => storiesApi.list(undefined, charFilter || undefined),
+  const { data: allUsers = [] } = useQuery<User[]>({
+    queryKey: ['users-list'],
+    queryFn: () => api.get<User[]>('/users'),
+    enabled: isAdmin,
   });
+
+  const activeFilters = !!(search || text || charFilter || userFilter);
+
+  const { data: stories = [], isLoading } = useQuery({
+    queryKey: ['stories', search, text, charFilter, userFilter],
+    queryFn: () => storiesApi.list({
+      search:       search   || undefined,
+      text:         text     || undefined,
+      characterId:  charFilter || undefined,
+      filterUserId: userFilter  || undefined,
+    }),
+  });
+
+  function clearFilters() {
+    setSearchInput('');
+    setTextInput('');
+    setCharFilter('');
+    setUserFilter('');
+  }
 
   const toggleActive = useMutation({
     mutationFn: (story: Story) => storiesApi.update(story.id, { isActive: !story.isActive }),
@@ -41,41 +80,109 @@ export function StoriesPage() {
 
   return (
     <div className="flex flex-col h-full">
+      {/* ── Header ── */}
       <div className="flex-shrink-0 flex items-center justify-between px-6 py-4 border-b border-border"
         style={{ background: 'var(--surface-1)' }}>
         <div>
-          <h1 className="text-lg font-semibold">Stories</h1>
-          <p className="text-xs text-text-muted">{stories.length} scenarios</p>
+          <h1 className="text-lg font-semibold">Historias</h1>
+          <p className="text-xs text-text-muted">{stories.length} {stories.length === 1 ? 'historia' : 'historias'}</p>
         </div>
-        <div className="flex items-center gap-2">
-          {allCharacters.length > 0 && (
-            <div className="relative flex items-center">
-              <Users size={14} className="absolute left-3 text-text-muted pointer-events-none" />
-              <select
-                value={charFilter}
-                onChange={(e) => setCharFilter(e.target.value)}
-                className="pl-8 pr-7 py-1.5 rounded-lg text-sm border border-border text-text-primary focus:outline-none focus:ring-1 focus:ring-accent appearance-none cursor-pointer"
-                style={{ background: 'var(--surface-2)', color: charFilter ? 'var(--text-primary)' : 'var(--text-muted)' }}
-              >
-                <option value="">Todos los personajes</option>
-                {allCharacters.map((c) => (
-                  <option key={c.id} value={c.id}>{c.name}</option>
-                ))}
-              </select>
-              {charFilter && (
-                <button
-                  onClick={() => setCharFilter('')}
-                  className="absolute right-2 text-text-muted hover:text-text-primary transition-colors"
-                >
-                  <X size={12} />
-                </button>
-              )}
-            </div>
+        <Button size="sm" onClick={() => { setEditingStory(null); setEditorOpen(true); }}>
+          <Plus size={14} /> Nueva Historia
+        </Button>
+      </div>
+
+      {/* ── Barra de filtros ── */}
+      <div className="flex-shrink-0 flex flex-wrap items-center gap-2 px-6 py-3 border-b border-border"
+        style={{ background: 'var(--surface-2)' }}>
+
+        {/* Búsqueda por título */}
+        <div className="relative flex items-center flex-1 min-w-[140px]">
+          <Search size={13} className="absolute left-2.5 text-text-muted pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Buscar por título..."
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            className="w-full pl-7 pr-6 py-1.5 rounded-lg text-xs border border-border bg-transparent text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+          />
+          {searchInput && (
+            <button onClick={() => setSearchInput('')} className="absolute right-2 text-text-muted hover:text-text-primary">
+              <X size={11} />
+            </button>
           )}
-          <Button size="sm" onClick={() => { setEditingStory(null); setEditorOpen(true); }}>
-            <Plus size={14} /> New Story
-          </Button>
         </div>
+
+        {/* Filtro por personaje */}
+        <div className="relative flex items-center">
+          <Users size={13} className="absolute left-2.5 text-text-muted pointer-events-none" />
+          <select
+            value={charFilter}
+            onChange={(e) => setCharFilter(e.target.value)}
+            className="pl-7 pr-6 py-1.5 rounded-lg text-xs border border-border appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-accent"
+            style={{ background: 'var(--surface-1)', color: charFilter ? 'var(--text-primary)' : 'var(--text-muted)', minWidth: '140px' }}
+          >
+            <option value="">Todos los personajes</option>
+            {allCharacters.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          {charFilter && (
+            <button onClick={() => setCharFilter('')} className="absolute right-2 text-text-muted hover:text-text-primary">
+              <X size={11} />
+            </button>
+          )}
+        </div>
+
+        {/* Filtro por usuario (solo admin) */}
+        {isAdmin && allUsers.length > 0 && (
+          <div className="relative flex items-center">
+            <UserCircle size={13} className="absolute left-2.5 text-text-muted pointer-events-none" />
+            <select
+              value={userFilter}
+              onChange={(e) => setUserFilter(e.target.value)}
+              className="pl-7 pr-6 py-1.5 rounded-lg text-xs border border-border appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-accent"
+              style={{ background: 'var(--surface-1)', color: userFilter ? 'var(--text-primary)' : 'var(--text-muted)', minWidth: '130px' }}
+            >
+              <option value="">Todos los usuarios</option>
+              {allUsers.map((u) => (
+                <option key={u.id} value={u.id}>{u.displayName || u.username}</option>
+              ))}
+            </select>
+            {userFilter && (
+              <button onClick={() => setUserFilter('')} className="absolute right-2 text-text-muted hover:text-text-primary">
+                <X size={11} />
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Búsqueda en contenido */}
+        <div className="relative flex items-center flex-1 min-w-[160px]">
+          <FileText size={13} className="absolute left-2.5 text-text-muted pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Buscar en contenido..."
+            value={textInput}
+            onChange={(e) => setTextInput(e.target.value)}
+            className="w-full pl-7 pr-6 py-1.5 rounded-lg text-xs border border-border bg-transparent text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+          />
+          {textInput && (
+            <button onClick={() => setTextInput('')} className="absolute right-2 text-text-muted hover:text-text-primary">
+              <X size={11} />
+            </button>
+          )}
+        </div>
+
+        {/* Borrar todos */}
+        {activeFilters && (
+          <button
+            onClick={clearFilters}
+            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs border border-border text-text-muted hover:text-text-primary hover:border-accent/50 transition-colors"
+          >
+            <Filter size={11} /> Limpiar
+          </button>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto p-6">
@@ -86,13 +193,25 @@ export function StoriesPage() {
             <div className="w-16 h-16 rounded-2xl bg-accent-muted flex items-center justify-center">
               <BookOpen size={28} className="text-accent" />
             </div>
-            <div className="text-center">
-              <p className="font-medium">No stories yet</p>
-              <p className="text-text-muted text-sm mt-1">Create a story to add context and rules to conversations.</p>
-            </div>
-            <Button onClick={() => { setEditingStory(null); setEditorOpen(true); }}>
-              <Plus size={14} /> Create Story
-            </Button>
+            {activeFilters ? (
+              <div className="text-center">
+                <p className="font-medium">Sin resultados</p>
+                <p className="text-text-muted text-sm mt-1">Ninguna historia coincide con los filtros aplicados.</p>
+                <button onClick={clearFilters} className="mt-3 text-xs text-accent hover:underline">
+                  Limpiar filtros
+                </button>
+              </div>
+            ) : (
+              <div className="text-center">
+                <p className="font-medium">Aún no hay historias</p>
+                <p className="text-text-muted text-sm mt-1">Crea una historia para añadir contexto y reglas a las conversaciones.</p>
+              </div>
+            )}
+            {!activeFilters && (
+              <Button onClick={() => { setEditingStory(null); setEditorOpen(true); }}>
+                <Plus size={14} /> Crear Historia
+              </Button>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
