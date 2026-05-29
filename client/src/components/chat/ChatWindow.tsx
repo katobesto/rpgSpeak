@@ -7,10 +7,12 @@ import { ContextModal } from './ContextModal.tsx';
 import { StatsModal } from './StatsModal.tsx';
 import { ChatSearchModal } from './ChatSearchModal.tsx';
 import { useChatStore } from '../../stores/chat.store.ts';
+import { useAuthStore } from '../../stores/auth.store.ts';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { messagesApi, conversationsApi } from '../../api/conversations.ts';
 import { charactersApi } from '../../api/characters.ts';
 import { storiesApi } from '../../api/stories.ts';
+import { api } from '../../api/client.ts';
 import {
   MessageSquarePlus,
   Users,
@@ -26,15 +28,19 @@ import {
   Clock,
   MessagesSquare,
   ChevronRight,
+  SlidersHorizontal,
+  UserCircle,
+  Filter,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar.tsx';
-import type { Character, Story, Conversation } from '@rpgspeak/shared';
+import type { Character, Story, Conversation, User } from '@rpgspeak/shared';
 
 export function ChatWindow() {
   const {
     activeConversation, setMessages, messages, setActiveConversation,
     addMessage,
   } = useChatStore();
+  const isAdmin = useAuthStore((s) => s.isAdmin);
   const qc = useQueryClient();
   const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -200,6 +206,7 @@ export function ChatWindow() {
         stories={allStories}
         onStartAdventure={(s) => startAdventure.mutate(s)}
         allCharacters={allCharacters}
+        isAdmin={isAdmin}
       />
     );
   }
@@ -566,6 +573,7 @@ function EmptyState({
   stories,
   onStartAdventure,
   allCharacters,
+  isAdmin,
 }: {
   conversations: Conversation[];
   onSelectConversation: (c: Conversation) => void;
@@ -574,12 +582,32 @@ function EmptyState({
   stories: Story[];
   onStartAdventure: (s: Story) => void;
   allCharacters: Character[];
+  isAdmin?: boolean;
 }) {
   const [summaryPopupConv, setSummaryPopupConv] = useState<Conversation | null>(null);
 
-  // Sort conversations by updatedAt desc (most recent first)
+  // ── Filtros ────────────────────────────────────────────────────────────────
+  const [search, setSearch]           = useState('');
+  const [charFilter, setCharFilter]   = useState('');
+  const [storyFilter, setStoryFilter] = useState('');
+  const [userFilter, setUserFilter]   = useState('');
+
+  const { data: allUsers = [] } = useQuery<User[]>({
+    queryKey: ['users-list'],
+    queryFn: () => api.get<User[]>('/users'),
+    enabled: !!isAdmin,
+  });
+
+  const activeFilters = !!(search || charFilter || storyFilter || userFilter);
+  function clearFilters() { setSearch(''); setCharFilter(''); setStoryFilter(''); setUserFilter(''); }
+
+  // Sort + filter conversations (client-side sobre los datos ya cargados)
   const sortedConvs = [...conversations]
     .filter((c) => !c.isArchived)
+    .filter((c) => !search     || c.title.toLowerCase().includes(search.toLowerCase()))
+    .filter((c) => !charFilter  || c.characters.some((l) => l.characterId === charFilter))
+    .filter((c) => !storyFilter || c.stories.some((l) => l.storyId === storyFilter))
+    .filter((c) => !userFilter  || c.userId === userFilter)
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
   return (
@@ -588,19 +616,108 @@ function EmptyState({
 
         {/* ── 1. Historias comenzadas ──────────────────────────────────────── */}
         <section>
-          <SectionHeader
-            icon={<MessagesSquare size={16} />}
-            title="Historias comenzadas"
-            count={sortedConvs.length}
-          />
+          <div className="flex items-center justify-between mb-4">
+            <SectionHeader
+              icon={<MessagesSquare size={16} />}
+              title="Historias comenzadas"
+              count={sortedConvs.length}
+            />
+          </div>
+
+          {/* Barra de filtros */}
+          <div className="flex flex-wrap items-center gap-2 mb-4 p-3 rounded-xl border border-border"
+            style={{ background: 'var(--surface-2)' }}>
+            {/* Búsqueda por título */}
+            <div className="relative flex items-center flex-1 min-w-[160px]">
+              <Search size={13} className="absolute left-2.5 text-text-muted pointer-events-none" />
+              <input
+                type="text"
+                placeholder="Buscar por título..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-7 pr-6 py-1.5 rounded-lg text-xs border border-border bg-transparent text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+              {search && (
+                <button onClick={() => setSearch('')} className="absolute right-2 text-text-muted hover:text-text-primary">
+                  <X size={11} />
+                </button>
+              )}
+            </div>
+
+            {/* Historia */}
+            <div className="relative flex items-center">
+              <select
+                value={storyFilter}
+                onChange={(e) => setStoryFilter(e.target.value)}
+                className="pl-2.5 pr-6 py-1.5 rounded-lg text-xs border border-border appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-accent"
+                style={{ background: 'var(--surface-1)', color: storyFilter ? 'var(--text-primary)' : 'var(--text-muted)', minWidth: '140px' }}
+              >
+                <option value="">📖 Todas las historias</option>
+                {stories.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+              {storyFilter && (
+                <button onClick={() => setStoryFilter('')} className="absolute right-1.5 text-text-muted hover:text-text-primary"><X size={10} /></button>
+              )}
+            </div>
+
+            {/* Personaje */}
+            <div className="relative flex items-center">
+              <select
+                value={charFilter}
+                onChange={(e) => setCharFilter(e.target.value)}
+                className="pl-2.5 pr-6 py-1.5 rounded-lg text-xs border border-border appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-accent"
+                style={{ background: 'var(--surface-1)', color: charFilter ? 'var(--text-primary)' : 'var(--text-muted)', minWidth: '140px' }}
+              >
+                <option value="">👤 Todos los personajes</option>
+                {allCharacters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+              {charFilter && (
+                <button onClick={() => setCharFilter('')} className="absolute right-1.5 text-text-muted hover:text-text-primary"><X size={10} /></button>
+              )}
+            </div>
+
+            {/* Usuario (solo admin) */}
+            {isAdmin && allUsers.length > 0 && (
+              <div className="relative flex items-center">
+                <select
+                  value={userFilter}
+                  onChange={(e) => setUserFilter(e.target.value)}
+                  className="pl-2.5 pr-6 py-1.5 rounded-lg text-xs border border-border appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-accent"
+                  style={{ background: 'var(--surface-1)', color: userFilter ? 'var(--text-primary)' : 'var(--text-muted)', minWidth: '130px' }}
+                >
+                  <option value="">🧑‍💻 Todos los usuarios</option>
+                  {allUsers.map((u) => <option key={u.id} value={u.id}>{u.displayName || u.username}</option>)}
+                </select>
+                {userFilter && (
+                  <button onClick={() => setUserFilter('')} className="absolute right-1.5 text-text-muted hover:text-text-primary"><X size={10} /></button>
+                )}
+              </div>
+            )}
+
+            {activeFilters && (
+              <button onClick={clearFilters}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs border border-border text-text-muted hover:text-accent hover:border-accent/50 transition-colors">
+                <Filter size={11} /> Limpiar
+              </button>
+            )}
+          </div>
 
           {sortedConvs.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border px-6 py-10 text-center space-y-2">
               <MessagesSquare size={28} className="text-text-muted mx-auto mb-1 opacity-40" />
-              <p className="text-sm text-text-muted">Aún no has comenzado ninguna historia.</p>
-              <p className="text-xs text-text-muted opacity-70">
-                Elige un personaje o una historia de las secciones de abajo para empezar.
-              </p>
+              {activeFilters ? (
+                <>
+                  <p className="text-sm text-text-muted">Ninguna conversación coincide con los filtros.</p>
+                  <button onClick={clearFilters} className="text-xs text-accent hover:underline">Limpiar filtros</button>
+                </>
+              ) : (
+                <>
+                  <p className="text-sm text-text-muted">Aún no has comenzado ninguna historia.</p>
+                  <p className="text-xs text-text-muted opacity-70">
+                    Elige un personaje o una historia de las secciones de abajo para empezar.
+                  </p>
+                </>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
@@ -620,9 +737,9 @@ function EmptyState({
                     className="flex flex-col gap-3 p-4 rounded-xl border border-border hover:border-accent/50 hover:bg-accent/5 transition-all text-left group cursor-pointer"
                     style={{ background: 'var(--surface-1)' }}
                   >
-                    {/* Avatars + mode badge */}
+                    {/* Avatars + time + owner badge */}
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center">
+                      <div className="flex items-center gap-2">
                         {convChars.length > 0 ? (
                           <div className="flex -space-x-2">
                             {convChars.slice(0, 3).map((c, i) => (
@@ -643,6 +760,13 @@ function EmptyState({
                               : <BookOpen size={12} className="text-text-muted" />
                             }
                           </div>
+                        )}
+                        {/* Badge de usuario (solo admin) */}
+                        {isAdmin && conv.ownerName && (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-accent/10 text-accent text-[9px] font-medium leading-none">
+                            <UserCircle size={9} />
+                            {conv.ownerName}
+                          </span>
                         )}
                       </div>
                       <div className="flex items-center gap-1 text-[10px] text-text-muted">
