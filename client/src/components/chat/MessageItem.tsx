@@ -335,7 +335,7 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <ActionButton icon={copied ? Check : Copy} onClick={copyContent} title="Copy" />
             <ActionButton icon={Edit2} onClick={() => { setEditContent(message.content); setEditing(true); }} title="Edit" />
-            {isAdmin && !isUser && (
+            {!isUser && (
               <ActionButton
                 icon={isTtsLoading ? Loader : isTtsPlaying ? VolumeX : Volume2}
                 onClick={() => speak(message.id, message.content, {
