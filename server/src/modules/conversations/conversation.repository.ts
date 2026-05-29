@@ -1,4 +1,4 @@
-import { eq, desc, sql } from 'drizzle-orm';
+import { eq, desc, sql, and, like } from 'drizzle-orm';
 import { getDb } from '../../db/index.js';
 import {
   conversations,
@@ -13,11 +13,21 @@ function now() {
   return new Date().toISOString();
 }
 
+function resolveOwnerName(userId: string | null | undefined): string | null {
+  if (!userId) return null;
+  const db = getDb();
+  const row = db.get<{ display_name: string }>(
+    sql`SELECT display_name FROM users WHERE id = ${userId} LIMIT 1`
+  );
+  return row?.display_name ?? null;
+}
+
 function dbToConversation(
   row: DbConversation,
   chars: ConversationCharacterLink[],
   storiesLinks: ConversationStoryLink[]
 ): Conversation {
+  const userId = (row as any).userId ?? null;
   return {
     id: row.id,
     title: row.title,
@@ -30,6 +40,8 @@ function dbToConversation(
     characters: chars,
     stories: storiesLinks,
     metadata: JSON.parse(row.metadata),
+    userId,
+    ownerName: resolveOwnerName(userId),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
@@ -58,16 +70,57 @@ export class ConversationRepository {
       .map((r) => ({ storyId: r.storyId, priority: r.priority }));
   }
 
-  findAll(includeArchived = false, userId?: string, isAdmin = false): Conversation[] {
-    let query = this.db.select().from(conversations).$dynamic();
+  findAll(params: {
+    includeArchived?: boolean;
+    userId?: string;
+    isAdmin?: boolean;
+    search?: string;       // búsqueda en título
+    characterId?: string;  // filtrar por personaje vinculado
+    storyId?: string;      // filtrar por historia vinculada
+    filterUserId?: string; // admin: filtrar por propietario
+  } = {}): Conversation[] {
+    const {
+      includeArchived = false,
+      userId,
+      isAdmin = false,
+      search,
+      characterId,
+      storyId,
+      filterUserId,
+    } = params;
 
-    if (!includeArchived) {
-      query = query.where(eq(conversations.isArchived, false));
+    const conds = [];
+
+    if (!includeArchived) conds.push(eq(conversations.isArchived, false));
+
+    // Visibilidad
+    if (!isAdmin && userId) conds.push(eq(conversations.userId, userId));
+
+    // Filtro admin por propietario
+    if (isAdmin && filterUserId) conds.push(eq(conversations.userId, filterUserId));
+
+    // Búsqueda por título
+    if (search) conds.push(like(conversations.title, `%${search}%`));
+
+    // Filtro por personaje
+    if (characterId) {
+      conds.push(sql`${conversations.id} IN (
+        SELECT conversation_id FROM conversation_characters
+        WHERE character_id = ${characterId}
+      )`);
     }
-    // Admin sees everything; regular users see only their own
-    if (!isAdmin && userId) {
-      query = query.where(eq(conversations.userId, userId));
+
+    // Filtro por historia
+    if (storyId) {
+      conds.push(sql`${conversations.id} IN (
+        SELECT conversation_id FROM conversation_stories
+        WHERE story_id = ${storyId}
+      )`);
     }
+
+    let query = this.db.select().from(conversations).$dynamic();
+    if (conds.length === 1) query = query.where(conds[0]);
+    else if (conds.length > 1) query = query.where(and(...conds));
 
     const rows = query.orderBy(desc(conversations.updatedAt)).all();
     return rows.map((r) => dbToConversation(r, this.getChars(r.id), this.getStories(r.id)));

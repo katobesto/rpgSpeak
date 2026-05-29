@@ -7,8 +7,16 @@ import { triggerSummaryUpdate as engineTriggerSummaryUpdate } from '../../core/c
 const repo = new ConversationRepository();
 
 export class ConversationService {
-  list(includeArchived?: boolean, userId?: string, isAdmin = false): Conversation[] {
-    return repo.findAll(includeArchived, userId, isAdmin);
+  list(params: {
+    includeArchived?: boolean;
+    userId?: string;
+    isAdmin?: boolean;
+    search?: string;
+    characterId?: string;
+    storyId?: string;
+    filterUserId?: string;
+  } = {}): Conversation[] {
+    return repo.findAll(params);
   }
 
   get(id: string): Conversation {

@@ -9,8 +9,16 @@ type UpdateConversationExtended = UpdateConversationDto & {
 };
 
 export const conversationsApi = {
-  list: (archived?: boolean) =>
-    api.get<Conversation[]>(`/conversations${archived ? '?archived=true' : ''}`),
+  list: (filters: { archived?: boolean; search?: string; characterId?: string; storyId?: string; filterUserId?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (filters.archived)      params.set('archived', 'true');
+    if (filters.search)        params.set('search', filters.search);
+    if (filters.characterId)   params.set('characterId', filters.characterId);
+    if (filters.storyId)       params.set('storyId', filters.storyId);
+    if (filters.filterUserId)  params.set('filterUserId', filters.filterUserId);
+    const qs = params.toString();
+    return api.get<Conversation[]>(`/conversations${qs ? `?${qs}` : ''}`);
+  },
   get: (id: string) => api.get<Conversation>(`/conversations/${id}`),
   create: (data: CreateConversationDto) => api.post<Conversation>('/conversations', data),
   update: (id: string, data: UpdateConversationExtended) =>

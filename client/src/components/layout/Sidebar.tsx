@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   MessageSquare, Users, BookOpen, Settings, ChevronLeft, ChevronRight, Plus, Zap,
   MoreHorizontal, Trash2, AlertTriangle, Sword, ChevronDown, ChevronUp, LogOut, KeyRound, X,
+  Search, SlidersHorizontal, UserCircle,
 } from 'lucide-react';
 import { useUiStore } from '../../stores/ui.store.ts';
 import { useChatStore } from '../../stores/chat.store.ts';
@@ -12,8 +13,18 @@ import { conversationsApi } from '../../api/conversations.ts';
 import { charactersApi } from '../../api/characters.ts';
 import { storiesApi } from '../../api/stories.ts';
 import { authApi } from '../../api/auth.ts';
+import { api } from '../../api/client.ts';
 import { Avatar } from '../ui/Avatar.tsx';
-import type { Character, Conversation } from '@rpgspeak/shared';
+import type { Character, Conversation, User } from '@rpgspeak/shared';
+
+function useDebounce<T>(value: T, delay = 300): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), delay);
+    return () => clearTimeout(t);
+  }, [value, delay]);
+  return debounced;
+}
 
 interface SidebarProps {
   collapsed: boolean;
@@ -43,9 +54,27 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
   const qc = useQueryClient();
   const [adventurePanelOpen, setAdventurePanelOpen] = useState(true);
 
+  // ── Filtros de conversaciones ──────────────────────────────────────────────
+  const [filtersOpen, setFiltersOpen]     = useState(false);
+  const [searchInput, setSearchInput]     = useState('');
+  const [charFilter, setCharFilter]       = useState('');
+  const [storyFilter, setStoryFilter]     = useState('');
+  const [userFilter, setUserFilter]       = useState('');
+  const search = useDebounce(searchInput);
+  const activeFilters = !!(search || charFilter || storyFilter || userFilter);
+
+  function clearFilters() {
+    setSearchInput(''); setCharFilter(''); setStoryFilter(''); setUserFilter('');
+  }
+
   const { data: conversations = [] } = useQuery({
-    queryKey: ['conversations'],
-    queryFn: () => conversationsApi.list(),
+    queryKey: ['conversations', search, charFilter, storyFilter, userFilter],
+    queryFn: () => conversationsApi.list({
+      search:       search     || undefined,
+      characterId:  charFilter || undefined,
+      storyId:      storyFilter || undefined,
+      filterUserId: userFilter  || undefined,
+    }),
   });
 
   const { data: allCharacters = [] } = useQuery({
@@ -56,6 +85,12 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
   const { data: allStories = [] } = useQuery({
     queryKey: ['stories'],
     queryFn: () => storiesApi.list(),
+  });
+
+  const { data: allUsers = [] } = useQuery<User[]>({
+    queryKey: ['users-list'],
+    queryFn: () => api.get<User[]>('/users'),
+    enabled: isAdmin,
   });
 
   const charIds = activeConversation?.characters.map((c) => c.characterId) ?? [];
@@ -137,40 +172,123 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
       {/* Conversations list (only on chat route) */}
       {!collapsed && location.pathname === '/' && (
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
-          <div className="flex items-center justify-between px-3 py-2">
+          {/* Header */}
+          <div className="flex items-center justify-between px-3 py-2 flex-shrink-0">
             <span className="text-xs font-medium text-text-muted uppercase tracking-wider">Conversaciones</span>
-            <button
-              onClick={() => createConv.mutate()}
-              className="p-1 rounded hover:bg-white/8 text-text-muted hover:text-accent transition-colors"
-              title="Nueva conversación"
-            >
-              <Plus size={14} />
-            </button>
+            <div className="flex items-center gap-0.5">
+              <button
+                onClick={() => { setFiltersOpen((v) => !v); if (filtersOpen) clearFilters(); }}
+                className={`p-1 rounded hover:bg-white/8 transition-colors ${filtersOpen || activeFilters ? 'text-accent' : 'text-text-muted hover:text-text-primary'}`}
+                title="Filtrar conversaciones"
+              >
+                <SlidersHorizontal size={13} />
+              </button>
+              <button
+                onClick={() => createConv.mutate()}
+                className="p-1 rounded hover:bg-white/8 text-text-muted hover:text-accent transition-colors"
+                title="Nueva conversación"
+              >
+                <Plus size={14} />
+              </button>
+            </div>
           </div>
-          <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5">
+
+          {/* Filtros colapsables */}
+          {filtersOpen && (
+            <div className="px-2 pb-2 flex-shrink-0 space-y-1.5 border-b border-border">
+              {/* Búsqueda por título */}
+              <div className="relative flex items-center">
+                <Search size={11} className="absolute left-2 text-text-muted pointer-events-none" />
+                <input
+                  type="text"
+                  placeholder="Buscar título..."
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  className="w-full pl-6 pr-5 py-1 rounded-md text-[11px] border border-border bg-transparent text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                  autoFocus
+                />
+                {searchInput && (
+                  <button onClick={() => setSearchInput('')} className="absolute right-1.5 text-text-muted hover:text-text-primary">
+                    <X size={10} />
+                  </button>
+                )}
+              </div>
+
+              {/* Historia */}
+              <select
+                value={storyFilter}
+                onChange={(e) => setStoryFilter(e.target.value)}
+                className="w-full px-2 py-1 rounded-md text-[11px] border border-border appearance-none focus:outline-none focus:ring-1 focus:ring-accent"
+                style={{ background: 'var(--surface-2)', color: storyFilter ? 'var(--text-primary)' : 'var(--text-muted)' }}
+              >
+                <option value="">📖 Todas las historias</option>
+                {allStories.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+
+              {/* Personaje */}
+              <select
+                value={charFilter}
+                onChange={(e) => setCharFilter(e.target.value)}
+                className="w-full px-2 py-1 rounded-md text-[11px] border border-border appearance-none focus:outline-none focus:ring-1 focus:ring-accent"
+                style={{ background: 'var(--surface-2)', color: charFilter ? 'var(--text-primary)' : 'var(--text-muted)' }}
+              >
+                <option value="">👤 Todos los personajes</option>
+                {allCharacters.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+
+              {/* Usuario (solo admin) */}
+              {isAdmin && allUsers.length > 0 && (
+                <select
+                  value={userFilter}
+                  onChange={(e) => setUserFilter(e.target.value)}
+                  className="w-full px-2 py-1 rounded-md text-[11px] border border-border appearance-none focus:outline-none focus:ring-1 focus:ring-accent"
+                  style={{ background: 'var(--surface-2)', color: userFilter ? 'var(--text-primary)' : 'var(--text-muted)' }}
+                >
+                  <option value="">🧑‍💻 Todos los usuarios</option>
+                  {allUsers.map((u) => (
+                    <option key={u.id} value={u.id}>{u.displayName || u.username}</option>
+                  ))}
+                </select>
+              )}
+
+              {activeFilters && (
+                <button onClick={clearFilters} className="w-full text-[10px] text-text-muted hover:text-accent transition-colors text-center py-0.5">
+                  Limpiar filtros
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* Lista */}
+          <div className="flex-1 overflow-y-auto px-2 pb-2 space-y-0.5 mt-1">
             {conversations.map((conv) => (
               <ConversationItem
                 key={conv.id}
                 conv={conv}
                 active={conv.id === activeConversationId}
+                showOwner={isAdmin}
                 onSelect={() => {
                   setActiveConversation(conv);
                   navigate('/');
                   if (isMobile) setMobileSidebarOpen(false);
                 }}
                 onDeleted={() => {
-                  if (conv.id === activeConversationId) {
-                    setActiveConversation(null);
-                  }
+                  if (conv.id === activeConversationId) setActiveConversation(null);
                   qc.invalidateQueries({ queryKey: ['conversations'] });
                 }}
               />
             ))}
             {conversations.length === 0 && (
               <div className="py-8 text-center text-xs text-text-muted">
-                Aún no hay conversaciones.
-                <br />
-                Pulsa + para empezar.
+                {activeFilters ? (
+                  <>Sin resultados.<br /><button onClick={clearFilters} className="text-accent hover:underline">Limpiar filtros</button></>
+                ) : (
+                  <>Aún no hay conversaciones.<br />Pulsa + para empezar.</>
+                )}
               </div>
             )}
           </div>
@@ -488,11 +606,13 @@ function ChangePasswordModal({ onClose }: { onClose: () => void }) {
 function ConversationItem({
   conv,
   active,
+  showOwner,
   onSelect,
   onDeleted,
 }: {
   conv: Conversation;
   active: boolean;
+  showOwner?: boolean;
   onSelect: () => void;
   onDeleted: () => void;
 }) {
@@ -533,9 +653,17 @@ function ConversationItem({
             <p className={`text-xs font-medium truncate ${active ? 'text-accent' : 'text-text-primary'}`}>
               {conv.title}
             </p>
-            <p className="text-[10px] text-text-muted">
-              {conv.messageCount} {conv.messageCount === 1 ? 'mensaje' : 'mensajes'}
-            </p>
+            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+              <p className="text-[10px] text-text-muted">
+                {conv.messageCount} {conv.messageCount === 1 ? 'msg' : 'msgs'}
+              </p>
+              {showOwner && conv.ownerName && (
+                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-accent/10 text-accent text-[9px] font-medium leading-none">
+                  <UserCircle size={8} />
+                  {conv.ownerName}
+                </span>
+              )}
+            </div>
           </div>
         </button>
 

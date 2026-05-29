@@ -14,9 +14,22 @@ const msgRepo  = new MessageRepository();
 
 export const conversationRoutes: FastifyPluginAsync = async (app) => {
   app.get('/', async (req) => {
-    const { archived } = req.query as { archived?: string };
+    const { archived, search, characterId, storyId, filterUserId } =
+      req.query as { archived?: string; search?: string; characterId?: string; storyId?: string; filterUserId?: string };
     const { userId, role } = (req as any).authUser ?? {};
-    return { success: true, data: service.list(archived === 'true', userId, role === 'admin') };
+    const isAdmin = role === 'admin';
+    return {
+      success: true,
+      data: service.list({
+        includeArchived: archived === 'true',
+        userId,
+        isAdmin,
+        search,
+        characterId,
+        storyId,
+        filterUserId: isAdmin ? filterUserId : undefined,
+      }),
+    };
   });
 
   app.get<{ Params: { id: string } }>('/:id', async (req) => {

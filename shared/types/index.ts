@@ -163,6 +163,8 @@ export interface Conversation {
   characters: ConversationCharacterLink[];
   stories: ConversationStoryLink[];
   metadata: Record<string, unknown>;
+  userId: string | null;
+  ownerName: string | null;
   createdAt: string;
   updatedAt: string;
 }
