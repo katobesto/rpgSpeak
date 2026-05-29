@@ -43,7 +43,11 @@ export const config = {
     level: optional('LOG_LEVEL', 'info') as 'trace' | 'debug' | 'info' | 'warn' | 'error',
   },
   cors: {
-    origin: optional('CORS_ORIGIN', 'http://localhost:5173'),
+    // Soporta múltiples orígenes separados por coma: "http://a.com,http://b.com"
+    origin: optional('CORS_ORIGIN', 'http://localhost:5173')
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean),
   },
   limits: {
     maxContextTokens: optionalInt('MAX_CONTEXT_TOKENS', 8192),

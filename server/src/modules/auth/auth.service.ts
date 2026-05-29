@@ -80,8 +80,6 @@ export function loginUser(username: string, password: string, fromLocalhost: boo
   const valid = compareSync(password, row.password_hash);
   if (!valid) return null;
 
-  // Admin accounts can only log in from localhost
-  if (row.role === 'admin' && !fromLocalhost) return null;
 
   const user = rowToUser(row);
   const payload: AuthPayload = {
