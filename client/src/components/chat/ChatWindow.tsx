@@ -159,18 +159,9 @@ export function ChatWindow() {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['conversations'] }),
   });
 
-  const startChat = useMutation({
-    mutationFn: (char: Character) =>
-      conversationsApi.create({ title: `Chat con ${char.name}`, characterIds: [char.id] }),
-    onSuccess: (conv) => {
-      setActiveConversation(conv);
-      qc.invalidateQueries({ queryKey: ['conversations'] });
-    },
-  });
-
-  const startAdventure = useMutation({
-    mutationFn: (story: Story) =>
-      conversationsApi.create({ title: story.name, storyIds: [story.id] }),
+  const startConversation = useMutation({
+    mutationFn: ({ title, characterIds, storyIds }: { title: string; characterIds: string[]; storyIds: string[] }) =>
+      conversationsApi.create({ title, characterIds, storyIds }),
     onSuccess: (conv) => {
       setActiveConversation(conv);
       qc.invalidateQueries({ queryKey: ['conversations'] });
@@ -202,9 +193,8 @@ export function ChatWindow() {
         conversations={allConversations}
         onSelectConversation={(c) => setActiveConversation(c)}
         characters={allCharacters}
-        onStartChat={(c) => startChat.mutate(c)}
+        onStartConversation={(p) => startConversation.mutate(p)}
         stories={allStories}
-        onStartAdventure={(s) => startAdventure.mutate(s)}
         allCharacters={allCharacters}
         isAdmin={isAdmin}
       />
@@ -469,6 +459,285 @@ function ContextAnchorModal({ onClose, onSubmit }: {
   );
 }
 
+// ─── Confirmation Dialogs ─────────────────────────────────────────────────────
+
+function ConfirmOverlay({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.72)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        className="w-full max-w-md rounded-2xl border border-border shadow-2xl animate-slide-up overflow-hidden"
+        style={{ background: 'var(--surface-1)' }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** Confirmación al empezar chat desde un personaje */
+function CharacterConfirmDialog({
+  char, stories, onClose, onConfirm,
+}: {
+  char: Character;
+  stories: Story[];
+  onClose: () => void;
+  onConfirm: (p: StartParams) => void;
+}) {
+  const [selectedStoryId, setSelectedStoryId] = useState('');
+
+  function handleConfirm() {
+    const storyIds = selectedStoryId ? [selectedStoryId] : [];
+    // Si se selecciona una historia con personajes vinculados, añadirlos también
+    const extraCharIds: string[] = [];
+    if (selectedStoryId) {
+      const story = stories.find(s => s.id === selectedStoryId);
+      story?.characters.forEach(l => {
+        if (l.characterId !== char.id) extraCharIds.push(l.characterId);
+      });
+    }
+    onConfirm({
+      title: `Chat con ${char.name}`,
+      characterIds: [char.id, ...extraCharIds],
+      storyIds,
+    });
+  }
+
+  return (
+    <ConfirmOverlay onClose={onClose}>
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+        <p className="font-semibold text-sm">Nueva conversación</p>
+        <button onClick={onClose} className="p-1 rounded-lg hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors">
+          <X size={15} />
+        </button>
+      </div>
+
+      {/* Body */}
+      <div className="p-5 space-y-4">
+        {/* Personaje */}
+        <div className="flex items-center gap-3 p-3 rounded-xl border border-border" style={{ background: 'var(--surface-2)' }}>
+          <Avatar name={char.name} src={char.avatar} size="md" />
+          <div className="flex-1 min-w-0">
+            <p className="font-semibold text-sm">{char.name}</p>
+            {char.description && (
+              <p className="text-xs text-text-muted line-clamp-2 mt-0.5 leading-relaxed">
+                {char.description.slice(0, 120)}{char.description.length > 120 ? '…' : ''}
+              </p>
+            )}
+          </div>
+        </div>
+
+        {/* Historia opcional */}
+        {stories.length > 0 && (
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-text-secondary flex items-center gap-1.5">
+              <BookOpen size={12} className="text-accent" />
+              Añadir historia (opcional)
+            </label>
+            <select
+              value={selectedStoryId}
+              onChange={(e) => setSelectedStoryId(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg text-sm border border-border appearance-none focus:outline-none focus:ring-1 focus:ring-accent"
+              style={{ background: 'var(--surface-2)', color: 'var(--text-primary)' }}
+            >
+              <option value="">Sin historia</option>
+              {stories.map((s) => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
+            {selectedStoryId && (() => {
+              const story = stories.find(s => s.id === selectedStoryId);
+              if (!story?.description) return null;
+              return <p className="text-[11px] text-text-muted leading-relaxed">{story.description.slice(0, 100)}…</p>;
+            })()}
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="flex gap-2 px-5 pb-5">
+        <button
+          onClick={onClose}
+          className="flex-1 py-2 rounded-xl text-sm border border-border text-text-secondary hover:text-text-primary transition-colors"
+        >
+          Cancelar
+        </button>
+        <button
+          onClick={handleConfirm}
+          className="flex-1 py-2 rounded-xl text-sm font-medium transition-colors"
+          style={{ background: 'var(--accent)', color: '#fff' }}
+        >
+          <MessageSquarePlus size={14} className="inline mr-1.5 -mt-0.5" />
+          Empezar conversación
+        </button>
+      </div>
+    </ConfirmOverlay>
+  );
+}
+
+/** Confirmación al empezar aventura desde una historia */
+function StoryConfirmDialog({
+  story, allCharacters, onClose, onConfirm,
+}: {
+  story: Story;
+  allCharacters: Character[];
+  onClose: () => void;
+  onConfirm: (p: StartParams) => void;
+}) {
+  // Pre-seleccionar personajes vinculados a la historia
+  const linkedIds = story.characters.map(l => l.characterId);
+  const [selectedCharIds, setSelectedCharIds] = useState<Set<string>>(new Set(linkedIds));
+
+  function toggle(id: string) {
+    setSelectedCharIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  }
+
+  // Personajes vinculados primero, resto después
+  const linkedChars   = linkedIds.map(id => allCharacters.find(c => c.id === id)).filter(Boolean) as Character[];
+  const unlinkedChars = allCharacters.filter(c => !linkedIds.includes(c.id));
+
+  function handleConfirm() {
+    onConfirm({
+      title: story.name,
+      characterIds: [...selectedCharIds],
+      storyIds: [story.id],
+    });
+  }
+
+  return (
+    <ConfirmOverlay onClose={onClose}>
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+        <div className="flex items-center gap-2">
+          {story.adventureMode
+            ? <Sword size={15} className="text-accent" />
+            : <BookOpen size={15} className="text-accent" />}
+          <p className="font-semibold text-sm">
+            {story.adventureMode ? 'Nueva aventura' : 'Nueva historia'}
+          </p>
+        </div>
+        <button onClick={onClose} className="p-1 rounded-lg hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors">
+          <X size={15} />
+        </button>
+      </div>
+
+      {/* Body */}
+      <div className="p-5 space-y-4 max-h-[60vh] overflow-y-auto">
+        {/* Info de la historia */}
+        <div className="p-3 rounded-xl border border-border space-y-1" style={{ background: 'var(--surface-2)' }}>
+          <p className="font-semibold text-sm">{story.name}</p>
+          {story.description && (
+            <p className="text-xs text-text-muted leading-relaxed">
+              {story.description.slice(0, 200)}{story.description.length > 200 ? '…' : ''}
+            </p>
+          )}
+        </div>
+
+        {/* Personajes */}
+        {allCharacters.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-text-secondary flex items-center gap-1.5">
+              <Users size={12} className="text-accent" />
+              Personajes que participarán
+              {linkedChars.length > 0 && (
+                <span className="text-text-muted font-normal">({linkedChars.length} sugeridos por la historia)</span>
+              )}
+            </p>
+
+            {/* Vinculados a la historia */}
+            {linkedChars.map((char) => (
+              <CharacterToggle key={char.id} char={char} checked={selectedCharIds.has(char.id)}
+                linked onChange={() => toggle(char.id)} />
+            ))}
+
+            {/* Resto de personajes */}
+            {unlinkedChars.length > 0 && (
+              <>
+                {linkedChars.length > 0 && (
+                  <p className="text-[10px] text-text-muted pt-1">Otros personajes disponibles:</p>
+                )}
+                {unlinkedChars.map((char) => (
+                  <CharacterToggle key={char.id} char={char} checked={selectedCharIds.has(char.id)}
+                    linked={false} onChange={() => toggle(char.id)} />
+                ))}
+              </>
+            )}
+
+            {selectedCharIds.size === 0 && (
+              <p className="text-xs text-amber-400/80 italic">
+                Sin personajes seleccionados — el narrador actuará solo.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="flex gap-2 px-5 pb-5 border-t border-border pt-4">
+        <button
+          onClick={onClose}
+          className="flex-1 py-2 rounded-xl text-sm border border-border text-text-secondary hover:text-text-primary transition-colors"
+        >
+          Cancelar
+        </button>
+        <button
+          onClick={handleConfirm}
+          className="flex-1 py-2 rounded-xl text-sm font-medium transition-colors"
+          style={{ background: 'var(--accent)', color: '#fff' }}
+        >
+          {story.adventureMode
+            ? <><Sword size={13} className="inline mr-1.5 -mt-0.5" />¡Comenzar aventura!</>
+            : <><BookOpen size={13} className="inline mr-1.5 -mt-0.5" />Comenzar historia</>
+          }
+        </button>
+      </div>
+    </ConfirmOverlay>
+  );
+}
+
+function CharacterToggle({ char, checked, linked, onChange }: {
+  char: Character; checked: boolean; linked: boolean; onChange: () => void;
+}) {
+  return (
+    <button
+      onClick={onChange}
+      className={`w-full flex items-center gap-3 p-2.5 rounded-xl border transition-all text-left ${
+        checked
+          ? 'border-accent/50 bg-accent/5'
+          : 'border-border hover:border-border/80 opacity-60 hover:opacity-80'
+      }`}
+    >
+      <Avatar name={char.name} src={char.avatar} size="sm" />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <p className="text-xs font-medium truncate">{char.name}</p>
+          {linked && (
+            <span className="text-[9px] px-1 py-0.5 rounded bg-accent/15 text-accent font-medium flex-shrink-0">
+              vinculado
+            </span>
+          )}
+        </div>
+        {char.description && (
+          <p className="text-[10px] text-text-muted truncate mt-0.5">{char.description.slice(0, 60)}</p>
+        )}
+      </div>
+      <div className={`w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-colors ${
+        checked ? 'border-accent bg-accent' : 'border-border'
+      }`}>
+        {checked && <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 5l2.5 2.5 4.5-4.5" stroke="white" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+      </div>
+    </button>
+  );
+}
+
 // ─── Conversation Summary Popup ───────────────────────────────────────────────
 
 function ConvSummaryPopup({
@@ -565,26 +834,28 @@ function SectionHeader({ icon, title, count }: { icon: React.ReactNode; title: s
 
 // ─── Empty state / Home screen ────────────────────────────────────────────────
 
+type StartParams = { title: string; characterIds: string[]; storyIds: string[] };
+
 function EmptyState({
   conversations,
   onSelectConversation,
   characters,
-  onStartChat,
+  onStartConversation,
   stories,
-  onStartAdventure,
   allCharacters,
   isAdmin,
 }: {
   conversations: Conversation[];
   onSelectConversation: (c: Conversation) => void;
   characters: Character[];
-  onStartChat: (c: Character) => void;
+  onStartConversation: (p: StartParams) => void;
   stories: Story[];
-  onStartAdventure: (s: Story) => void;
   allCharacters: Character[];
   isAdmin?: boolean;
 }) {
   const [summaryPopupConv, setSummaryPopupConv] = useState<Conversation | null>(null);
+  const [confirmChar,  setConfirmChar]  = useState<Character | null>(null);
+  const [confirmStory, setConfirmStory] = useState<Story | null>(null);
 
   // ── Filtros ────────────────────────────────────────────────────────────────
   const [search, setSearch]           = useState('');
@@ -830,7 +1101,7 @@ function EmptyState({
               {characters.map((char) => (
                 <button
                   key={char.id}
-                  onClick={() => onStartChat(char)}
+                  onClick={() => setConfirmChar(char)}
                   className="flex items-center gap-3 p-3.5 rounded-xl border border-border hover:border-accent/50 hover:bg-accent/5 transition-all text-left group"
                   style={{ background: 'var(--surface-1)' }}
                 >
@@ -864,7 +1135,7 @@ function EmptyState({
               {stories.map((story) => (
                 <button
                   key={story.id}
-                  onClick={() => onStartAdventure(story)}
+                  onClick={() => setConfirmStory(story)}
                   className="flex items-center gap-3 p-3.5 rounded-xl border border-border hover:border-accent/50 hover:bg-accent/5 transition-all text-left group"
                   style={{ background: 'var(--surface-1)' }}
                 >
@@ -917,6 +1188,26 @@ function EmptyState({
           conv={summaryPopupConv}
           onClose={() => setSummaryPopupConv(null)}
           onOpen={() => { onSelectConversation(summaryPopupConv); setSummaryPopupConv(null); }}
+        />
+      )}
+
+      {/* Confirmación: nuevo chat con personaje */}
+      {confirmChar && (
+        <CharacterConfirmDialog
+          char={confirmChar}
+          stories={stories}
+          onClose={() => setConfirmChar(null)}
+          onConfirm={(p) => { onStartConversation(p); setConfirmChar(null); }}
+        />
+      )}
+
+      {/* Confirmación: nueva aventura con historia */}
+      {confirmStory && (
+        <StoryConfirmDialog
+          story={confirmStory}
+          allCharacters={allCharacters}
+          onClose={() => setConfirmStory(null)}
+          onConfirm={(p) => { onStartConversation(p); setConfirmStory(null); }}
         />
       )}
     </div>
