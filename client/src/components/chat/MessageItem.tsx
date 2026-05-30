@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { Copy, Edit2, RefreshCw, Trash2, Check, Bug, X, Pin, Volume2, VolumeX, Loader, Wand2, Image as ImageIcon, Zap, ChevronDown, RotateCcw } from 'lucide-react';
+import { Copy, Edit2, RefreshCw, Trash2, Check, Bug, X, Pin, Volume2, VolumeX, Loader, Wand2, Image as ImageIcon, Zap, ChevronDown, RotateCcw, Play, Square } from 'lucide-react';
 import type { Message, ChatMessage } from '@rpgspeak/shared';
 import { Avatar } from '../ui/Avatar.tsx';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -323,6 +323,17 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
               )}
             </>
           )}
+
+          {/* ── TTS player inline ────────────────────────────────────────── */}
+          {!isUser && !isStreaming && !editing && (
+            <TtsPlayerBar
+              messageId={message.id}
+              text={message.content}
+              voiceId={settings?.ttsSettings?.defaultVoiceId ?? undefined}
+              speed={settings?.ttsSettings?.speed}
+              temperature={settings?.ttsSettings?.temperature}
+            />
+          )}
         </div>
 
         {/* Fast LLM debug panel — solo admin */}
@@ -335,18 +346,6 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <ActionButton icon={copied ? Check : Copy} onClick={copyContent} title="Copy" />
             <ActionButton icon={Edit2} onClick={() => { setEditContent(message.content); setEditing(true); }} title="Edit" />
-            {!isUser && (
-              <ActionButton
-                icon={isTtsLoading ? Loader : isTtsPlaying ? VolumeX : Volume2}
-                onClick={() => speak(message.id, message.content, {
-                  voiceId:     settings?.ttsSettings?.defaultVoiceId ?? undefined,
-                  speed:       settings?.ttsSettings?.speed,
-                  temperature: settings?.ttsSettings?.temperature,
-                })}
-                title={isTtsPlaying ? 'Detener voz' : 'Reproducir voz'}
-                spin={isTtsLoading}
-              />
-            )}
             {isAdmin && !isUser && Boolean(message.metadata?.promptMessages) && (
               <ActionButton icon={Bug} onClick={() => setShowPrompt(true)} title="Debug prompt" />
             )}
@@ -554,6 +553,80 @@ function FastLlmDebugPanel({ debug: initialDebug, messageId }: { debug: FastLlmD
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─── TTS Player Bar ───────────────────────────────────────────────────────────
+
+function TtsPlayerBar({ messageId, text, voiceId, speed, temperature }: {
+  messageId:   string;
+  text:        string;
+  voiceId?:    string;
+  speed?:      number;
+  temperature?: number;
+}) {
+  const { speak, stop, playingId, loadingId, currentTime, duration } = useTtsStore();
+  const isPlaying = playingId === messageId;
+  const isLoading = loadingId === messageId;
+
+  function handleClick() {
+    if (isPlaying || isLoading) {
+      stop();
+    } else {
+      speak(messageId, text, { voiceId, speed, temperature });
+    }
+  }
+
+  // Formato mm:ss
+  function fmt(s: number) {
+    if (!isFinite(s) || s < 0) return '0:00';
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, '0')}`;
+  }
+
+  const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
+
+  return (
+    <div className="mt-2 pt-2 border-t border-white/8">
+      <div className="flex items-center gap-2">
+        {/* Botón play/stop */}
+        <button
+          onClick={handleClick}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium transition-all flex-shrink-0 ${
+            isPlaying
+              ? 'bg-accent/20 text-accent border border-accent/40 hover:bg-accent/30'
+              : isLoading
+              ? 'bg-white/8 text-text-muted border border-border cursor-wait'
+              : 'bg-white/8 text-text-muted border border-border hover:bg-white/12 hover:text-text-primary hover:border-accent/40'
+          }`}
+          title={isPlaying ? 'Detener' : isLoading ? 'Generando audio…' : 'Escuchar'}
+        >
+          {isLoading ? (
+            <><Loader size={11} className="animate-spin" /> Generando…</>
+          ) : isPlaying ? (
+            <><Square size={10} className="fill-current" /> Detener</>
+          ) : (
+            <><Play size={11} className="fill-current" /> Escuchar</>
+          )}
+        </button>
+
+        {/* Barra de progreso — solo visible mientras reproduce */}
+        {isPlaying && (
+          <div className="flex items-center gap-2 flex-1 min-w-0">
+            <div className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-accent transition-all duration-300"
+                style={{ width: `${progress}%` }}
+              />
+            </div>
+            <span className="text-[10px] text-text-muted tabular-nums flex-shrink-0">
+              {fmt(currentTime)}{duration > 0 ? ` / ${fmt(duration)}` : ''}
+            </span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function ActionButton({ icon: Icon, onClick, title, danger = false, spin = false }: {
   icon: React.ElementType; onClick: () => void; title: string; danger?: boolean; spin?: boolean;

@@ -3,21 +3,19 @@ import { getAuthHeader } from '../api/client.ts';
 
 // ─── Text cleaning ────────────────────────────────────────────────────────────
 
-// El servidor aplica la limpieza completa. Aquí solo eliminamos lo mínimo
-// para evitar código no pronunciable y acotaciones de escena.
 function cleanForSpeech(text: string): string {
   return text
-    .replace(/```[\s\S]*?```/g, '')        // bloques de código
-    .replace(/`[^`]+`/g, '')               // código inline
-    .replace(/\*\*([^*]+)\*\*/g, '$1')     // bold → texto
-    .replace(/\*([^*]+)\*/g, '$1')         // italic → texto
-    .replace(/^#{1,6}\s+/gm, '')           // encabezados markdown
-    .replace(/^\s*\([^)]{1,300}\)\s*/gm, '') // acotaciones de escena al inicio de línea
-    .replace(/\n{3,}/g, '\n\n')            // colapsar saltos excesivos
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`[^`]+`/g, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/^\s*\([^)]{1,300}\)\s*/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
-// ─── Defaults TTS ─────────────────────────────────────────────────────────────
+// ─── Defaults ────────────────────────────────────────────────────────────────
 
 interface TtsConfig {
   voiceId:     string;
@@ -31,24 +29,12 @@ const DEFAULT_CONFIG: TtsConfig = {
   temperature: 0.667,
 };
 
-// ─── Audio state (módulo-level, único) ───────────────────────────────────────
+// ─── Audio state ──────────────────────────────────────────────────────────────
 
-// AudioContext path — usado en iOS y navegadores modernos
-let _audioCtx:    AudioContext | null = null;
-let _audioSource: AudioBufferSourceNode | null = null;
-
-// HTMLAudioElement fallback (edge cases)
 let _audio:     HTMLAudioElement | null = null;
 let _objectUrl: string | null = null;
 
 function releaseAudio() {
-  // AudioContext path
-  try { _audioSource?.stop(); } catch { /* already stopped */ }
-  _audioSource = null;
-  try { _audioCtx?.close(); } catch { /* already closed */ }
-  _audioCtx = null;
-
-  // HTMLAudioElement path
   if (_audio) {
     _audio.pause();
     _audio.src    = '';
@@ -60,6 +46,10 @@ function releaseAudio() {
     URL.revokeObjectURL(_objectUrl);
     _objectUrl = null;
   }
+  // Reset MediaSession state
+  if ('mediaSession' in navigator) {
+    try { navigator.mediaSession.playbackState = 'none'; } catch {}
+  }
 }
 
 // ─── Store ────────────────────────────────────────────────────────────────────
@@ -68,48 +58,49 @@ interface TtsStore {
   playingId: string | null;
   loadingId: string | null;
   lastError: string | null;
+  duration:  number;   // segundos totales del audio en reproducción
+  currentTime: number; // posición actual en segundos
 
   speak: (messageId: string, text: string, config?: Partial<TtsConfig>) => Promise<void>;
   stop:  () => void;
 }
 
 export const useTtsStore = create<TtsStore>((set, get) => ({
-  playingId: null,
-  loadingId: null,
-  lastError: null,
+  playingId:   null,
+  loadingId:   null,
+  lastError:   null,
+  duration:    0,
+  currentTime: 0,
 
   stop() {
     releaseAudio();
-    set({ playingId: null, loadingId: null });
+    set({ playingId: null, loadingId: null, duration: 0, currentTime: 0 });
   },
 
   async speak(messageId, text, config) {
     const { playingId, loadingId } = get();
 
-    // Mismo mensaje → toggle off
+    // Toggle off si ya está sonando o cargando este mensaje
     if (playingId === messageId || loadingId === messageId) {
       get().stop();
       return;
     }
 
     releaseAudio();
-    set({ loadingId: messageId, playingId: null, lastError: null });
+    set({ loadingId: messageId, playingId: null, lastError: null, duration: 0, currentTime: 0 });
 
-    // ── iOS fix: desbloquear AudioContext DENTRO del handler del gesto ─────────
-    // iOS Safari pierde el contexto de gesto en cuanto hay una operación async
-    // (como fetch). Crear y resumir el AudioContext aquí — ANTES del fetch —
-    // lo "desbloquea" de forma persistente para el resto de la función.
-    const AudioContextClass =
-      window.AudioContext ?? (window as Record<string, unknown>).webkitAudioContext as typeof AudioContext | undefined;
-
-    let audioCtx: AudioContext | null = null;
-    if (AudioContextClass) {
+    // ── iOS unlock — DEBE ir antes del primer await ────────────────────────
+    // AudioContext.resume() dentro del gesto desbloquea el motor de audio.
+    // HTMLAudioElement.play() también se beneficia de esto en iOS moderno.
+    const AudioCtxClass =
+      window.AudioContext ??
+      (window as Record<string, unknown>).webkitAudioContext as typeof AudioContext | undefined;
+    if (AudioCtxClass) {
       try {
-        audioCtx = new AudioContextClass();
-        await audioCtx.resume(); // desbloqueo iOS — debe llamarse antes de cualquier await de red
-      } catch {
-        audioCtx = null;
-      }
+        const ctx = new AudioCtxClass();
+        await ctx.resume();
+        ctx.close(); // solo lo usamos para desbloquear, no para reproducir
+      } catch { /* no crítico */ }
     }
 
     const { voiceId, speed, temperature } = { ...DEFAULT_CONFIG, ...config };
@@ -131,46 +122,57 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
         throw new Error(String(err.error ?? 'Error de síntesis'));
       }
 
-      if (audioCtx) {
-        // ── Ruta AudioContext (iOS + Chrome + Firefox modernos) ───────────────
-        // AudioContext.decodeAudioData no tiene restricciones de autoplay:
-        // la reproducción ya está desbloqueada porque resumimos antes del fetch.
-        const arrayBuffer = await resp.arrayBuffer();
-        const decodedData = await audioCtx.decodeAudioData(arrayBuffer);
+      // Crear blob con el Content-Type correcto (WAV para Piper, MP3 para Edge TTS)
+      const contentType = resp.headers.get('content-type') ?? 'audio/wav';
+      const blob        = new Blob([await resp.arrayBuffer()], { type: contentType });
+      const url         = URL.createObjectURL(blob);
 
-        const source = audioCtx.createBufferSource();
-        source.buffer = decodedData;
-        source.connect(audioCtx.destination);
+      // ── HTMLAudioElement para reproducción ────────────────────────────────
+      // A diferencia de AudioContext, HTMLAudioElement continúa reproduciéndose
+      // cuando el dispositivo se bloquea o la pantalla se apaga (iOS).
+      const audio       = new Audio(url);
+      _audio            = audio;
+      _objectUrl        = url;
 
-        _audioCtx    = audioCtx;
-        _audioSource = source;
+      // Progreso en tiempo real
+      audio.ontimeupdate = () => set({ currentTime: audio.currentTime });
+      audio.onloadedmetadata = () => set({ duration: audio.duration });
 
-        source.onended = () => {
-          releaseAudio();
+      audio.onended = () => {
+        releaseAudio();
+        set({ playingId: null, duration: 0, currentTime: 0 });
+      };
+      audio.onerror = () => {
+        releaseAudio();
+        set({ playingId: null, lastError: 'Error al reproducir' });
+      };
+
+      // ── MediaSession API ──────────────────────────────────────────────────
+      // Informa al SO que hay media reproduciéndose: impide que iOS pause el
+      // audio al bloquear la pantalla y muestra controles en la pantalla de bloqueo.
+      if ('mediaSession' in navigator) {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title:  'rpgSpeak',
+          artist: 'Narración',
+          album:  '',
+        });
+        navigator.mediaSession.playbackState = 'playing';
+        navigator.mediaSession.setActionHandler('play',  () => {
+          audio.play().catch(() => {});
+          set({ playingId: messageId });
+        });
+        navigator.mediaSession.setActionHandler('pause', () => {
+          audio.pause();
           set({ playingId: null });
-        };
-
-        set({ loadingId: null, playingId: messageId });
-        source.start(0);
-
-      } else {
-        // ── Fallback: HTMLAudioElement ────────────────────────────────────────
-        const blob = await resp.blob();
-        _objectUrl = URL.createObjectURL(blob);
-        _audio     = new Audio(_objectUrl);
-
-        _audio.onended = () => { releaseAudio(); set({ playingId: null }); };
-        _audio.onerror = () => { releaseAudio(); set({ playingId: null, lastError: 'Error al reproducir' }); };
-
-        set({ loadingId: null, playingId: messageId });
-        await _audio.play();
+          navigator.mediaSession.playbackState = 'paused';
+        });
+        navigator.mediaSession.setActionHandler('stop',  () => get().stop());
       }
+
+      set({ loadingId: null, playingId: messageId });
+      await audio.play();
 
     } catch (err) {
-      // Limpiar el audioCtx si algo falla antes de asignarlo a _audioCtx
-      if (audioCtx && audioCtx !== _audioCtx) {
-        try { audioCtx.close(); } catch { /* noop */ }
-      }
       releaseAudio();
       const msg = err instanceof Error ? err.message : String(err);
       console.error('[TTS]', msg);
