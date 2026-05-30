@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   MessageSquare, Users, BookOpen, Settings, ChevronLeft, ChevronRight, Plus, Zap,
@@ -375,21 +376,32 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
 // ─── Chapters Sidebar Panel ───────────────────────────────────────────────────
 
 function ChaptersSidebarPanel({ conversationId }: { conversationId: string }) {
-  const [open, setOpen]               = useState(true);
-  const [expandedId, setExpandedId]   = useState<string | null>(null);
-  const [menuId, setMenuId]           = useState<string | null>(null);
-  const menuRef                       = useRef<HTMLDivElement>(null);
+  const [open, setOpen]             = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [menu, setMenu]             = useState<{ id: string; top: number; left: number } | null>(null);
+  const menuPortalRef               = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
 
-  // Cerrar menú al hacer clic fuera
+  // Cerrar menú al hacer clic fuera (en el portal)
   useEffect(() => {
-    if (!menuId) return;
+    if (!menu) return;
     function onClickOutside(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuId(null);
+      if (menuPortalRef.current && !menuPortalRef.current.contains(e.target as Node)) {
+        setMenu(null);
+      }
     }
     document.addEventListener('mousedown', onClickOutside);
     return () => document.removeEventListener('mousedown', onClickOutside);
-  }, [menuId]);
+  }, [menu]);
+
+  // Calcular posición del menú desde el botón ⋮
+  const openMenu = useCallback((e: React.MouseEvent<HTMLButtonElement>, chId: string) => {
+    e.stopPropagation();
+    if (menu?.id === chId) { setMenu(null); return; }
+    const rect = e.currentTarget.getBoundingClientRect();
+    // Mostrar debajo del botón, alineado a la derecha
+    setMenu({ id: chId, top: rect.bottom + 4, left: rect.right - 176 });
+  }, [menu]);
 
   useEffect(() => {
     function handler(e: Event) {
@@ -422,7 +434,7 @@ function ChaptersSidebarPanel({ conversationId }: { conversationId: string }) {
       chaptersApi.setAction(id, action),
     onSuccess:  () => {
       qc.invalidateQueries({ queryKey: ['chapters', conversationId] });
-      setMenuId(null);
+      setMenu(null);
     },
   });
 
@@ -514,55 +526,16 @@ function ChaptersSidebarPanel({ conversationId }: { conversationId: string }) {
                       </button>
                     )}
 
-                    {/* Menú de acciones ⋮ */}
-                    <div className="relative flex-shrink-0" ref={isMenuOpen ? menuRef : undefined}>
-                      <button
-                        onClick={(e) => { e.stopPropagation(); setMenuId(isMenuOpen ? null : ch.id); }}
-                        className={`p-0.5 rounded text-text-muted hover:text-text-primary transition-colors ${
-                          isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover/ch:opacity-100'
-                        }`}
-                        title="Acciones"
-                      >
-                        <MoreVertical size={11} />
-                      </button>
-
-                      {isMenuOpen && (
-                        <div
-                          className="absolute right-0 top-full mt-0.5 z-50 w-44 rounded-xl border border-border shadow-xl py-1 animate-slide-up"
-                          style={{ background: 'var(--surface-2)' }}
-                        >
-                          {/* Marcar como activo — siempre disponible excepto si ya es el activo */}
-                          {!isCurrent && (
-                            <button
-                              onClick={() => doAction(ch.id, 'activate')}
-                              className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-accent/10 text-left text-xs text-text-primary"
-                            >
-                              <PlayCircle size={12} className="text-accent" />
-                              Marcar como activo
-                            </button>
-                          )}
-
-                          {/* Marcar completado / pendiente */}
-                          {!isCompleted ? (
-                            <button
-                              onClick={() => doAction(ch.id, 'complete')}
-                              className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-emerald-500/10 text-left text-xs text-text-primary"
-                            >
-                              <CheckCheck size={12} className="text-emerald-400" />
-                              Marcar como completado
-                            </button>
-                          ) : (
-                            <button
-                              onClick={() => doAction(ch.id, 'uncomplete')}
-                              className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-amber-500/10 text-left text-xs text-text-primary"
-                            >
-                              <RotateCcw size={12} className="text-amber-400" />
-                              Marcar como pendiente
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </div>
+                    {/* Botón ⋮ — el menú se renderiza fuera del DOM via portal */}
+                    <button
+                      onClick={(e) => openMenu(e, ch.id)}
+                      className={`flex-shrink-0 p-0.5 rounded text-text-muted hover:text-text-primary transition-colors ${
+                        menu?.id === ch.id ? 'opacity-100' : 'opacity-0 group-hover/ch:opacity-100'
+                      }`}
+                      title="Acciones"
+                    >
+                      <MoreVertical size={11} />
+                    </button>
                   </div>
 
                   {/* Descripción desplegable */}
@@ -580,6 +553,59 @@ function ChaptersSidebarPanel({ conversationId }: { conversationId: string }) {
 
           </div>
         </div>
+      )}
+
+      {/* Portal del menú — renderizado en document.body para escapar overflow:hidden */}
+      {menu && createPortal(
+        <div
+          ref={menuPortalRef}
+          className="w-44 rounded-xl border border-border shadow-2xl py-1 animate-slide-up"
+          style={{
+            position:   'fixed',
+            top:        menu.top,
+            left:       Math.max(4, menu.left),
+            zIndex:     9999,
+            background: 'var(--surface-2)',
+          }}
+        >
+          {(() => {
+            const ch          = chapters.find(c => c.id === menu.id);
+            const isCurrent   = ch?.id === currentChapter?.id;
+            const isCompleted = ch?.isCompleted;
+            if (!ch) return null;
+            return (
+              <>
+                {!isCurrent && (
+                  <button
+                    onClick={() => doAction(ch.id, 'activate')}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-accent/10 text-left text-xs text-text-primary"
+                  >
+                    <PlayCircle size={12} className="text-accent" />
+                    Marcar como activo
+                  </button>
+                )}
+                {!isCompleted ? (
+                  <button
+                    onClick={() => doAction(ch.id, 'complete')}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-emerald-500/10 text-left text-xs text-text-primary"
+                  >
+                    <CheckCheck size={12} className="text-emerald-400" />
+                    Marcar como completado
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => doAction(ch.id, 'uncomplete')}
+                    className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-amber-500/10 text-left text-xs text-text-primary"
+                  >
+                    <RotateCcw size={12} className="text-amber-400" />
+                    Marcar como pendiente
+                  </button>
+                )}
+              </>
+            );
+          })()}
+        </div>,
+        document.body
       )}
     </div>
   );
