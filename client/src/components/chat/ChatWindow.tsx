@@ -22,6 +22,7 @@ import {
   Zap,
   BookOpen,
   BarChart2,
+  ScrollText,
   Pin,
   X,
   Sword,
@@ -133,6 +134,19 @@ export function ChatWindow() {
   const { data: allStories = [] } = useQuery({
     queryKey: ['stories'],
     queryFn: () => storiesApi.list(),
+  });
+
+  // Query de capítulos para el banner de "sin guión"
+  const hasStories = (activeConversation?.stories.length ?? 0) > 0;
+  const { data: convChapters = [] } = useQuery({
+    queryKey: ['chapters', convId],
+    queryFn:  () => chaptersApi.list(convId!),
+    enabled:  !!convId && hasStories,
+    staleTime: 10_000,
+  });
+  const generateChaptersMut = useMutation({
+    mutationFn: () => chaptersApi.generate(convId!),
+    onSuccess:  () => qc.invalidateQueries({ queryKey: ['chapters', convId] }),
   });
 
   const { data: allConversations = [] } = useQuery({
@@ -312,6 +326,30 @@ export function ChatWindow() {
           </div>
         </div>
       </div>
+
+      {/* Banner: guión no generado */}
+      {hasStories && convChapters.length === 0 && !generateChaptersMut.isPending && (
+        <div className="flex-shrink-0 flex items-center gap-3 px-4 py-2.5 border-b border-border"
+          style={{ background: 'rgba(var(--accent-rgb,99,102,241),0.06)' }}>
+          <ScrollText size={14} className="text-accent flex-shrink-0" />
+          <p className="text-xs text-text-secondary flex-1">
+            Esta historia no tiene guión generado.
+          </p>
+          <button
+            onClick={() => generateChaptersMut.mutate()}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-accent/50 text-accent hover:bg-accent/15 transition-colors flex-shrink-0"
+          >
+            Generar guión
+          </button>
+        </div>
+      )}
+      {generateChaptersMut.isPending && (
+        <div className="flex-shrink-0 flex items-center gap-2 px-4 py-2 border-b border-border text-xs text-text-muted"
+          style={{ background: 'rgba(var(--accent-rgb,99,102,241),0.04)' }}>
+          <span className="w-3 h-3 rounded-full border-2 border-accent border-t-transparent animate-spin flex-shrink-0" />
+          Generando guión de campaña…
+        </div>
+      )}
 
       <MessageList
         ref={messageListRef}
