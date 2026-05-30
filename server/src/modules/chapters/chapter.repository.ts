@@ -82,6 +82,44 @@ export class ChapterRepository {
     return { completed: { ...current, isCompleted: true, completedAt: ts }, next };
   }
 
+  /** Marca un capítulo concreto como completado o pendiente */
+  setCompleted(id: string, completed: boolean): StoryChapter | null {
+    const ts = now();
+    if (completed) {
+      this.db.run(sql`UPDATE story_chapters SET is_completed = 1, completed_at = ${ts} WHERE id = ${id}`);
+    } else {
+      this.db.run(sql`UPDATE story_chapters SET is_completed = 0, completed_at = NULL WHERE id = ${id}`);
+    }
+    const row = this.db.select().from(storyChapters).where(eq(storyChapters.id, id)).get();
+    return row ? dbToChapter(row) : null;
+  }
+
+  /**
+   * Hace que un capítulo sea el "activo":
+   * - Completa todos los capítulos con número MENOR
+   * - Deja pendiente este capítulo y todos los POSTERIORES
+   */
+  setActive(id: string): void {
+    const row = this.db.select().from(storyChapters).where(eq(storyChapters.id, id)).get();
+    if (!row) return;
+    const ts = now();
+    // Completar anteriores
+    this.db.run(sql`
+      UPDATE story_chapters
+      SET is_completed = 1, completed_at = ${ts}
+      WHERE conversation_id = ${row.conversationId}
+        AND chapter_number < ${row.chapterNumber}
+        AND is_completed = 0
+    `);
+    // Dejar pendiente este y los posteriores
+    this.db.run(sql`
+      UPDATE story_chapters
+      SET is_completed = 0, completed_at = NULL
+      WHERE conversation_id = ${row.conversationId}
+        AND chapter_number >= ${row.chapterNumber}
+    `);
+  }
+
   deleteByConversation(conversationId: string): void {
     this.db.run(sql`DELETE FROM story_chapters WHERE conversation_id = ${conversationId}`);
   }

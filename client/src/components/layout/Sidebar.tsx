@@ -3,7 +3,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   MessageSquare, Users, BookOpen, Settings, ChevronLeft, ChevronRight, Plus, Zap,
   MoreHorizontal, Trash2, AlertTriangle, Sword, ChevronDown, ChevronUp, LogOut, KeyRound, X,
-  Search, SlidersHorizontal, UserCircle, ScrollText, CheckCircle2, Circle,
+  Search, SlidersHorizontal, UserCircle, ScrollText, CheckCircle2, Circle, MoreVertical,
+  CheckCheck, RotateCcw, PlayCircle,
 } from 'lucide-react';
 import { useUiStore } from '../../stores/ui.store.ts';
 import { useChatStore } from '../../stores/chat.store.ts';
@@ -376,7 +377,19 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
 function ChaptersSidebarPanel({ conversationId }: { conversationId: string }) {
   const [open, setOpen]               = useState(true);
   const [expandedId, setExpandedId]   = useState<string | null>(null);
+  const [menuId, setMenuId]           = useState<string | null>(null);
+  const menuRef                       = useRef<HTMLDivElement>(null);
   const qc = useQueryClient();
+
+  // Cerrar menú al hacer clic fuera
+  useEffect(() => {
+    if (!menuId) return;
+    function onClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuId(null);
+    }
+    document.addEventListener('mousedown', onClickOutside);
+    return () => document.removeEventListener('mousedown', onClickOutside);
+  }, [menuId]);
 
   useEffect(() => {
     function handler(e: Event) {
@@ -403,6 +416,19 @@ function ChaptersSidebarPanel({ conversationId }: { conversationId: string }) {
     mutationFn: () => chaptersApi.generate(conversationId),
     onSuccess:  () => qc.invalidateQueries({ queryKey: ['chapters', conversationId] }),
   });
+
+  const actionMut = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'complete' | 'uncomplete' | 'activate' }) =>
+      chaptersApi.setAction(id, action),
+    onSuccess:  () => {
+      qc.invalidateQueries({ queryKey: ['chapters', conversationId] });
+      setMenuId(null);
+    },
+  });
+
+  function doAction(id: string, action: 'complete' | 'uncomplete' | 'activate') {
+    actionMut.mutate({ id, action });
+  }
 
   return (
     // overflow-hidden evita que el texto empuje el ancho del sidebar
@@ -450,16 +476,16 @@ function ChaptersSidebarPanel({ conversationId }: { conversationId: string }) {
             )}
 
             {chapters.map((ch) => {
-              const isCurrent    = ch.id === currentChapter?.id;
-              const isCompleted  = ch.isCompleted;
-              const isExpanded   = expandedId === ch.id;
-              const canExpand    = !!ch.description;
+              const isCurrent   = ch.id === currentChapter?.id;
+              const isCompleted = ch.isCompleted;
+              const isExpanded  = expandedId === ch.id;
+              const isMenuOpen  = menuId === ch.id;
 
               return (
-                <div key={ch.id} className={`transition-opacity ${isCompleted ? 'opacity-40' : ''}`}>
+                <div key={ch.id} className={`transition-opacity ${isCompleted ? 'opacity-50' : ''}`}>
                   {/* Fila del capítulo */}
-                  <div className="flex items-center gap-1.5 py-1 min-w-0 overflow-hidden">
-                    {/* Icono estado — fijo */}
+                  <div className="flex items-center gap-1 py-1 min-w-0 overflow-hidden group/ch">
+                    {/* Icono estado */}
                     <div className="flex-shrink-0">
                       {isCompleted
                         ? <CheckCircle2 size={11} className="text-emerald-400" />
@@ -469,7 +495,7 @@ function ChaptersSidebarPanel({ conversationId }: { conversationId: string }) {
                       }
                     </div>
 
-                    {/* Número + título — truncado */}
+                    {/* Título truncado */}
                     <p className={`text-[11px] font-medium leading-tight truncate flex-1 min-w-0 ${
                       isCompleted ? 'line-through text-text-muted' :
                       isCurrent   ? 'text-accent' : 'text-text-secondary'
@@ -478,21 +504,68 @@ function ChaptersSidebarPanel({ conversationId }: { conversationId: string }) {
                     </p>
 
                     {/* Botón expandir descripción */}
-                    {canExpand && (
+                    {ch.description && (
                       <button
                         onClick={() => setExpandedId(isExpanded ? null : ch.id)}
-                        className="flex-shrink-0 p-0.5 rounded text-text-muted hover:text-text-primary transition-colors"
-                        title={isExpanded ? 'Ocultar descripción' : 'Ver descripción'}
+                        className="flex-shrink-0 p-0.5 rounded text-text-muted hover:text-text-primary transition-colors opacity-0 group-hover/ch:opacity-100"
+                        title={isExpanded ? 'Ocultar' : 'Ver descripción'}
                       >
-                        {isExpanded
-                          ? <ChevronUp   size={10} />
-                          : <ChevronDown size={10} />
-                        }
+                        {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
                       </button>
                     )}
+
+                    {/* Menú de acciones ⋮ */}
+                    <div className="relative flex-shrink-0" ref={isMenuOpen ? menuRef : undefined}>
+                      <button
+                        onClick={(e) => { e.stopPropagation(); setMenuId(isMenuOpen ? null : ch.id); }}
+                        className={`p-0.5 rounded text-text-muted hover:text-text-primary transition-colors ${
+                          isMenuOpen ? 'opacity-100' : 'opacity-0 group-hover/ch:opacity-100'
+                        }`}
+                        title="Acciones"
+                      >
+                        <MoreVertical size={11} />
+                      </button>
+
+                      {isMenuOpen && (
+                        <div
+                          className="absolute right-0 top-full mt-0.5 z-50 w-44 rounded-xl border border-border shadow-xl py-1 animate-slide-up"
+                          style={{ background: 'var(--surface-2)' }}
+                        >
+                          {/* Marcar como activo — siempre disponible excepto si ya es el activo */}
+                          {!isCurrent && (
+                            <button
+                              onClick={() => doAction(ch.id, 'activate')}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-accent/10 text-left text-xs text-text-primary"
+                            >
+                              <PlayCircle size={12} className="text-accent" />
+                              Marcar como activo
+                            </button>
+                          )}
+
+                          {/* Marcar completado / pendiente */}
+                          {!isCompleted ? (
+                            <button
+                              onClick={() => doAction(ch.id, 'complete')}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-emerald-500/10 text-left text-xs text-text-primary"
+                            >
+                              <CheckCheck size={12} className="text-emerald-400" />
+                              Marcar como completado
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => doAction(ch.id, 'uncomplete')}
+                              className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-amber-500/10 text-left text-xs text-text-primary"
+                            >
+                              <RotateCcw size={12} className="text-amber-400" />
+                              Marcar como pendiente
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  {/* Descripción desplegable — width estrictamente limitado al contenedor */}
+                  {/* Descripción desplegable */}
                   {isExpanded && ch.description && (
                     <p
                       className="text-[10px] text-text-muted leading-relaxed pl-4 pr-1 pb-1.5"

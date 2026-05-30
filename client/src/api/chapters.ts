@@ -14,6 +14,10 @@ export const chaptersApi = {
       { conversationId },
     ),
 
+  /** Cambia el estado de un capítulo: completado, pendiente o activo */
+  setAction: (chapterId: string, action: 'complete' | 'uncomplete' | 'activate') =>
+    api.patch<{ success: boolean }>(`/chapters/${chapterId}`, { action }),
+
   deleteAll: (conversationId: string) =>
     api.delete(`/chapters/${conversationId}`),
 };

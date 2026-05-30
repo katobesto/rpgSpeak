@@ -131,12 +131,28 @@ Responde ÚNICAMENTE con las etiquetas siguientes, una por línea, sin texto adi
     });
   });
 
-  // POST /api/chapters/:id/complete — marcar capítulo completado manualmente
+  // POST /api/chapters/:id/complete — marcar completado manualmente
   app.post<{ Params: { id: string } }>('/:id/complete', async (req) => {
     const schema = z.object({ conversationId: z.string() });
     const { conversationId } = schema.parse(req.body);
     const result = chapterRepo.completeCurrentChapter(conversationId);
     return { success: true, data: result };
+  });
+
+  // PATCH /api/chapters/:id — marcar completado / pendiente / activo
+  app.patch<{ Params: { id: string } }>('/:id', async (req) => {
+    const schema = z.object({
+      action: z.enum(['complete', 'uncomplete', 'activate']),
+    });
+    const { action } = schema.parse(req.body);
+
+    if (action === 'activate') {
+      chapterRepo.setActive(req.params.id);
+    } else {
+      chapterRepo.setCompleted(req.params.id, action === 'complete');
+    }
+
+    return { success: true };
   });
 
   // DELETE /api/chapters/:conversationId — eliminar todos los capítulos
