@@ -225,7 +225,7 @@ export function ChatWindow() {
   const activeChar = characters.find((c) => c.id === activeCharacterId);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full relative">
       {/* Header */}
       <div
         className="flex-shrink-0 flex items-center gap-3 px-4 py-3 border-b border-border group"
@@ -356,6 +356,12 @@ export function ChatWindow() {
         messages={messages}
         characters={characters}
         highlightedMessageId={highlightedMessageId}
+      />
+
+      {/* Botón flotante "Continúa la historia" */}
+      <ContinueStoryButton
+        activeCharacterId={activeCharacterId}
+        narratorMode={activeConversation.characters.length === 0}
       />
 
       <MessageInput
@@ -849,6 +855,54 @@ function ConvSummaryPopup({
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
+
+// ─── Continue Story Button ────────────────────────────────────────────────────
+
+function ContinueStoryButton({
+  activeCharacterId,
+  narratorMode,
+}: {
+  activeCharacterId: string | null;
+  narratorMode: boolean;
+}) {
+  const { sendMessage, isStreaming } = useChatStore();
+  const [sending, setSending] = React.useState(false);
+
+  async function handleClick() {
+    if (isStreaming || sending) return;
+    setSending(true);
+    try {
+      await sendMessage({
+        message:     'Continua la historia',
+        characterId: narratorMode ? undefined : (activeCharacterId ?? undefined),
+      });
+    } finally {
+      setSending(false);
+    }
+  }
+
+  if (isStreaming) return null;
+
+  return (
+    <div className="absolute bottom-20 right-4 z-10">
+      <button
+        onClick={handleClick}
+        disabled={sending}
+        className="flex items-center gap-2 px-4 py-2 rounded-full shadow-lg text-xs font-semibold transition-all active:scale-95 disabled:opacity-50 border"
+        style={{
+          background:   'var(--accent)',
+          color:        '#fff',
+          borderColor:  'rgba(255,255,255,0.15)',
+          boxShadow:    '0 4px 16px rgba(0,0,0,0.35)',
+        }}
+        title="Enviar 'Continua la historia'"
+      >
+        <ChevronRight size={14} />
+        Continúa la historia
+      </button>
+    </div>
+  );
+}
 
 function relativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
