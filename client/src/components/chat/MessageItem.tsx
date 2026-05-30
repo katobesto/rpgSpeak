@@ -332,6 +332,7 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
               voiceId={settings?.ttsSettings?.defaultVoiceId ?? undefined}
               speed={settings?.ttsSettings?.speed}
               temperature={settings?.ttsSettings?.temperature}
+              replacements={settings?.ttsSettings?.replacements}
             />
           )}
         </div>
@@ -556,12 +557,13 @@ function FastLlmDebugPanel({ debug: initialDebug, messageId }: { debug: FastLlmD
 
 // ─── TTS Player Bar ───────────────────────────────────────────────────────────
 
-function TtsPlayerBar({ messageId, text, voiceId, speed, temperature }: {
-  messageId:   string;
-  text:        string;
-  voiceId?:    string;
-  speed?:      number;
+function TtsPlayerBar({ messageId, text, voiceId, speed, temperature, replacements }: {
+  messageId:    string;
+  text:         string;
+  voiceId?:     string;
+  speed?:       number;
   temperature?: number;
+  replacements?: import('@rpgspeak/shared').TtsTextReplacement[];
 }) {
   const { speak, stop, playingId, loadingId, currentTime, duration, cachedKeys } = useTtsStore();
   const isPlaying = playingId === messageId;
@@ -577,7 +579,7 @@ function TtsPlayerBar({ messageId, text, voiceId, speed, temperature }: {
     if (isPlaying || isLoading) {
       stop();
     } else {
-      speak(messageId, text, { voiceId, speed, temperature });
+      speak(messageId, text, { voiceId, speed, temperature, replacements });
     }
   }
 

@@ -1,10 +1,26 @@
 import { create } from 'zustand';
 import { getAuthHeader } from '../api/client.ts';
+import type { TtsTextReplacement } from '@rpgspeak/shared';
 
 // ─── Text cleaning ────────────────────────────────────────────────────────────
 
-function cleanForSpeech(text: string): string {
-  return text
+function applyReplacements(text: string, replacements: TtsTextReplacement[]): string {
+  let result = text;
+  for (const { search, replace } of replacements) {
+    if (!search.trim()) continue;
+    try {
+      // Escapar caracteres especiales de regex, búsqueda sin distinguir mayúsculas
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      result = result.replace(new RegExp(escaped, 'gi'), replace);
+    } catch { /* regex inválida — ignorar */ }
+  }
+  return result;
+}
+
+function cleanForSpeech(text: string, replacements: TtsTextReplacement[] = []): string {
+  // Reemplazos del usuario — se aplican primero para que tengan máxima prioridad
+  let t = replacements.length > 0 ? applyReplacements(text, replacements) : text;
+  return t
     // ── 1. Etiquetas de personaje → forma oral natural ────────────────────
     // "**Natasha:** texto"  →  "Natasha dice, texto"
     // "**Natasha:**\ntexto" →  "Natasha dice, texto"
@@ -29,15 +45,17 @@ function cleanForSpeech(text: string): string {
 // ─── Defaults ────────────────────────────────────────────────────────────────
 
 interface TtsConfig {
-  voiceId:     string;
-  speed:       number;
-  temperature: number;
+  voiceId:      string;
+  speed:        number;
+  temperature:  number;
+  replacements: TtsTextReplacement[];
 }
 
 const DEFAULT_CONFIG: TtsConfig = {
-  voiceId:     'es_daniela',
-  speed:       1.0,
-  temperature: 0.667,
+  voiceId:      'es_daniela',
+  speed:        1.0,
+  temperature:  0.667,
+  replacements: [],
 };
 
 // ─── Audio cache ─────────────────────────────────────────────────────────────
@@ -142,7 +160,7 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
       } catch { /* no crítico */ }
     }
 
-    const { voiceId, speed, temperature } = { ...DEFAULT_CONFIG, ...config };
+    const { voiceId, speed, temperature, replacements } = { ...DEFAULT_CONFIG, ...config };
     const cKey = audioCacheKey(messageId, voiceId, speed);
 
     try {
@@ -158,7 +176,7 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
           method:  'POST',
           headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
           body: JSON.stringify({
-            text:        cleanForSpeech(text),
+            text:        cleanForSpeech(text, replacements),
             voiceId,
             speed,
             temperature,

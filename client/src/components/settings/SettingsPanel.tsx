@@ -907,6 +907,10 @@ function VoiceSection({
           hint="Baja = voz estable. Alta = más dinámica pero menos precisa." />
       </Section>
 
+      {/* ── Reemplazos de texto ──────────────────────────────────────────────── */}
+      <ReplacementsSection replacements={tts.replacements ?? []}
+        onChange={(r) => setTts({ replacements: r })} />
+
       {/* ── Voice selection ──────────────────────────────────────────────────── */}
       <Section title="Voces femeninas">
         <VoiceGrid voices={females} selectedId={tts.defaultVoiceId}
@@ -923,6 +927,106 @@ function VoiceSection({
           onPreview={(id) => togglePreview(id, tts.speed, tts.temperature)} />
       </Section>
     </>
+  );
+}
+
+// ─── TTS Replacements Section ────────────────────────────────────────────────
+
+function ReplacementsSection({
+  replacements,
+  onChange,
+}: {
+  replacements: import('@rpgspeak/shared').TtsTextReplacement[];
+  onChange: (r: import('@rpgspeak/shared').TtsTextReplacement[]) => void;
+}) {
+  const [search,  setSearch]  = React.useState('');
+  const [replace, setReplace] = React.useState('');
+  const [error,   setError]   = React.useState('');
+
+  function add() {
+    const s = search.trim();
+    const r = replace.trim();
+    if (!s) { setError('El texto a buscar no puede estar vacío.'); return; }
+    if (replacements.some((x) => x.search.toLowerCase() === s.toLowerCase())) {
+      setError('Ya existe un reemplazo para ese texto.'); return;
+    }
+    onChange([...replacements, { search: s, replace: r }]);
+    setSearch('');
+    setReplace('');
+    setError('');
+  }
+
+  function remove(idx: number) {
+    onChange(replacements.filter((_, i) => i !== idx));
+  }
+
+  return (
+    <Section title="Reemplazos de pronunciación">
+      <p className="text-xs text-text-muted mb-3 leading-relaxed">
+        Corrige pronunciaciones incorrectas. El texto se busca sin distinguir mayúsculas.
+        Ej: «Natasha» → «Natacha», «NPC» → «ene pe ce».
+      </p>
+
+      {/* Lista de reemplazos existentes */}
+      {replacements.length > 0 && (
+        <div className="mb-3 space-y-1.5">
+          {replacements.map((rep, idx) => (
+            <div key={idx}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border text-xs"
+              style={{ background: 'var(--surface-2)' }}
+            >
+              <span className="font-mono text-text-primary flex-shrink-0">{rep.search}</span>
+              <span className="text-text-muted flex-shrink-0">→</span>
+              <span className="font-mono text-accent flex-1 min-w-0 truncate">
+                {rep.replace || <em className="text-text-muted not-italic">(eliminar)</em>}
+              </span>
+              <button
+                onClick={() => remove(idx)}
+                className="flex-shrink-0 p-0.5 rounded hover:bg-red-500/15 text-text-muted hover:text-red-400 transition-colors"
+                title="Eliminar"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Formulario de nuevo reemplazo */}
+      <div className="flex gap-2 items-start">
+        <div className="flex-1 space-y-1.5">
+          <input
+            type="text"
+            placeholder="Buscar…"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setError(''); }}
+            onKeyDown={(e) => e.key === 'Enter' && add()}
+            className="w-full rounded-lg px-3 py-1.5 text-xs border border-border bg-transparent text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent font-mono"
+          />
+          <input
+            type="text"
+            placeholder="Reemplazar con…"
+            value={replace}
+            onChange={(e) => setReplace(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && add()}
+            className="w-full rounded-lg px-3 py-1.5 text-xs border border-border bg-transparent text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent font-mono"
+          />
+        </div>
+        <button
+          onClick={add}
+          disabled={!search.trim()}
+          className="mt-0.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-accent/60 text-accent hover:bg-accent/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex-shrink-0"
+        >
+          Añadir
+        </button>
+      </div>
+
+      {error && <p className="text-[11px] text-red-400 mt-1.5">{error}</p>}
+
+      {replacements.length === 0 && (
+        <p className="text-[11px] text-text-muted mt-2 italic">Sin reemplazos configurados.</p>
+      )}
+    </Section>
   );
 }
 

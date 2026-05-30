@@ -258,6 +258,13 @@ export interface ProviderModel {
 
 // ─── TTS Types ────────────────────────────────────────────────────────────────
 
+export interface TtsTextReplacement {
+  /** Texto a buscar (sin distinguir mayúsculas) */
+  search:  string;
+  /** Texto con el que se sustituye */
+  replace: string;
+}
+
 export interface TtsSettings {
   /** Enable the TTS feature across the app */
   enabled: boolean;
@@ -271,6 +278,8 @@ export interface TtsSettings {
   temperature: number;
   /** Automatically play TTS for new AI messages */
   autoPlay: boolean;
+  /** Lista de sustituciones de texto para mejorar la pronunciación */
+  replacements: TtsTextReplacement[];
 }
 
 export interface TtsVoice {

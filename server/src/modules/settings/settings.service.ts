@@ -10,6 +10,7 @@ const TTS_DEFAULTS: TtsSettings = {
   speed:          1.0,
   temperature:    0.667,
   autoPlay:       false,
+  replacements:   [],
 };
 
 const DEFAULTS: AppSettings = {
