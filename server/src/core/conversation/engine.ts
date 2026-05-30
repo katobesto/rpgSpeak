@@ -604,6 +604,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       embeddingModel:      settings.embeddingModel,
       narrationStylePrompt,
       currentChapter,
+      chapterGuidePrompt: settings.chapterGuidePrompt || undefined,
     });
 
     // Use character's contextLength, then settings default, then 32768
@@ -780,9 +781,10 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     // ── Detección de fin de capítulo ─────────────────────────────────────────
     let chapterCompleted = false;
     let nextChapterNumber: number | null = null;
-    if (cleanContent.includes('[FIN_CAPITULO]')) {
-      // Strip the marker from the saved/displayed content
-      cleanContent = cleanContent.replace(/\[FIN_CAPITULO\]\s*/g, '').trimEnd();
+    // Acepta tanto el marcador nuevo como el legacy por compatibilidad
+    const CHAPTER_DONE_RE = /\[Capitulo\s+Finalizado\]|\[FIN_CAPITULO\]/gi;
+    if (CHAPTER_DONE_RE.test(cleanContent)) {
+      cleanContent = cleanContent.replace(/\[Capitulo\s+Finalizado\]\s*/gi, '').replace(/\[FIN_CAPITULO\]\s*/gi, '').trimEnd();
       const result = chapterRepo.completeCurrentChapter(conversationId);
       if (result) {
         chapterCompleted = true;

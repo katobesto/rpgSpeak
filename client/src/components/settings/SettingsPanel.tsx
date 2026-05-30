@@ -18,7 +18,7 @@ import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
 
 type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats';
 
-const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'storyEventGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage'];
+const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'storyEventGenerationPrompt', 'chapterGuidePrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel'];
 
@@ -359,6 +359,33 @@ export function SettingsPanel() {
                       value={draft.storyEventGenerationPrompt ?? ''}
                       onChange={(v) => update('storyEventGenerationPrompt', v)}
                       rows={10}
+                      mono
+                    />
+                  </Section>
+
+                  <Section title="Guión de campaña — prompt de guía de capítulo">
+                    <p className="text-xs text-text-muted mb-3 leading-relaxed">
+                      Se inyecta como mensaje de sistema justo antes del turno del usuario cuando hay un capítulo activo.
+                      Guía al LLM hacia los eventos del capítulo y le indica cuándo marcar el capítulo como finalizado.
+                    </p>
+                    <p className="text-xs text-text-muted mb-3 leading-relaxed">
+                      Variables disponibles:{' '}
+                      {[
+                        '{{CAPITULO_NUMERO}}',
+                        '{{CAPITULO_TITULO}}',
+                        '{{CAPITULO_DESCRIPCION}}',
+                      ].map(v => (
+                        <code key={v} className="bg-white/8 px-1 mx-0.5 rounded text-accent/80 font-mono text-[10px]">{v}</code>
+                      ))}
+                    </p>
+                    <p className="text-xs text-amber-400/80 mb-3 leading-relaxed">
+                      ⚠ El marcador de fin de capítulo es <code className="font-mono text-[10px]">[Capitulo Finalizado]</code> — inclúyelo en el prompt para que el LLM sepa qué enviar.
+                    </p>
+                    <RestorablePrompt
+                      settingsKey="chapterGuidePrompt"
+                      value={draft.chapterGuidePrompt ?? ''}
+                      onChange={(v) => update('chapterGuidePrompt', v)}
+                      rows={12}
                       mono
                     />
                   </Section>

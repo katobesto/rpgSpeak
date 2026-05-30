@@ -39,6 +39,8 @@ export interface BuildContextOptions {
   narrationStylePrompt?: string;
   // Capítulo activo del guión de campaña
   currentChapter?: import('@rpgspeak/shared').StoryChapter | null;
+  // Prompt configurable para guiar al LLM hacia los eventos del capítulo
+  chapterGuidePrompt?: string;
 }
 
 // ── Aviso de aventura para modo personaje individual (sin narrador) ─────────
@@ -77,6 +79,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
     embeddingModel,
     narrationStylePrompt,
     currentChapter,
+    chapterGuidePrompt,
   } = opts;
 
   const systemParts: string[] = [];
@@ -347,15 +350,20 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
 
   // 4b. Capítulo activo del guión de campaña
   if (currentChapter && needsSplit) {
-    history.push({
-      role: 'system',
-      content: `## Guión de campaña — Capítulo ${currentChapter.chapterNumber}: "${currentChapter.title}"
-${currentChapter.description}
+    // Usar el prompt configurable; sustituir variables {{...}}
+    const template = chapterGuidePrompt?.trim() || `## Capítulo activo: {{CAPITULO_NUMERO}} — "{{CAPITULO_TITULO}}"
 
-Cuando los eventos de este capítulo queden completamente resueltos, incluye en una línea separada al final de tu respuesta:
-[FIN_CAPITULO]
-No incluyas esta marca antes de que el capítulo esté verdaderamente concluido.`,
-    });
+**Descripción:**
+{{CAPITULO_DESCRIPCION}}
+
+**Directiva narrativa:** Tu prioridad es avanzar la historia hacia los eventos de este capítulo. Cuando esté concluido, añade al final (línea separada): [Capitulo Finalizado]`;
+
+    const chapterBlock = template
+      .replace(/\{\{CAPITULO_NUMERO\}\}/g,      String(currentChapter.chapterNumber))
+      .replace(/\{\{CAPITULO_TITULO\}\}/g,       currentChapter.title)
+      .replace(/\{\{CAPITULO_DESCRIPCION\}\}/g,  currentChapter.description);
+
+    history.push({ role: 'system', content: chapterBlock });
   }
 
   // 5. Last user message (generation point)
