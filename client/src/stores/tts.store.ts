@@ -113,6 +113,7 @@ interface TtsStore {
 
   speak:    (messageId: string, text: string, config?: Partial<TtsConfig>) => Promise<void>;
   stop:     () => void;
+  seek:     (time: number) => void;
   isCached: (messageId: string, config?: Partial<TtsConfig>) => boolean;
 }
 
@@ -127,6 +128,12 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
   stop() {
     releaseAudio();
     set({ playingId: null, loadingId: null, duration: 0, currentTime: 0 });
+  },
+
+  seek(time) {
+    if (_audio) {
+      _audio.currentTime = Math.max(0, Math.min(time, _audio.duration || 0));
+    }
   },
 
   isCached(messageId, config) {

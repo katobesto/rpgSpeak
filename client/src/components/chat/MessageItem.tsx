@@ -565,38 +565,40 @@ function TtsPlayerBar({ messageId, text, voiceId, speed, temperature, replacemen
   temperature?: number;
   replacements?: import('@rpgspeak/shared').TtsTextReplacement[];
 }) {
-  const { speak, stop, playingId, loadingId, currentTime, duration, cachedKeys } = useTtsStore();
+  const { speak, stop, seek, playingId, loadingId, currentTime, duration, cachedKeys } = useTtsStore();
   const isPlaying = playingId === messageId;
   const isLoading = loadingId === messageId;
 
-  // Construir la misma clave que usa el store para verificar si hay caché
   const effectiveVoiceId = voiceId ?? 'es_daniela';
   const effectiveSpeed   = speed ?? 1.0;
-  const cacheKey = `${messageId}:${effectiveVoiceId}:${effectiveSpeed.toFixed(1)}`;
-  const cached   = cachedKeys.has(cacheKey);
+  const cKey   = `${messageId}:${effectiveVoiceId}:${effectiveSpeed.toFixed(1)}`;
+  const cached = cachedKeys.has(cKey);
 
   function handleClick() {
-    if (isPlaying || isLoading) {
-      stop();
-    } else {
-      speak(messageId, text, { voiceId, speed, temperature, replacements });
-    }
+    if (isPlaying || isLoading) stop();
+    else speak(messageId, text, { voiceId, speed, temperature, replacements });
   }
 
-  // Formato mm:ss
+  function handleSeek(e: React.MouseEvent<HTMLDivElement>) {
+    if (!duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const pct  = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+    seek(pct * duration);
+  }
+
   function fmt(s: number) {
     if (!isFinite(s) || s < 0) return '0:00';
     const m = Math.floor(s / 60);
-    const sec = Math.floor(s % 60);
-    return `${m}:${sec.toString().padStart(2, '0')}`;
+    return `${m}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
   }
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
   return (
     <div className="mt-2 pt-2 border-t border-white/8">
+      {/* Fila principal: botón + barra a todo el ancho */}
       <div className="flex items-center gap-2">
-        {/* Botón play/stop */}
+        {/* Botón compacto */}
         <button
           onClick={handleClick}
           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium transition-all flex-shrink-0 ${
@@ -606,33 +608,40 @@ function TtsPlayerBar({ messageId, text, voiceId, speed, temperature, replacemen
               ? 'bg-white/8 text-text-muted border border-border cursor-wait'
               : 'bg-white/8 text-text-muted border border-border hover:bg-white/12 hover:text-text-primary hover:border-accent/40'
           }`}
-          title={isPlaying ? 'Detener' : isLoading ? 'Generando audio…' : 'Escuchar'}
+          title={isPlaying ? 'Detener' : isLoading ? 'Generando audio…' : cached ? 'Reproducir' : 'Generar audio'}
         >
           {isLoading ? (
             <><Loader size={11} className="animate-spin" /> Generando…</>
           ) : isPlaying ? (
             <><Square size={10} className="fill-current" /> Detener</>
           ) : cached ? (
-            <><Play size={11} className="fill-current" /> Repetir</>
+            <><Play size={11} className="fill-current" /> Reproducir</>
           ) : (
-            <><Play size={11} className="fill-current" /> Escuchar</>
+            <><Play size={11} className="fill-current" /> Generar audio</>
           )}
         </button>
 
-        {/* Barra de progreso — solo visible mientras reproduce */}
-        {isPlaying && (
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            <div className="flex-1 h-1 rounded-full bg-white/10 overflow-hidden">
-              <div
-                className="h-full rounded-full bg-accent transition-all duration-300"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <span className="text-[10px] text-text-muted tabular-nums flex-shrink-0">
+        {/* Barra de progreso a todo el ancho — clicable para seek */}
+        <div className="flex items-center gap-2 flex-1 min-w-0">
+          <div
+            className={`flex-1 h-2 rounded-full overflow-hidden transition-colors ${
+              isPlaying ? 'bg-white/15 cursor-pointer' : 'bg-white/6'
+            }`}
+            onClick={handleSeek}
+            title={isPlaying ? 'Clic para saltar' : undefined}
+          >
+            <div
+              className="h-full rounded-full bg-accent transition-[width] duration-200"
+              style={{ width: `${isPlaying ? progress : 0}%` }}
+            />
+          </div>
+          {/* Tiempo — solo si está reproduciendo */}
+          {isPlaying && (
+            <span className="text-[10px] text-text-muted tabular-nums flex-shrink-0 select-none">
               {fmt(currentTime)}{duration > 0 ? ` / ${fmt(duration)}` : ''}
             </span>
-          </div>
-        )}
+          )}
+        </div>
       </div>
     </div>
   );
