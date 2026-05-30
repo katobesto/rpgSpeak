@@ -138,12 +138,17 @@ app.add_middleware(
 
 HF_BASE = "https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0"
 
+# type='local'  → Piper TTS (offline, requiere modelo descargado)
+# type='cloud'  → Microsoft Edge TTS (neural, requiere internet, gratis)
+
 VOICE_CATALOG = [
+    # ══ PIPER — LOCAL ══════════════════════════════════════════════════════════
     # ── Argentina ──────────────────────────────────────────────────────────────
     {
         "id":          "es_daniela",
         "name":        "Daniela",
         "gender":      "female",
+        "type":        "local",
         "description": "Voz femenina expresiva, acento argentino (alta calidad)",
         "model_id":    "es_AR-daniela-high",
         "speaker_id":  None,
@@ -153,6 +158,7 @@ VOICE_CATALOG = [
         "id":          "es_catala",
         "name":        "Catala",
         "gender":      "female",
+        "type":        "local",
         "description": "Voz femenina, acento argentino (calidad media)",
         "model_id":    "es_AR-catala-medium",
         "speaker_id":  None,
@@ -163,24 +169,27 @@ VOICE_CATALOG = [
         "id":          "es_sofia",
         "name":        "Sofía",
         "gender":      "female",
+        "type":        "local",
         "description": "Voz femenina clara y natural (España)",
         "model_id":    "es_ES-sharvard-medium",
-        "speaker_id":  1,           # sharvard: M=0, F=1
+        "speaker_id":  1,
         "path_prefix": "es/es_ES/sharvard/medium",
     },
     {
         "id":          "es_carlos",
         "name":        "Carlos",
         "gender":      "male",
+        "type":        "local",
         "description": "Voz masculina narrativa, acento español",
         "model_id":    "es_ES-sharvard-medium",
-        "speaker_id":  0,           # sharvard: M=0, F=1
+        "speaker_id":  0,
         "path_prefix": "es/es_ES/sharvard/medium",
     },
     {
         "id":          "es_david",
         "name":        "David",
         "gender":      "male",
+        "type":        "local",
         "description": "Voz masculina clara y expresiva (España)",
         "model_id":    "es_ES-davefx-medium",
         "speaker_id":  None,
@@ -190,7 +199,8 @@ VOICE_CATALOG = [
         "id":          "es_carlfm",
         "name":        "Carl",
         "gender":      "male",
-        "description": "Voz masculina compacta (España, calidad básica, muy rápida)",
+        "type":        "local",
+        "description": "Voz masculina compacta (España, básica, muy rápida)",
         "model_id":    "es_ES-carlfm-x_low",
         "speaker_id":  None,
         "path_prefix": "es/es_ES/carlfm/x_low",
@@ -200,6 +210,7 @@ VOICE_CATALOG = [
         "id":          "es_antonio",
         "name":        "Antonio",
         "gender":      "male",
+        "type":        "local",
         "description": "Voz masculina neutra y profesional (México)",
         "model_id":    "es_MX-ald-medium",
         "speaker_id":  None,
@@ -209,10 +220,114 @@ VOICE_CATALOG = [
         "id":          "es_claude_mx",
         "name":        "Claude MX",
         "gender":      "male",
+        "type":        "local",
         "description": "Voz masculina, acento mexicano (alta calidad)",
         "model_id":    "es_MX-claude-high",
         "speaker_id":  None,
         "path_prefix": "es/es_MX/claude/high",
+    },
+
+    # ══ MICROSOFT EDGE TTS — CLOUD ═════════════════════════════════════════════
+    # Voces neurales gratuitas. Sin descarga. Requieren conexión a internet.
+    # ── España ─────────────────────────────────────────────────────────────────
+    {
+        "id":           "edge_alvaro",
+        "name":         "Álvaro",
+        "gender":       "male",
+        "type":         "cloud",
+        "description":  "Voz neural masculina, acento español (Microsoft)",
+        "edge_voice_id": "es-ES-AlvaroNeural",
+    },
+    {
+        "id":           "edge_elvira",
+        "name":         "Elvira",
+        "gender":       "female",
+        "type":         "cloud",
+        "description":  "Voz neural femenina, acento español (Microsoft)",
+        "edge_voice_id": "es-ES-ElviraNeural",
+    },
+    {
+        "id":           "edge_irene",
+        "name":         "Irene",
+        "gender":       "female",
+        "type":         "cloud",
+        "description":  "Voz neural femenina cálida, acento español (Microsoft)",
+        "edge_voice_id": "es-ES-IreneNeural",
+    },
+    {
+        "id":           "edge_triana",
+        "name":         "Triana",
+        "gender":       "female",
+        "type":         "cloud",
+        "description":  "Voz neural femenina expresiva, acento español (Microsoft)",
+        "edge_voice_id": "es-ES-TrianaNeural",
+    },
+    {
+        "id":           "edge_saul",
+        "name":         "Saúl",
+        "gender":       "male",
+        "type":         "cloud",
+        "description":  "Voz neural masculina natural, acento español (Microsoft)",
+        "edge_voice_id": "es-ES-SaulNeural",
+    },
+    # ── México ─────────────────────────────────────────────────────────────────
+    {
+        "id":           "edge_dalia",
+        "name":         "Dalia",
+        "gender":       "female",
+        "type":         "cloud",
+        "description":  "Voz neural femenina, acento mexicano (Microsoft)",
+        "edge_voice_id": "es-MX-DaliaNeural",
+    },
+    {
+        "id":           "edge_jorge_mx",
+        "name":         "Jorge",
+        "gender":       "male",
+        "type":         "cloud",
+        "description":  "Voz neural masculina, acento mexicano (Microsoft)",
+        "edge_voice_id": "es-MX-JorgeNeural",
+    },
+    {
+        "id":           "edge_candela",
+        "name":         "Candela",
+        "gender":       "female",
+        "type":         "cloud",
+        "description":  "Voz neural femenina expresiva, acento mexicano (Microsoft)",
+        "edge_voice_id": "es-MX-CandelaNeural",
+    },
+    # ── Argentina ──────────────────────────────────────────────────────────────
+    {
+        "id":           "edge_elena_ar",
+        "name":         "Elena AR",
+        "gender":       "female",
+        "type":         "cloud",
+        "description":  "Voz neural femenina, acento argentino (Microsoft)",
+        "edge_voice_id": "es-AR-ElenaNeural",
+    },
+    {
+        "id":           "edge_tomas_ar",
+        "name":         "Tomás AR",
+        "gender":       "male",
+        "type":         "cloud",
+        "description":  "Voz neural masculina, acento argentino (Microsoft)",
+        "edge_voice_id": "es-AR-TomasNeural",
+    },
+    # ── Colombia ───────────────────────────────────────────────────────────────
+    {
+        "id":           "edge_salome",
+        "name":         "Salomé",
+        "gender":       "female",
+        "type":         "cloud",
+        "description":  "Voz neural femenina, acento colombiano (Microsoft)",
+        "edge_voice_id": "es-CO-SalomeNeural",
+    },
+    {
+        "id":           "edge_gonzalo",
+        "name":         "Gonzalo",
+        "gender":       "male",
+        "type":         "cloud",
+        "description":  "Voz neural masculina, acento colombiano (Microsoft)",
+        "edge_voice_id": "es-CO-GonzaloNeural",
     },
 ]
 
@@ -373,8 +488,42 @@ def _synth_binary(text: str, model_id: str, voice_meta: dict,
     return result.stdout
 
 
+async def _synth_edge(text: str, voice_meta: dict, speed: float) -> bytes:
+    """Synthesize using Microsoft Edge TTS (neural, cloud, free, no API key)."""
+    try:
+        import edge_tts  # type: ignore
+    except ImportError:
+        raise RuntimeError("edge-tts no está instalado. Ejecuta: pip install edge-tts")
+
+    edge_voice = voice_meta["edge_voice_id"]
+
+    # Convertir speed (0.5-3.0) a rate de Edge TTS ("+20%", "-30%", etc.)
+    rate_pct = int(round((speed - 1.0) * 100))
+    rate_str = f"+{rate_pct}%" if rate_pct >= 0 else f"{rate_pct}%"
+
+    logger.info("Edge TTS | voice=%s | rate=%s | chars=%d", edge_voice, rate_str, len(text))
+
+    communicate = edge_tts.Communicate(
+        text=text,
+        voice=edge_voice,
+        rate=rate_str,
+    )
+
+    audio_chunks: list[bytes] = []
+    async for chunk in communicate.stream():
+        if chunk["type"] == "audio":
+            audio_chunks.append(chunk["data"])
+
+    if not audio_chunks:
+        raise RuntimeError("Edge TTS no devolvió audio")
+
+    return b"".join(audio_chunks)
+
+
 async def _ensure_model(voice: dict) -> None:
-    """Download model files if not present."""
+    """Download model files if not present (solo voces locales Piper)."""
+    if voice.get("type") == "cloud":
+        return  # Las voces cloud no necesitan descarga
     if not _model_available(voice["model_id"]):
         logger.info("Model files missing for %s — downloading…", voice["model_id"])
         await _download_model(voice["model_id"], voice["path_prefix"])
@@ -395,13 +544,19 @@ class SynthesizeRequest(BaseModel):
 async def list_voices():
     voices = []
     for v in VOICE_CATALOG:
+        voice_type = v.get("type", "local")
+        # Las voces cloud siempre están disponibles (no requieren descarga)
+        if voice_type == "cloud":
+            available = True
+        else:
+            available = _model_available(v["model_id"])
         voices.append({
             "id":          v["id"],
             "name":        v["name"],
             "gender":      v["gender"],
             "description": v["description"],
-            "available":   _model_available(v["model_id"]),
-            "type":        "builtin",
+            "available":   available,
+            "type":        voice_type,
         })
     return {"success": True, "data": voices}
 
@@ -435,8 +590,11 @@ async def synthesize(req: SynthesizeRequest):
     if not text:
         raise HTTPException(status_code=400, detail="El texto está vacío después de limpiar")
 
+    voice_type = voice.get("type", "local")
+    backend    = "edge" if voice_type == "cloud" else ("binary" if _USE_BINARY else "python")
+
     logger.info("Synthesizing | voice=%s | speed=%.1f | chars=%d | backend=%s",
-                req.voice_id, req.speed, len(text), "binary" if _USE_BINARY else "python")
+                req.voice_id, req.speed, len(text), backend)
 
     try:
         await _ensure_model(voice)
@@ -444,23 +602,31 @@ async def synthesize(req: SynthesizeRequest):
         logger.error("Failed to load/download model: %s", exc)
         raise HTTPException(status_code=500, detail=f"Error al cargar modelo TTS: {exc}") from exc
 
-    synth_fn = _synth_binary if _USE_BINARY else _synth_python
-
     loop = asyncio.get_event_loop()
     try:
-        wav_bytes = await loop.run_in_executor(
-            None, synth_fn, text, voice["model_id"], voice, req.speed, req.temperature
-        )
+        if voice_type == "cloud":
+            # Edge TTS es nativo async — llamada directa
+            audio_bytes = await _synth_edge(text, voice, req.speed)
+            media_type  = "audio/mpeg"
+            filename    = "speech.mp3"
+        else:
+            # Piper (local) — ejecutamos en thread para no bloquear el event loop
+            synth_fn    = _synth_binary if _USE_BINARY else _synth_python
+            audio_bytes = await loop.run_in_executor(
+                None, synth_fn, text, voice["model_id"], voice, req.speed, req.temperature
+            )
+            media_type  = "audio/wav"
+            filename    = "speech.wav"
     except Exception as exc:
         logger.error("Synthesis error: %s", exc)
-        raise HTTPException(status_code=500, detail=f"Error en síntesis: {exc}") from exc
+        raise HTTPException(status_code=500, detail=f"Error en sintesis: {exc}") from exc
 
-    logger.info("✓ Synthesized %d bytes WAV", len(wav_bytes))
+    logger.info("✓ Synthesized %d bytes (%s)", len(audio_bytes), media_type)
 
     return Response(
-        content=wav_bytes,
-        media_type="audio/wav",
-        headers={"Content-Disposition": 'attachment; filename="speech.wav"'},
+        content=audio_bytes,
+        media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

@@ -692,13 +692,27 @@ export function SettingsPanel() {
 
 // Static catalog — Piper TTS voices, mirrors Python VOICE_CATALOG
 const STATIC_CATALOG: Omit<TtsVoice, 'available'>[] = [
-  { id: 'es_daniela', name: 'Daniela', gender: 'female', description: 'Voz femenina expresiva, acento argentino (alta calidad)',   type: 'builtin' },
-  { id: 'es_sofia',   name: 'Sofía',   gender: 'female', description: 'Voz femenina clara y natural (España)',                     type: 'builtin' },
-  { id: 'es_laura',   name: 'Laura',   gender: 'female', description: 'Voz femenina cálida y expresiva, acento mexicano (alta calidad)', type: 'builtin' },
-  { id: 'es_carlos',  name: 'Carlos',  gender: 'male',   description: 'Voz masculina grave y narrativa (España)',                  type: 'builtin' },
-  { id: 'es_david',   name: 'David',   gender: 'male',   description: 'Voz masculina clara y expresiva (España)',                  type: 'builtin' },
-  { id: 'es_antonio', name: 'Antonio', gender: 'male',   description: 'Voz masculina neutra y profesional (México)',               type: 'builtin' },
-  { id: 'es_claude',  name: 'Claude',  gender: 'male',   description: 'Voz masculina, acento mexicano (alta calidad)',             type: 'builtin' },
+  // ── Local (Piper) ───────────────────────────────────────────────────────────
+  { id: 'es_daniela',  name: 'Daniela',  gender: 'female', type: 'local',  description: 'Voz femenina expresiva, acento argentino (Piper)' },
+  { id: 'es_catala',   name: 'Catala',   gender: 'female', type: 'local',  description: 'Voz femenina, acento argentino (Piper)' },
+  { id: 'es_sofia',    name: 'Sofía',    gender: 'female', type: 'local',  description: 'Voz femenina clara, acento español (Piper)' },
+  { id: 'es_carlos',   name: 'Carlos',   gender: 'male',   type: 'local',  description: 'Voz masculina narrativa, acento español (Piper)' },
+  { id: 'es_david',    name: 'David',    gender: 'male',   type: 'local',  description: 'Voz masculina expresiva, acento español (Piper)' },
+  { id: 'es_antonio',  name: 'Antonio',  gender: 'male',   type: 'local',  description: 'Voz masculina neutra, acento mexicano (Piper)' },
+  { id: 'es_claude_mx',name: 'Claude MX',gender: 'male',   type: 'local',  description: 'Voz masculina, acento mexicano alta calidad (Piper)' },
+  // ── Cloud (Microsoft Edge TTS) ─────────────────────────────────────────────
+  { id: 'edge_elvira',   name: 'Elvira',   gender: 'female', type: 'cloud', description: 'Voz neural femenina, acento español (Microsoft)' },
+  { id: 'edge_irene',    name: 'Irene',    gender: 'female', type: 'cloud', description: 'Voz neural femenina cálida, acento español (Microsoft)' },
+  { id: 'edge_triana',   name: 'Triana',   gender: 'female', type: 'cloud', description: 'Voz neural femenina expresiva, acento español (Microsoft)' },
+  { id: 'edge_dalia',    name: 'Dalia',    gender: 'female', type: 'cloud', description: 'Voz neural femenina, acento mexicano (Microsoft)' },
+  { id: 'edge_candela',  name: 'Candela',  gender: 'female', type: 'cloud', description: 'Voz neural femenina expresiva, acento mexicano (Microsoft)' },
+  { id: 'edge_elena_ar', name: 'Elena AR', gender: 'female', type: 'cloud', description: 'Voz neural femenina, acento argentino (Microsoft)' },
+  { id: 'edge_salome',   name: 'Salomé',   gender: 'female', type: 'cloud', description: 'Voz neural femenina, acento colombiano (Microsoft)' },
+  { id: 'edge_alvaro',   name: 'Álvaro',   gender: 'male',   type: 'cloud', description: 'Voz neural masculina, acento español (Microsoft)' },
+  { id: 'edge_saul',     name: 'Saúl',     gender: 'male',   type: 'cloud', description: 'Voz neural masculina natural, acento español (Microsoft)' },
+  { id: 'edge_jorge_mx', name: 'Jorge',    gender: 'male',   type: 'cloud', description: 'Voz neural masculina, acento mexicano (Microsoft)' },
+  { id: 'edge_tomas_ar', name: 'Tomás AR', gender: 'male',   type: 'cloud', description: 'Voz neural masculina, acento argentino (Microsoft)' },
+  { id: 'edge_gonzalo',  name: 'Gonzalo',  gender: 'male',   type: 'cloud', description: 'Voz neural masculina, acento colombiano (Microsoft)' },
 ];
 
 const PREVIEW_TEXT = 'El viento susurraba entre las ruinas del castillo mientras la aventura comenzaba a desplegarse ante ti.';
@@ -931,7 +945,8 @@ function VoiceGrid({
         const isSelected    = selectedId === voice.id;
         const isDownloading = downloading === voice.id;
         const hasError      = downloadError === voice.id;
-        const needsDownload = !voice.available;
+        const isCloud       = voice.type === 'cloud';
+        const needsDownload = !isCloud && !voice.available;
         const isPreviewing  = previewing === voice.id;
         const isLoadingPrev = previewLoading === voice.id;
 
@@ -947,16 +962,25 @@ function VoiceGrid({
             }`}
             style={{ background: isSelected ? 'rgba(var(--accent-rgb,99,102,241),0.08)' : 'var(--surface-2)' }}
           >
-            {/* Header row: icon + name + selected check */}
+            {/* Header row: icon + name + badge + selected check */}
             <div className="flex items-start gap-2">
               <div className={`mt-0.5 p-1 rounded-md flex-shrink-0 ${isSelected ? 'bg-accent/20' : 'bg-white/8'}`}>
                 <Volume2 size={11} className={isSelected ? 'text-accent' : 'text-text-muted'} />
               </div>
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <span className={`text-xs font-semibold ${isSelected ? 'text-accent' : 'text-text-primary'}`}>
                     {voice.name}
                   </span>
+                  {isCloud ? (
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-blue-500/15 text-blue-400 leading-none flex-shrink-0">
+                      ☁ cloud
+                    </span>
+                  ) : (
+                    <span className="px-1.5 py-0.5 rounded text-[9px] font-medium bg-emerald-500/15 text-emerald-400 leading-none flex-shrink-0">
+                      ⬢ local
+                    </span>
+                  )}
                   {isSelected && <CheckCircle2 size={10} className="text-accent flex-shrink-0" />}
                 </div>
                 <p className="text-[10px] text-text-muted leading-tight mt-0.5 line-clamp-2">
