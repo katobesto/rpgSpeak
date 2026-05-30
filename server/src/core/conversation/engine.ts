@@ -11,14 +11,16 @@ import { SettingsService } from '../../modules/settings/settings.service.js';
 import { MemoryRepository } from '../memory/memory.repository.js';
 import { NotFoundError, ProviderError } from '../../shared/errors.js';
 import { getUserById } from '../../modules/auth/auth.service.js';
+import { ChapterRepository } from '../../modules/chapters/chapter.repository.js';
 
-const providerRepo = new ProviderRepository();
-const charRepo = new CharacterRepository();
-const storyRepo = new StoryRepository();
-const msgRepo = new MessageRepository();
-const convRepo = new ConversationRepository();
+const providerRepo   = new ProviderRepository();
+const charRepo       = new CharacterRepository();
+const storyRepo      = new StoryRepository();
+const msgRepo        = new MessageRepository();
+const convRepo       = new ConversationRepository();
 const settingsService = new SettingsService();
-const memRepo = new MemoryRepository();
+const memRepo        = new MemoryRepository();
+const chapterRepo    = new ChapterRepository();
 
 export interface GenerateOptions {
   conversationId: string;
@@ -43,7 +45,7 @@ export interface AffinityUpdate {
 export interface StreamOptions extends GenerateOptions {
   signal?: AbortSignal;
   onToken: (token: string) => void;
-  onDone: (response: { messageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string }) => void;
+  onDone: (response: { messageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string; chapterCompleted?: boolean; nextChapterNumber?: number | null }) => void;
   onError: (error: Error) => void;
 }
 
@@ -572,6 +574,9 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       ownerStyle === 'medium' ? (settings.narrationMediumPrompt || undefined) :
       undefined;
 
+    // Capítulo activo del guión de campaña (si existe para esta conversación)
+    const currentChapter = chapterRepo.findCurrentChapter(conversationId) ?? null;
+
     const rawContext = await buildContext({
       character: character ?? groupCharacters[0],
       stories: linkedStories,
@@ -598,6 +603,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       embeddingProviderId: settings.embeddingProviderId,
       embeddingModel:      settings.embeddingModel,
       narrationStylePrompt,
+      currentChapter,
     });
 
     // Use character's contextLength, then settings default, then 32768
@@ -771,6 +777,20 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       cleanContent = accumulated.replace(/\[AFINIDAD:[^\]]+\]/g, '').trimEnd();
     }
 
+    // ── Detección de fin de capítulo ─────────────────────────────────────────
+    let chapterCompleted = false;
+    let nextChapterNumber: number | null = null;
+    if (cleanContent.includes('[FIN_CAPITULO]')) {
+      // Strip the marker from the saved/displayed content
+      cleanContent = cleanContent.replace(/\[FIN_CAPITULO\]\s*/g, '').trimEnd();
+      const result = chapterRepo.completeCurrentChapter(conversationId);
+      if (result) {
+        chapterCompleted = true;
+        nextChapterNumber = result.next?.chapterNumber ?? null;
+        console.log(`[chapters] Chapter ${result.completed.chapterNumber} completed for conv ${conversationId}${result.next ? `, next: ${result.next.chapterNumber}` : ' (fin de guión)'}`);
+      }
+    }
+
     // Always persist whatever content was generated (full or partial)
     msgRepo.update(assistantMsg.id, {
       content: cleanContent,
@@ -791,7 +811,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
 
     if (!aborted) {
       convRepo.incrementCounts(conversationId, finalTokens);
-      onDone({ messageId: assistantMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent });
+      onDone({ messageId: assistantMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, chapterCompleted, nextChapterNumber });
       // Fire-and-forget summary update
       updateSummaryAsync(conversationId, provider, modelId, narratorMode);
     }

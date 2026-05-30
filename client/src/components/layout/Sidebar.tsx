@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   MessageSquare, Users, BookOpen, Settings, ChevronLeft, ChevronRight, Plus, Zap,
   MoreHorizontal, Trash2, AlertTriangle, Sword, ChevronDown, ChevronUp, LogOut, KeyRound, X,
-  Search, SlidersHorizontal, UserCircle,
+  Search, SlidersHorizontal, UserCircle, ScrollText, CheckCircle2, Circle,
 } from 'lucide-react';
 import { useUiStore } from '../../stores/ui.store.ts';
 import { useChatStore } from '../../stores/chat.store.ts';
@@ -13,9 +13,10 @@ import { conversationsApi } from '../../api/conversations.ts';
 import { charactersApi } from '../../api/characters.ts';
 import { storiesApi } from '../../api/stories.ts';
 import { authApi } from '../../api/auth.ts';
+import { chaptersApi } from '../../api/chapters.ts';
 import { api } from '../../api/client.ts';
 import { Avatar } from '../ui/Avatar.tsx';
-import type { Character, Conversation, User } from '@rpgspeak/shared';
+import type { Character, Conversation, User, StoryChapter } from '@rpgspeak/shared';
 
 function useDebounce<T>(value: T, delay = 300): T {
   const [debounced, setDebounced] = useState(value);
@@ -295,6 +296,11 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
         </div>
       )}
 
+      {/* Chapters Panel — when conversation has linked stories */}
+      {!collapsed && activeConversation && activeConversation.stories.length > 0 && (
+        <ChaptersSidebarPanel conversationId={activeConversation.id} />
+      )}
+
       {/* Adventure Status Panel — only when not collapsed and adventure active */}
       {!collapsed && isAdventureActive && activeConversation && (
         <AdventureSidebarPanel
@@ -360,6 +366,119 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
 
       {changePwdOpen && (
         <ChangePasswordModal onClose={() => setChangePwdOpen(false)} />
+      )}
+    </div>
+  );
+}
+
+// ─── Chapters Sidebar Panel ───────────────────────────────────────────────────
+
+function ChaptersSidebarPanel({ conversationId }: { conversationId: string }) {
+  const [open, setOpen] = useState(true);
+  const qc = useQueryClient();
+
+  // Invalidar cuando el engine notifica fin de capítulo
+  useEffect(() => {
+    function handler(e: Event) {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.conversationId === conversationId) {
+        qc.invalidateQueries({ queryKey: ['chapters', conversationId] });
+      }
+    }
+    window.addEventListener('rpgspeak:chapterCompleted', handler);
+    return () => window.removeEventListener('rpgspeak:chapterCompleted', handler);
+  }, [conversationId, qc]);
+
+  const { data: chapters = [], isLoading } = useQuery({
+    queryKey: ['chapters', conversationId],
+    queryFn:  () => chaptersApi.list(conversationId),
+    staleTime: 5_000,
+  });
+
+  const completedCount = chapters.filter(c => c.isCompleted).length;
+  const currentChapter = chapters.find(c => !c.isCompleted) ?? null;
+  const hasChapters    = chapters.length > 0;
+
+  const generateMut = useMutation({
+    mutationFn: () => chaptersApi.generate(conversationId),
+    onSuccess:  () => qc.invalidateQueries({ queryKey: ['chapters', conversationId] }),
+  });
+
+  return (
+    <div className="border-t border-border flex-shrink-0" style={{ background: 'var(--surface-1)' }}>
+      {/* Header */}
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/4 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <ScrollText size={12} className="text-accent" />
+          <span className="text-[11px] font-semibold text-accent uppercase tracking-wider">Guión</span>
+          {hasChapters && (
+            <span className="text-[10px] text-text-muted">
+              {completedCount}/{chapters.length}
+            </span>
+          )}
+        </div>
+        {open ? <ChevronDown size={12} className="text-text-muted" /> : <ChevronUp size={12} className="text-text-muted" />}
+      </button>
+
+      {open && (
+        <div className="overflow-y-auto" style={{ maxHeight: '260px' }}>
+          <div className="px-3 pb-3 space-y-1">
+            {isLoading && (
+              <p className="text-[10px] text-text-muted italic py-1">Cargando guión…</p>
+            )}
+
+            {!isLoading && !hasChapters && (
+              <div className="space-y-1.5">
+                <p className="text-[10px] text-text-muted italic">Sin guión generado.</p>
+                <button
+                  onClick={() => generateMut.mutate()}
+                  disabled={generateMut.isPending}
+                  className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-accent/40 text-accent text-[10px] hover:bg-accent/10 transition-colors disabled:opacity-50"
+                >
+                  {generateMut.isPending ? 'Generando…' : '+ Generar guión'}
+                </button>
+              </div>
+            )}
+
+            {chapters.map((ch) => {
+              const isCurrent   = ch.id === currentChapter?.id;
+              const isCompleted = ch.isCompleted;
+              return (
+                <div
+                  key={ch.id}
+                  className={`flex items-start gap-2 py-1 transition-opacity ${isCompleted ? 'opacity-40' : ''}`}
+                >
+                  {/* Icono estado */}
+                  <div className="flex-shrink-0 mt-0.5">
+                    {isCompleted
+                      ? <CheckCircle2 size={11} className="text-emerald-400" />
+                      : isCurrent
+                      ? <Sword size={11} className="text-accent" />
+                      : <Circle size={11} className="text-text-muted" />
+                    }
+                  </div>
+                  {/* Contenido */}
+                  <div className="flex-1 min-w-0">
+                    <p className={`text-[11px] font-medium leading-tight ${
+                      isCompleted ? 'line-through text-text-muted' :
+                      isCurrent   ? 'text-accent' : 'text-text-secondary'
+                    }`}>
+                      {ch.chapterNumber}. {ch.title}
+                    </p>
+                    {isCurrent && ch.description && (
+                      <p className="text-[10px] text-text-muted leading-relaxed mt-0.5 line-clamp-2">
+                        {ch.description}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       )}
     </div>
   );

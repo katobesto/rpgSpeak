@@ -24,7 +24,8 @@ import { settingsRoutes } from './modules/settings/settings.routes.js';
 import { generateRoutes } from './modules/generate/generate.routes.js';
 import { ttsRoutes } from './modules/tts/tts.routes.js';
 import { memoriesRoutes } from './modules/memories/memories.routes.js';
-import { contextRoutes } from './modules/context/context.routes.js';
+import { contextRoutes }  from './modules/context/context.routes.js';
+import { chapterRoutes }  from './modules/chapters/chapter.routes.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -82,6 +83,7 @@ export async function buildApp(): Promise<FastifyInstance> {
           await prot.register(ttsRoutes,          { prefix: '/tts' });
           await prot.register(memoriesRoutes,     { prefix: '/memories' });
           await prot.register(contextRoutes,      { prefix: '/context' });
+          await prot.register(chapterRoutes,     { prefix: '/chapters' });
         },
         { prefix: '' }
       );

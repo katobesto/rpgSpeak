@@ -201,6 +201,20 @@ export function runMigrations(db: Db): void {
   // ─── Users — narration style preference ──────────────────────────────────
   try { db.run(sql`ALTER TABLE users ADD COLUMN narration_style TEXT NOT NULL DEFAULT 'normal'`); } catch { /* already exists */ }
 
+  // ─── Story Chapters ────────────────────────────────────────────────────────
+  db.run(sql`
+    CREATE TABLE IF NOT EXISTS story_chapters (
+      id              TEXT    PRIMARY KEY,
+      conversation_id TEXT    NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      chapter_number  INTEGER NOT NULL,
+      title           TEXT    NOT NULL,
+      description     TEXT    NOT NULL DEFAULT '',
+      is_completed    INTEGER NOT NULL DEFAULT 0,
+      completed_at    TEXT,
+      created_at      TEXT    NOT NULL
+    )
+  `);
+
   // ─── User content assignments ─────────────────────────────────────────────
   db.run(sql`
     CREATE TABLE IF NOT EXISTS user_characters (

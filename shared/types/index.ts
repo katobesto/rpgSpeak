@@ -152,6 +152,19 @@ export interface StoryCharacterLink {
   notes: string;
 }
 
+// ─── Story Chapter Types ──────────────────────────────────────────────────────
+
+export interface StoryChapter {
+  id:             string;
+  conversationId: string;
+  chapterNumber:  number;
+  title:          string;
+  description:    string;
+  isCompleted:    boolean;
+  completedAt:    string | null;
+  createdAt:      string;
+}
+
 // ─── Conversation Types ───────────────────────────────────────────────────────
 
 export interface Conversation {

@@ -37,6 +37,8 @@ export interface BuildContextOptions {
   embeddingModel?:      string | null;
   // Estilo de narración del usuario: prompt inyectado justo antes del último mensaje
   narrationStylePrompt?: string;
+  // Capítulo activo del guión de campaña
+  currentChapter?: import('@rpgspeak/shared').StoryChapter | null;
 }
 
 // ── Aviso de aventura para modo personaje individual (sin narrador) ─────────
@@ -74,6 +76,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
     embeddingProviderId,
     embeddingModel,
     narrationStylePrompt,
+    currentChapter,
   } = opts;
 
   const systemParts: string[] = [];
@@ -310,7 +313,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
   // (character prompt + stories) can be fully reused by the KV cache across turns,
   // even when affinity values or memory sets change.
   const shouldInjectMemories = allMemories.length > 0 && memoryInjectionPrompt?.trim();
-  const needsSplit = shouldInjectMemories || Boolean(contextIndexBlock) || Boolean(affinityBlock) || Boolean(narrationStylePrompt?.trim());
+  const needsSplit = shouldInjectMemories || Boolean(contextIndexBlock) || Boolean(affinityBlock) || Boolean(narrationStylePrompt?.trim()) || Boolean(currentChapter);
   const historyBody = needsSplit ? trimmedMessages.slice(0, -1) : trimmedMessages;
   const lastMessage = needsSplit ? trimmedMessages[trimmedMessages.length - 1] : null;
 
@@ -340,6 +343,19 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
   // 4. Narration style directive (user preference — overrides default verbosity)
   if (narrationStylePrompt?.trim() && needsSplit) {
     history.push({ role: 'system', content: narrationStylePrompt.trim() });
+  }
+
+  // 4b. Capítulo activo del guión de campaña
+  if (currentChapter && needsSplit) {
+    history.push({
+      role: 'system',
+      content: `## Guión de campaña — Capítulo ${currentChapter.chapterNumber}: "${currentChapter.title}"
+${currentChapter.description}
+
+Cuando los eventos de este capítulo queden completamente resueltos, incluye en una línea separada al final de tu respuesta:
+[FIN_CAPITULO]
+No incluyas esta marca antes de que el capítulo esté verdaderamente concluido.`,
+    });
   }
 
   // 5. Last user message (generation point)
