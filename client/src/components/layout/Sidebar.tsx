@@ -374,10 +374,10 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
 // ─── Chapters Sidebar Panel ───────────────────────────────────────────────────
 
 function ChaptersSidebarPanel({ conversationId }: { conversationId: string }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen]               = useState(true);
+  const [expandedId, setExpandedId]   = useState<string | null>(null);
   const qc = useQueryClient();
 
-  // Invalidar cuando el engine notifica fin de capítulo
   useEffect(() => {
     function handler(e: Event) {
       const detail = (e as CustomEvent).detail;
@@ -405,33 +405,39 @@ function ChaptersSidebarPanel({ conversationId }: { conversationId: string }) {
   });
 
   return (
-    <div className="border-t border-border flex-shrink-0" style={{ background: 'var(--surface-1)' }}>
-      {/* Header */}
+    // overflow-hidden evita que el texto empuje el ancho del sidebar
+    <div className="border-t border-border flex-shrink-0 overflow-hidden" style={{ background: 'var(--surface-1)' }}>
+
+      {/* Header colapsable */}
       <button
         onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/4 transition-colors"
+        className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/4 transition-colors min-w-0"
       >
-        <div className="flex items-center gap-2">
-          <ScrollText size={12} className="text-accent" />
-          <span className="text-[11px] font-semibold text-accent uppercase tracking-wider">Guión</span>
+        <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+          <ScrollText size={12} className="text-accent flex-shrink-0" />
+          <span className="text-[11px] font-semibold text-accent uppercase tracking-wider flex-shrink-0">Guión</span>
           {hasChapters && (
-            <span className="text-[10px] text-text-muted">
+            <span className="text-[10px] text-text-muted flex-shrink-0">
               {completedCount}/{chapters.length}
             </span>
           )}
         </div>
-        {open ? <ChevronDown size={12} className="text-text-muted" /> : <ChevronUp size={12} className="text-text-muted" />}
+        {open
+          ? <ChevronDown size={12} className="text-text-muted flex-shrink-0" />
+          : <ChevronUp   size={12} className="text-text-muted flex-shrink-0" />
+        }
       </button>
 
       {open && (
-        <div className="overflow-y-auto" style={{ maxHeight: '260px' }}>
-          <div className="px-3 pb-3 space-y-1">
+        <div className="overflow-y-auto overflow-x-hidden" style={{ maxHeight: '260px' }}>
+          <div className="px-3 pb-3 space-y-0.5">
+
             {isLoading && (
               <p className="text-[10px] text-text-muted italic py-1">Cargando guión…</p>
             )}
 
             {!isLoading && !hasChapters && (
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 py-1">
                 <p className="text-[10px] text-text-muted italic">Sin guión generado.</p>
                 <button
                   onClick={() => generateMut.mutate()}
@@ -444,39 +450,58 @@ function ChaptersSidebarPanel({ conversationId }: { conversationId: string }) {
             )}
 
             {chapters.map((ch) => {
-              const isCurrent   = ch.id === currentChapter?.id;
-              const isCompleted = ch.isCompleted;
+              const isCurrent    = ch.id === currentChapter?.id;
+              const isCompleted  = ch.isCompleted;
+              const isExpanded   = expandedId === ch.id;
+              const canExpand    = !!ch.description;
+
               return (
-                <div
-                  key={ch.id}
-                  className={`flex items-start gap-2 py-1 transition-opacity ${isCompleted ? 'opacity-40' : ''}`}
-                >
-                  {/* Icono estado */}
-                  <div className="flex-shrink-0 mt-0.5">
-                    {isCompleted
-                      ? <CheckCircle2 size={11} className="text-emerald-400" />
-                      : isCurrent
-                      ? <Sword size={11} className="text-accent" />
-                      : <Circle size={11} className="text-text-muted" />
-                    }
-                  </div>
-                  {/* Contenido */}
-                  <div className="flex-1 min-w-0">
-                    <p className={`text-[11px] font-medium leading-tight ${
+                <div key={ch.id} className={`transition-opacity ${isCompleted ? 'opacity-40' : ''}`}>
+                  {/* Fila del capítulo */}
+                  <div className="flex items-center gap-1.5 py-1 min-w-0 overflow-hidden">
+                    {/* Icono estado — fijo */}
+                    <div className="flex-shrink-0">
+                      {isCompleted
+                        ? <CheckCircle2 size={11} className="text-emerald-400" />
+                        : isCurrent
+                        ? <Sword size={11} className="text-accent" />
+                        : <Circle size={11} className="text-text-muted" />
+                      }
+                    </div>
+
+                    {/* Número + título — truncado */}
+                    <p className={`text-[11px] font-medium leading-tight truncate flex-1 min-w-0 ${
                       isCompleted ? 'line-through text-text-muted' :
                       isCurrent   ? 'text-accent' : 'text-text-secondary'
                     }`}>
                       {ch.chapterNumber}. {ch.title}
                     </p>
-                    {isCurrent && ch.description && (
-                      <p className="text-[10px] text-text-muted leading-relaxed mt-0.5 line-clamp-2">
-                        {ch.description}
-                      </p>
+
+                    {/* Botón expandir descripción */}
+                    {canExpand && (
+                      <button
+                        onClick={() => setExpandedId(isExpanded ? null : ch.id)}
+                        className="flex-shrink-0 p-0.5 rounded text-text-muted hover:text-text-primary transition-colors"
+                        title={isExpanded ? 'Ocultar descripción' : 'Ver descripción'}
+                      >
+                        {isExpanded
+                          ? <ChevronUp   size={10} />
+                          : <ChevronDown size={10} />
+                        }
+                      </button>
                     )}
                   </div>
+
+                  {/* Descripción desplegable */}
+                  {isExpanded && ch.description && (
+                    <p className="text-[10px] text-text-muted leading-relaxed pl-4 pr-1 pb-1.5 break-words">
+                      {ch.description}
+                    </p>
+                  )}
                 </div>
               );
             })}
+
           </div>
         </div>
       )}
