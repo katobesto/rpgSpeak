@@ -106,7 +106,12 @@ export function MainLayout({ children }: MainLayoutProps) {
             mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
             'border-r border-border',
           ].join(' ')}
-          style={{ background: 'var(--surface-1)' }}
+          style={{
+            background: 'var(--surface-1)',
+            maxWidth: effectiveCollapsed ? '56px' : '288px',
+            minWidth: effectiveCollapsed ? '56px' : '288px',
+            width:    effectiveCollapsed ? '56px' : '288px',
+          }}
         >
           <Sidebar collapsed={effectiveCollapsed} isMobile={isMobile} />
         </div>
