@@ -50,8 +50,8 @@ export const ttsRoutes: FastifyPluginAsync = async (app) => {
   // ─── POST /api/tts/synthesize ─────────────────────────────────────────────
   app.post('/synthesize', async (req, reply) => {
     const schema = z.object({
-      text:        z.string().min(1).max(5000),
-      voiceId:     z.string().default('es_maria'),
+      text:        z.string().min(1).max(12000),
+      voiceId:     z.string().default('es_daniela'),
       speed:       z.number().min(0.5).max(2).default(1.0),
       temperature: z.number().min(0.1).max(1).default(0.7),
     });
@@ -81,9 +81,10 @@ export const ttsRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(resp.status).send({ success: false, error: body.detail ?? 'Error de síntesis' });
     }
 
-    const audio = Buffer.from(await resp.arrayBuffer());
+    const audio       = Buffer.from(await resp.arrayBuffer());
+    const contentType = resp.headers.get('content-type') ?? 'audio/wav';
     return reply
-      .header('Content-Type', 'audio/wav')
+      .header('Content-Type', contentType)
       .header('Content-Length', String(audio.length))
       .send(audio);
   });

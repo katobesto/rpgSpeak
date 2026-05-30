@@ -785,7 +785,6 @@ function VoiceSection({
   const [previewLoading, setPreviewLoading] = React.useState<string | null>(null);
 
   async function togglePreview(voiceId: string, speed: number, temperature: number) {
-    // Stop if already playing this voice
     if (previewing === voiceId || previewLoading === voiceId) {
       stopPreview();
       setPreviewing(null);
@@ -795,22 +794,48 @@ function VoiceSection({
     stopPreview();
     setPreviewing(null);
     setPreviewLoading(voiceId);
+
+    // iOS fix: desbloquear AudioContext dentro del handler del gesto (antes del fetch)
+    const AudioCtxClass = window.AudioContext ?? (window as Record<string,unknown>).webkitAudioContext as typeof AudioContext | undefined;
+    let audioCtx: AudioContext | null = null;
+    if (AudioCtxClass) {
+      try { audioCtx = new AudioCtxClass(); await audioCtx.resume(); } catch { audioCtx = null; }
+    }
+
     try {
       const resp = await fetch('/api/tts/synthesize', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-        body: JSON.stringify({ text: PREVIEW_TEXT, voiceId, speed, temperature }),
+        body:    JSON.stringify({ text: PREVIEW_TEXT, voiceId, speed, temperature }),
       });
       if (!resp.ok) throw new Error('Error de síntesis');
-      const blob = await resp.blob();
-      _previewUrl  = URL.createObjectURL(blob);
-      _previewAudio = new Audio(_previewUrl);
-      _previewAudio.onended = () => { stopPreview(); setPreviewing(null); };
-      _previewAudio.onerror = () => { stopPreview(); setPreviewing(null); };
-      setPreviewing(voiceId);
-      setPreviewLoading(null);
-      await _previewAudio.play();
-    } catch {
+
+      if (audioCtx) {
+        // Ruta AudioContext — compatible con iOS y voces cloud (MP3 o WAV)
+        const arrayBuffer = await resp.arrayBuffer();
+        const decoded     = await audioCtx.decodeAudioData(arrayBuffer);
+        const source      = audioCtx.createBufferSource();
+        source.buffer     = decoded;
+        source.connect(audioCtx.destination);
+        source.onended    = () => { try { audioCtx?.close(); } catch {} setPreviewing(null); };
+        setPreviewing(voiceId);
+        setPreviewLoading(null);
+        source.start(0);
+      } else {
+        // Fallback: HTMLAudioElement
+        const contentType = resp.headers.get('content-type') ?? 'audio/wav';
+        const blob = new Blob([await resp.arrayBuffer()], { type: contentType });
+        _previewUrl   = URL.createObjectURL(blob);
+        _previewAudio = new Audio(_previewUrl);
+        _previewAudio.onended = () => { stopPreview(); setPreviewing(null); };
+        _previewAudio.onerror = () => { stopPreview(); setPreviewing(null); };
+        setPreviewing(voiceId);
+        setPreviewLoading(null);
+        await _previewAudio.play();
+      }
+    } catch (e) {
+      console.error('[TTS preview]', e);
+      if (audioCtx) try { audioCtx.close(); } catch {}
       stopPreview();
       setPreviewLoading(null);
     }
