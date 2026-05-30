@@ -491,7 +491,8 @@ function ChaptersSidebarPanel({ conversationId }: { conversationId: string }) {
               const isCurrent   = ch.id === currentChapter?.id;
               const isCompleted = ch.isCompleted;
               const isExpanded  = expandedId === ch.id;
-              const isMenuOpen  = menuId === ch.id;
+              // isMenuOpen solo se usa para el estilo del botón ⋮ (el menú real es un portal)
+              const isMenuOpen  = menu?.id === ch.id;
 
               return (
                 <div key={ch.id} className={`transition-opacity ${isCompleted ? 'opacity-50' : ''}`}>
