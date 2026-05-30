@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { Copy, Edit2, RefreshCw, Trash2, Check, Bug, X, Pin, Volume2, VolumeX, Loader, Wand2, Image as ImageIcon, Zap, ChevronDown, RotateCcw, Play, Square } from 'lucide-react';
+import { Copy, Edit2, RefreshCw, Trash2, Check, Bug, X, Pin, Volume2, VolumeX, Loader, Wand2, Image as ImageIcon, Zap, ChevronDown, RotateCcw, Play, Square, Pause, Download, Share2 } from 'lucide-react';
 import type { Message, ChatMessage } from '@rpgspeak/shared';
 import { Avatar } from '../ui/Avatar.tsx';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -565,22 +565,31 @@ function TtsPlayerBar({ messageId, text, voiceId, speed, temperature, replacemen
   temperature?: number;
   replacements?: import('@rpgspeak/shared').TtsTextReplacement[];
 }) {
-  const { speak, stop, seek, playingId, loadingId, currentTime, duration, cachedKeys } = useTtsStore();
+  const {
+    speak, pause, resume, stop, seek, shareOrDownload,
+    playingId, pausedId, loadingId,
+    currentTime, duration, cachedKeys,
+  } = useTtsStore();
+
   const isPlaying = playingId === messageId;
+  const isPaused  = pausedId  === messageId;
   const isLoading = loadingId === messageId;
+  const isActive  = isPlaying || isPaused;
 
   const effectiveVoiceId = voiceId ?? 'es_daniela';
-  const effectiveSpeed   = speed ?? 1.0;
+  const effectiveSpeed   = speed   ?? 1.0;
   const cKey   = `${messageId}:${effectiveVoiceId}:${effectiveSpeed.toFixed(1)}`;
   const cached = cachedKeys.has(cKey);
 
-  function handleClick() {
-    if (isPlaying || isLoading) stop();
-    else speak(messageId, text, { voiceId, speed, temperature, replacements });
+  // El botón principal: genera, reproduce, pausa o reanuda según estado
+  function handleMainClick() {
+    if (isPlaying)       pause();
+    else if (isPaused)   resume();
+    else                 speak(messageId, text, { voiceId, speed, temperature, replacements });
   }
 
   function handleSeek(e: React.MouseEvent<HTMLDivElement>) {
-    if (!duration) return;
+    if (!isActive || !duration) return;
     const rect = e.currentTarget.getBoundingClientRect();
     const pct  = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
     seek(pct * duration);
@@ -588,60 +597,87 @@ function TtsPlayerBar({ messageId, text, voiceId, speed, temperature, replacemen
 
   function fmt(s: number) {
     if (!isFinite(s) || s < 0) return '0:00';
-    const m = Math.floor(s / 60);
-    return `${m}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
+    return `${Math.floor(s / 60)}:${Math.floor(s % 60).toString().padStart(2, '0')}`;
   }
 
   const progress = duration > 0 ? (currentTime / duration) * 100 : 0;
 
+  // Determinar el icono y label del botón principal
+  const canShare = typeof navigator !== 'undefined' && 'share' in navigator;
+  let btnIcon: React.ReactNode;
+  let btnLabel: string;
+  let btnClass: string;
+
+  if (isLoading) {
+    btnIcon  = <Loader size={11} className="animate-spin" />;
+    btnLabel = 'Generando…';
+    btnClass = 'bg-white/8 text-text-muted border-border cursor-wait';
+  } else if (isPlaying) {
+    btnIcon  = <Pause size={11} className="fill-current" />;
+    btnLabel = 'Pausar';
+    btnClass = 'bg-accent/20 text-accent border-accent/40 hover:bg-accent/30';
+  } else if (isPaused) {
+    btnIcon  = <Play size={11} className="fill-current" />;
+    btnLabel = 'Continuar';
+    btnClass = 'bg-accent/15 text-accent border-accent/30 hover:bg-accent/25';
+  } else if (cached) {
+    btnIcon  = <Play size={11} className="fill-current" />;
+    btnLabel = 'Reproducir';
+    btnClass = 'bg-white/8 text-text-muted border-border hover:bg-white/12 hover:text-text-primary hover:border-accent/40';
+  } else {
+    btnIcon  = <Play size={11} className="fill-current" />;
+    btnLabel = 'Generar audio';
+    btnClass = 'bg-white/8 text-text-muted border-border hover:bg-white/12 hover:text-text-primary hover:border-accent/40';
+  }
+
   return (
-    <div className="mt-2 pt-2 border-t border-white/8">
-      {/* Fila principal: botón + barra a todo el ancho */}
+    <div className="mt-2 pt-2 border-t border-white/8 space-y-1.5">
+      {/* Fila: botón principal + barra + tiempo + compartir */}
       <div className="flex items-center gap-2">
-        {/* Botón compacto */}
+        {/* Botón principal */}
         <button
-          onClick={handleClick}
-          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium transition-all flex-shrink-0 ${
-            isPlaying
-              ? 'bg-accent/20 text-accent border border-accent/40 hover:bg-accent/30'
-              : isLoading
-              ? 'bg-white/8 text-text-muted border border-border cursor-wait'
-              : 'bg-white/8 text-text-muted border border-border hover:bg-white/12 hover:text-text-primary hover:border-accent/40'
-          }`}
-          title={isPlaying ? 'Detener' : isLoading ? 'Generando audio…' : cached ? 'Reproducir' : 'Generar audio'}
+          onClick={handleMainClick}
+          disabled={isLoading}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-medium transition-all flex-shrink-0 border ${btnClass}`}
+          title={btnLabel}
         >
-          {isLoading ? (
-            <><Loader size={11} className="animate-spin" /> Generando…</>
-          ) : isPlaying ? (
-            <><Square size={10} className="fill-current" /> Detener</>
-          ) : cached ? (
-            <><Play size={11} className="fill-current" /> Reproducir</>
-          ) : (
-            <><Play size={11} className="fill-current" /> Generar audio</>
-          )}
+          {btnIcon} {btnLabel}
         </button>
 
-        {/* Barra de progreso a todo el ancho — clicable para seek */}
+        {/* Barra de progreso — siempre a todo el ancho, clicable cuando activa */}
         <div className="flex items-center gap-2 flex-1 min-w-0">
           <div
             className={`flex-1 h-2 rounded-full overflow-hidden transition-colors ${
-              isPlaying ? 'bg-white/15 cursor-pointer' : 'bg-white/6'
+              isActive ? 'bg-white/15 cursor-pointer' : 'bg-white/6'
             }`}
             onClick={handleSeek}
-            title={isPlaying ? 'Clic para saltar' : undefined}
+            title={isActive ? 'Clic para saltar' : undefined}
           >
             <div
-              className="h-full rounded-full bg-accent transition-[width] duration-200"
-              style={{ width: `${isPlaying ? progress : 0}%` }}
+              className={`h-full rounded-full transition-[width] duration-200 ${
+                isPaused ? 'bg-accent/50' : 'bg-accent'
+              }`}
+              style={{ width: `${isActive ? progress : 0}%` }}
             />
           </div>
-          {/* Tiempo — solo si está reproduciendo */}
-          {isPlaying && (
+          {/* Tiempo — cuando activo */}
+          {isActive && (
             <span className="text-[10px] text-text-muted tabular-nums flex-shrink-0 select-none">
               {fmt(currentTime)}{duration > 0 ? ` / ${fmt(duration)}` : ''}
             </span>
           )}
         </div>
+
+        {/* Botón compartir/descargar — solo si el audio está en caché */}
+        {cached && (
+          <button
+            onClick={() => shareOrDownload(messageId, { voiceId, speed })}
+            className="flex-shrink-0 p-1.5 rounded-lg text-text-muted hover:text-accent hover:bg-accent/10 transition-colors border border-transparent hover:border-accent/30"
+            title={canShare ? 'Compartir audio' : 'Descargar audio'}
+          >
+            {canShare ? <Share2 size={13} /> : <Download size={13} />}
+          </button>
+        )}
       </div>
     </div>
   );
