@@ -367,6 +367,9 @@ export interface AppSettings {
   // Estilo de narración — prompts inyectados cuando el usuario elige Medium o Short
   narrationMediumPrompt: string;
   narrationShortPrompt:  string;
+  // Guión de campaña — prompt inyectado junto al capítulo activo
+  // Variables: {{CAPITULO_NUMERO}}, {{CAPITULO_TITULO}}, {{CAPITULO_DESCRIPCION}}
+  chapterGuidePrompt: string;
   // Moderación de contenido
   allowNsfw: boolean;
   nsfwBlockedMessage: string;

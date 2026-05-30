@@ -334,6 +334,19 @@ INSTRUCCIONES:
 Responde ÚNICAMENTE con etiquetas en este formato exacto, una por línea. Sin texto adicional antes ni después.
 
 [EVENTO:título corto y evocador|disparador que activa el evento|descripción de lo que ocurre cuando se activa|importancia del 1 al 10]`,
+  // Guión de campaña — inyectado junto al capítulo activo antes del último turno
+  // Variables: {{CAPITULO_NUMERO}}, {{CAPITULO_TITULO}}, {{CAPITULO_DESCRIPCION}}
+  chapterGuidePrompt: `## Capítulo activo: {{CAPITULO_NUMERO}} — "{{CAPITULO_TITULO}}"
+
+**Descripción:**
+{{CAPITULO_DESCRIPCION}}
+
+**Directiva narrativa:** Tu prioridad en cada respuesta es avanzar la historia hacia los eventos de este capítulo. Introduce de forma natural los elementos, situaciones y personajes descritos. Si la conversación se desvía, redirige sutilmente la narrativa hacia los eventos pendientes. Construye la tensión de forma progresiva; no fuerces los giros de manera abrupta.
+
+Cuando todos los eventos principales del capítulo se hayan desarrollado y la escena esté naturalmente concluida, incluye al final de tu respuesta (en una línea separada):
+[Capitulo Finalizado]
+No incluyas esta marca antes de que el capítulo esté verdaderamente cerrado.`,
+
   // Estilo de narración — inyectados justo antes del último mensaje cuando el usuario elige medium/short
   narrationMediumPrompt: `## Estilo de respuesta: MODERADO
 Mantén respuestas de longitud moderada: 3-4 párrafos como máximo. Balancea diálogo y descripción sin extenderte. Evita introducciones largas y cierra cada escena con concisión.`,
