@@ -563,9 +563,15 @@ function TtsPlayerBar({ messageId, text, voiceId, speed, temperature }: {
   speed?:      number;
   temperature?: number;
 }) {
-  const { speak, stop, playingId, loadingId, currentTime, duration } = useTtsStore();
+  const { speak, stop, playingId, loadingId, currentTime, duration, cachedKeys } = useTtsStore();
   const isPlaying = playingId === messageId;
   const isLoading = loadingId === messageId;
+
+  // Construir la misma clave que usa el store para verificar si hay caché
+  const effectiveVoiceId = voiceId ?? 'es_daniela';
+  const effectiveSpeed   = speed ?? 1.0;
+  const cacheKey = `${messageId}:${effectiveVoiceId}:${effectiveSpeed.toFixed(1)}`;
+  const cached   = cachedKeys.has(cacheKey);
 
   function handleClick() {
     if (isPlaying || isLoading) {
@@ -604,6 +610,8 @@ function TtsPlayerBar({ messageId, text, voiceId, speed, temperature }: {
             <><Loader size={11} className="animate-spin" /> Generando…</>
           ) : isPlaying ? (
             <><Square size={10} className="fill-current" /> Detener</>
+          ) : cached ? (
+            <><Play size={11} className="fill-current" /> Repetir</>
           ) : (
             <><Play size={11} className="fill-current" /> Escuchar</>
           )}

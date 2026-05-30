@@ -29,6 +29,26 @@ const DEFAULT_CONFIG: TtsConfig = {
   temperature: 0.667,
 };
 
+// ─── Audio cache ─────────────────────────────────────────────────────────────
+// Almacena blobs por (messageId + voiceId + speed) para no re-sintetizar.
+// Límite: MAX_CACHE entradas (FIFO simple).
+
+const MAX_CACHE = 30;
+const _audioCache = new Map<string, Blob>();
+
+function audioCacheKey(messageId: string, voiceId: string, speed: number): string {
+  return `${messageId}:${voiceId}:${speed.toFixed(1)}`;
+}
+
+function cacheSet(key: string, blob: Blob): void {
+  if (_audioCache.size >= MAX_CACHE) {
+    // Eliminar la entrada más antigua
+    const oldest = _audioCache.keys().next().value;
+    if (oldest) _audioCache.delete(oldest);
+  }
+  _audioCache.set(key, blob);
+}
+
 // ─── Audio state ──────────────────────────────────────────────────────────────
 
 let _audio:     HTMLAudioElement | null = null;
@@ -55,14 +75,16 @@ function releaseAudio() {
 // ─── Store ────────────────────────────────────────────────────────────────────
 
 interface TtsStore {
-  playingId: string | null;
-  loadingId: string | null;
-  lastError: string | null;
-  duration:  number;   // segundos totales del audio en reproducción
-  currentTime: number; // posición actual en segundos
+  playingId:  string | null;
+  loadingId:  string | null;
+  lastError:  string | null;
+  duration:   number;
+  currentTime: number;
+  cachedKeys: ReadonlySet<string>; // señal reactiva para re-render en componentes
 
-  speak: (messageId: string, text: string, config?: Partial<TtsConfig>) => Promise<void>;
-  stop:  () => void;
+  speak:    (messageId: string, text: string, config?: Partial<TtsConfig>) => Promise<void>;
+  stop:     () => void;
+  isCached: (messageId: string, config?: Partial<TtsConfig>) => boolean;
 }
 
 export const useTtsStore = create<TtsStore>((set, get) => ({
@@ -71,10 +93,16 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
   lastError:   null,
   duration:    0,
   currentTime: 0,
+  cachedKeys:  new Set<string>(),
 
   stop() {
     releaseAudio();
     set({ playingId: null, loadingId: null, duration: 0, currentTime: 0 });
+  },
+
+  isCached(messageId, config) {
+    const { voiceId, speed } = { ...DEFAULT_CONFIG, ...config };
+    return _audioCache.has(audioCacheKey(messageId, voiceId, speed));
   },
 
   async speak(messageId, text, config) {
@@ -104,27 +132,39 @@ export const useTtsStore = create<TtsStore>((set, get) => ({
     }
 
     const { voiceId, speed, temperature } = { ...DEFAULT_CONFIG, ...config };
+    const cKey = audioCacheKey(messageId, voiceId, speed);
 
     try {
-      const resp = await fetch('/api/tts/synthesize', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
-        body: JSON.stringify({
-          text:        cleanForSpeech(text),
-          voiceId,
-          speed,
-          temperature,
-        }),
-      });
+      let blob: Blob;
 
-      if (!resp.ok) {
-        const err = await resp.json().catch(() => ({})) as Record<string, unknown>;
-        throw new Error(String(err.error ?? 'Error de síntesis'));
+      if (_audioCache.has(cKey)) {
+        // ── Caché hit — reproducción instantánea ──────────────────────────
+        blob = _audioCache.get(cKey)!;
+        console.debug('[TTS] cache hit', cKey);
+      } else {
+        // ── Caché miss — sintetizar desde el servidor ─────────────────────
+        const resp = await fetch('/api/tts/synthesize', {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json', ...getAuthHeader() },
+          body: JSON.stringify({
+            text:        cleanForSpeech(text),
+            voiceId,
+            speed,
+            temperature,
+          }),
+        });
+
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({})) as Record<string, unknown>;
+          throw new Error(String(err.error ?? 'Error de síntesis'));
+        }
+
+        const contentType = resp.headers.get('content-type') ?? 'audio/wav';
+        blob = new Blob([await resp.arrayBuffer()], { type: contentType });
+        cacheSet(cKey, blob);
+        // Actualizar señal reactiva para que los componentes re-rendericen
+        set((s) => ({ cachedKeys: new Set([...s.cachedKeys, cKey]) }));
       }
-
-      // Crear blob con el Content-Type correcto (WAV para Piper, MP3 para Edge TTS)
-      const contentType = resp.headers.get('content-type') ?? 'audio/wav';
-      const blob        = new Blob([await resp.arrayBuffer()], { type: contentType });
       const url         = URL.createObjectURL(blob);
 
       // ── HTMLAudioElement para reproducción ────────────────────────────────
