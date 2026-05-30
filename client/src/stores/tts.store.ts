@@ -5,6 +5,17 @@ import { getAuthHeader } from '../api/client.ts';
 
 function cleanForSpeech(text: string): string {
   return text
+    // ── 1. Etiquetas de personaje → forma oral natural ────────────────────
+    // "**Natasha:** texto"  →  "Natasha dice, texto"
+    // "**Natasha:**\ntexto" →  "Natasha dice, texto"
+    // Captura el nombre entre ** antes de que se eliminen los asteriscos.
+    .replace(/\*\*([^*:\n]{1,50}):\*\*\s*\n?/g, '$1 dice, ')
+    // "Nombre: texto" al inicio de línea — SOLO si cada palabra empieza en mayúscula
+    // (nombres propios). Evita falsos positivos como "Sin embargo: ..." o "Nota: ...".
+    // Ej: "El Capitán: ¡Cargad!"  → "El Capitán dice, ¡Cargad!"  ✓
+    //     "Sin embargo: blah"     → sin cambio                     ✓ (embargo = minúscula)
+    .replace(/^([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]{0,29}(?:\s+[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]{0,29}){0,3}):\s+/gm, '$1 dice, ')
+    // ── 2. Limpiar markdown restante ──────────────────────────────────────
     .replace(/```[\s\S]*?```/g, '')
     .replace(/`[^`]+`/g, '')
     .replace(/\*\*([^*]+)\*\*/g, '$1')

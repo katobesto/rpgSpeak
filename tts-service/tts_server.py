@@ -632,6 +632,22 @@ async def synthesize(req: SynthesizeRequest):
 
 # ─── Text preprocessing ───────────────────────────────────────────────────────
 
+# ── Patrón de etiquetas de personaje (aplicar ANTES del resto) ───────────────
+# "**Natasha:** texto"  →  "Natasha dice, texto"
+# "**Natasha:**\ntexto" →  "Natasha dice, texto"
+# "Nombre: texto" al inicio de línea (mayúscula + hasta 50 chars + dos puntos)
+_SPEAKER_PATTERNS = [
+    # Bold markdown: **Nombre:** → "Nombre dice, "
+    (re.compile(r"\*\*([^*:\n]{1,50}):\*\*\s*\n?"), r"\1 dice, "),
+    # Nombre propio al inicio de línea — cada palabra debe empezar en mayúscula.
+    # "El Capitán: ¡Cargad!" → "El Capitán dice, ¡Cargad!"  ✓
+    # "Sin embargo: blah"    → sin cambio                     ✓ (embargo = minúscula)
+    (re.compile(
+        r"^([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]{0,29}(?:\s+[A-ZÁÉÍÓÚÜÑ][a-záéíóúüñ]{0,29}){0,3}):\s+",
+        re.M
+    ), r"\1 dice, "),
+]
+
 _MD_PATTERNS = [
     (re.compile(r"```[\s\S]*?```"),         ""),    # fenced code blocks
     (re.compile(r"`[^`]+`"),                ""),    # inline code
@@ -643,18 +659,20 @@ _MD_PATTERNS = [
     (re.compile(r"^[-*+]\s+", re.M),       ""),    # unordered list markers
     (re.compile(r"^\d+\.\s+", re.M),       ""),    # ordered list markers
     # Horizontal rules: ONLY when the whole line is dashes/underscores/asterisks.
-    # Anchored to full lines to avoid eating narrative em-dashes like "—" or "---".
     (re.compile(r"^[\s]*[-_*]{3,}[\s]*$", re.M), ""),
-    # Stage directions: parentheticals at the START of a paragraph line.
-    # e.g. "(Aria frunce el ceño)" at beginning of line, but NOT "(risas)" inside a sentence.
+    # Stage directions at the START of a paragraph line.
     (re.compile(r"^\s*\([^)]{1,300}\)\s*", re.M), ""),
 ]
 
 
 def clean_text(text: str) -> str:
+    # 1. Etiquetas de personaje → forma oral (antes de limpiar asteriscos)
+    for pattern, repl in _SPEAKER_PATTERNS:
+        text = pattern.sub(repl, text)
+    # 2. Markdown y ruido visual
     for pattern, repl in _MD_PATTERNS:
         text = pattern.sub(repl, text)
-    # Collapse runs of blank lines to one
+    # 3. Colapsar líneas en blanco
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
