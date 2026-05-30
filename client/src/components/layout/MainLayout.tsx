@@ -95,12 +95,13 @@ export function MainLayout({ children }: MainLayoutProps) {
         */}
         <div
           className={[
-            // Desktop: inline, width animated
+            // Desktop: inline, width animated — overflow-hidden evita que el
+            // contenido empuje el ancho más allá del valor definido (w-14/w-72)
             'md:relative md:flex md:flex-shrink-0 md:translate-x-0',
-            'md:transition-[width] md:duration-200',
+            'md:transition-[width] md:duration-200 md:overflow-hidden',
             effectiveCollapsed ? 'md:w-14' : 'md:w-72',
             // Mobile: fixed full-width overlay
-            'fixed inset-y-0 left-0 z-50 w-full md:w-auto',
+            'fixed inset-y-0 left-0 z-50 w-full md:w-auto overflow-hidden',
             'transition-transform duration-250 ease-in-out',
             mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0',
             'border-r border-border',

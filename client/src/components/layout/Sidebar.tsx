@@ -113,7 +113,7 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
   });
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full w-full overflow-hidden">
       {/* Logo + toggle */}
       <div className="flex items-center justify-between px-3 py-3 border-b border-border">
         {/* Logo — always visible on mobile, visible on desktop when not collapsed */}
@@ -492,9 +492,12 @@ function ChaptersSidebarPanel({ conversationId }: { conversationId: string }) {
                     )}
                   </div>
 
-                  {/* Descripción desplegable */}
+                  {/* Descripción desplegable — width estrictamente limitado al contenedor */}
                   {isExpanded && ch.description && (
-                    <p className="text-[10px] text-text-muted leading-relaxed pl-4 pr-1 pb-1.5 break-words">
+                    <p
+                      className="text-[10px] text-text-muted leading-relaxed pl-4 pr-1 pb-1.5"
+                      style={{ overflowWrap: 'anywhere', wordBreak: 'break-word', maxWidth: '100%' }}
+                    >
                       {ch.description}
                     </p>
                   )}
