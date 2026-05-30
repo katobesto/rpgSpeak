@@ -314,6 +314,22 @@ def _synth_python(text: str, model_id: str, voice_meta: dict,
     return wav_io.getvalue()
 
 
+def _normalize_for_binary(text: str) -> str:
+    """Piper binary emits one WAV block per input line.
+    Multiple lines → multiple concatenated WAV headers → browser decodes only the first.
+    Solution: collapse paragraph breaks to '. ' and remaining newlines to ' ',
+    so the whole text becomes a single line → single WAV output."""
+    # Paragraph break → period + space (adds a natural pause)
+    text = re.sub(r"\n{2,}", ". ", text)
+    # Single newline → space
+    text = text.replace("\n", " ")
+    # Collapse whitespace runs
+    text = re.sub(r"  +", " ", text)
+    # Remove duplicate period-spaces
+    text = re.sub(r"\.\s*\.\s*", ". ", text)
+    return text.strip()
+
+
 def _synth_binary(text: str, model_id: str, voice_meta: dict,
                   speed: float, temperature: float) -> bytes:
     """Synthesize using the Piper standalone binary (ARM64 Linux)."""
@@ -324,6 +340,10 @@ def _synth_binary(text: str, model_id: str, voice_meta: dict,
 
     onnx_path, json_path = _model_paths(model_id)
     _patch_model_config(json_path)
+
+    # Flatten to single line so Piper emits exactly one WAV block
+    normalized = _normalize_for_binary(text)
+    logger.debug("Normalized text (%d chars → %d chars)", len(text), len(normalized))
 
     cmd = [
         str(binary),
@@ -343,9 +363,9 @@ def _synth_binary(text: str, model_id: str, voice_meta: dict,
 
     result = subprocess.run(
         cmd,
-        input=text.encode("utf-8"),
+        input=normalized.encode("utf-8"),
         capture_output=True,
-        timeout=60,
+        timeout=120,
         env=env,
     )
     if result.returncode != 0:
@@ -363,7 +383,7 @@ async def _ensure_model(voice: dict) -> None:
 # ─── Request models ───────────────────────────────────────────────────────────
 
 class SynthesizeRequest(BaseModel):
-    text:        str   = Field(..., min_length=1, max_length=5000)
+    text:        str   = Field(..., min_length=1, max_length=12000)
     voice_id:    str   = Field(default="es_daniela")
     speed:       float = Field(default=1.0, ge=0.5, le=3.0)
     temperature: float = Field(default=0.667, ge=0.0, le=1.0)
@@ -447,23 +467,29 @@ async def synthesize(req: SynthesizeRequest):
 # ─── Text preprocessing ───────────────────────────────────────────────────────
 
 _MD_PATTERNS = [
-    (re.compile(r"```[\s\S]*?```"),        ""),    # fenced code
-    (re.compile(r"`[^`]+`"),               ""),    # inline code
-    (re.compile(r"\*\*([^*]+)\*\*"),       r"\1"), # bold
-    (re.compile(r"\*([^*]+)\*"),           r"\1"), # italic
-    (re.compile(r"_([^_]+)_"),             r"\1"), # underscore italic
-    (re.compile(r"^#{1,6}\s+", re.M),     ""),    # headings
-    (re.compile(r"\[([^\]]+)\]\([^)]+\)"), r"\1"), # links
-    (re.compile(r"^[-*+]\s+", re.M),      ""),    # list markers
-    (re.compile(r"^\d+\.\s+", re.M),      ""),    # numbered lists
-    (re.compile(r"---+"),                  ""),    # horizontal rules
-    (re.compile(r"^\s*\([^)]{1,300}\)\s*", re.M), ""),  # stage directions
+    (re.compile(r"```[\s\S]*?```"),         ""),    # fenced code blocks
+    (re.compile(r"`[^`]+`"),                ""),    # inline code
+    (re.compile(r"\*\*([^*]+)\*\*"),        r"\1"), # bold → plain
+    (re.compile(r"\*([^*]+)\*"),            r"\1"), # italic → plain
+    (re.compile(r"_([^_]+)_"),              r"\1"), # underscore italic → plain
+    (re.compile(r"^#{1,6}\s+", re.M),      ""),    # markdown headings
+    (re.compile(r"\[([^\]]+)\]\([^)]+\)"),  r"\1"), # links → text
+    (re.compile(r"^[-*+]\s+", re.M),       ""),    # unordered list markers
+    (re.compile(r"^\d+\.\s+", re.M),       ""),    # ordered list markers
+    # Horizontal rules: ONLY when the whole line is dashes/underscores/asterisks.
+    # Anchored to full lines to avoid eating narrative em-dashes like "—" or "---".
+    (re.compile(r"^[\s]*[-_*]{3,}[\s]*$", re.M), ""),
+    # Stage directions: parentheticals at the START of a paragraph line.
+    # e.g. "(Aria frunce el ceño)" at beginning of line, but NOT "(risas)" inside a sentence.
+    (re.compile(r"^\s*\([^)]{1,300}\)\s*", re.M), ""),
 ]
 
 
 def clean_text(text: str) -> str:
     for pattern, repl in _MD_PATTERNS:
         text = pattern.sub(repl, text)
+    # Collapse runs of blank lines to one
+    text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
 

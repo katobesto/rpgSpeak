@@ -3,25 +3,18 @@ import { getAuthHeader } from '../api/client.ts';
 
 // ─── Text cleaning ────────────────────────────────────────────────────────────
 
-const MD_PATTERNS: [RegExp, string][] = [
-  [/```[\s\S]*?```/g,         ''],   // fenced code
-  [/`[^`]+`/g,                ''],   // inline code
-  [/\*\*([^*]+)\*\*/g,        '$1'], // bold
-  [/\*([^*]+)\*/g,            '$1'], // italic
-  [/_([^_]+)_/g,              '$1'], // underscore italic
-  [/^#{1,6}\s+/gm,            ''],   // headings
-  [/\[([^\]]+)\]\([^)]+\)/g,  '$1'], // links
-  [/^[-*+]\s+/gm,             ''],   // list markers
-  [/^\d+\.\s+/gm,             ''],   // numbered lists
-  [/---+/g,                   ''],   // horizontal rules
-  // Acotaciones de escena al inicio de párrafo: (Aria frunce el ceño...)
-  [/^\s*\([^)]{1,300}\)\s*/gm, ''],
-];
-
+// El servidor aplica la limpieza completa. Aquí solo eliminamos lo mínimo
+// para evitar código no pronunciable y acotaciones de escena.
 function cleanForSpeech(text: string): string {
-  let t = text;
-  for (const [re, repl] of MD_PATTERNS) t = t.replace(re, repl);
-  return t.replace(/\n{3,}/g, '\n\n').trim();
+  return text
+    .replace(/```[\s\S]*?```/g, '')        // bloques de código
+    .replace(/`[^`]+`/g, '')               // código inline
+    .replace(/\*\*([^*]+)\*\*/g, '$1')     // bold → texto
+    .replace(/\*([^*]+)\*/g, '$1')         // italic → texto
+    .replace(/^#{1,6}\s+/gm, '')           // encabezados markdown
+    .replace(/^\s*\([^)]{1,300}\)\s*/gm, '') // acotaciones de escena al inicio de línea
+    .replace(/\n{3,}/g, '\n\n')            // colapsar saltos excesivos
+    .trim();
 }
 
 // ─── Defaults TTS ─────────────────────────────────────────────────────────────
