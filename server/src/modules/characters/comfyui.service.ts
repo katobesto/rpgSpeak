@@ -31,7 +31,22 @@ type HistoryEntry = {
 };
 
 export class ComfyUiService {
-  constructor(private readonly baseUrl: string) {}
+  constructor(
+    private readonly baseUrl: string,
+    private readonly cfClientId?: string | null,
+    private readonly cfClientSecret?: string | null,
+  ) {}
+
+  /** Headers to add when Cloudflare Access protects the ComfyUI tunnel. */
+  private get authHeaders(): Record<string, string> {
+    if (this.cfClientId && this.cfClientSecret) {
+      return {
+        'CF-Access-Client-Id':     this.cfClientId,
+        'CF-Access-Client-Secret': this.cfClientSecret,
+      };
+    }
+    return {};
+  }
 
   // ── Load pre-converted API-format workflow from local disk ───────────────
   // Files live at  data/comfy-workflows/<name>_api.json  (relative to project root).
@@ -101,17 +116,48 @@ export class ComfyUiService {
     const clientId = `rpgspeak-${Date.now()}`;
     const res = await fetch(`${this.baseUrl}/prompt`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...this.authHeaders },
       body: JSON.stringify({ prompt: workflow, client_id: clientId }),
     });
 
     if (!res.ok) {
-      const text = await res.text().catch(() => res.statusText);
+      const body = await res.json().catch(() => null) as {
+        error?: { type?: string; message?: string };
+        node_errors?: Record<string, { errors?: Array<{ type?: string; details?: string }> }>;
+      } | null;
+
+      // Validation errors: parse node_errors for a human-readable message
+      if (body?.error?.type === 'prompt_outputs_failed_validation' && body.node_errors) {
+        const lines: string[] = [];
+        for (const [, nodeErr] of Object.entries(body.node_errors)) {
+          for (const e of nodeErr.errors ?? []) {
+            if (e.type === 'value_not_in_list') {
+              // e.g. "ckpt_name: 'foo.safetensors' not in []"
+              const match = e.details?.match(/^(\w+):\s*'([^']+)'\s+not in \[/);
+              if (match) {
+                const [, field, value] = match;
+                lines.push(`Modelo no encontrado — ${field}: "${value}". Descárgalo y colócalo en la carpeta correspondiente de ComfyUI.`);
+              } else {
+                lines.push(e.details ?? e.type ?? 'error desconocido');
+              }
+            } else {
+              lines.push(e.details ?? e.type ?? 'error desconocido');
+            }
+          }
+        }
+        throw new Error(`ComfyUI: workflow inválido — ${lines.join(' | ')}`);
+      }
+
+      const text = body ? JSON.stringify(body) : res.statusText;
       throw new Error(`ComfyUI: error al encolar prompt (${res.status}): ${text}`);
     }
 
-    const data = (await res.json()) as { prompt_id: string };
+    const data = (await res.json()) as { prompt_id?: string; error?: unknown };
     if (!data.prompt_id) {
+      // ComfyUI sometimes returns 200 with an error body (e.g. validation failed)
+      if (data.error) {
+        throw new Error(`ComfyUI: el workflow tiene errores — ${JSON.stringify(data.error).slice(0, 200)}`);
+      }
       throw new Error('ComfyUI: la respuesta no incluye prompt_id');
     }
     return data.prompt_id;
@@ -125,7 +171,9 @@ export class ComfyUiService {
     while (Date.now() < deadline) {
       await sleep(POLL_INTERVAL);
 
-      const res = await fetch(`${this.baseUrl}/history/${promptId}`);
+      const res = await fetch(`${this.baseUrl}/history/${promptId}`, {
+        headers: { ...this.authHeaders },
+      });
       if (!res.ok) continue;
 
       const history = (await res.json()) as Record<string, HistoryEntry>;
@@ -147,7 +195,9 @@ export class ComfyUiService {
   // ── Download image ────────────────────────────────────────────────────────
   async downloadImage(filename: string, subfolder = '', type = 'output'): Promise<Buffer> {
     const qs = new URLSearchParams({ filename, subfolder, type }).toString();
-    const res = await fetch(`${this.baseUrl}/view?${qs}`);
+    const res = await fetch(`${this.baseUrl}/view?${qs}`, {
+      headers: { ...this.authHeaders },
+    });
     if (!res.ok) {
       throw new Error(`ComfyUI: error descargando "${filename}" (${res.status})`);
     }
@@ -175,7 +225,7 @@ export class ComfyUiService {
 
     const res = await fetch(`${this.baseUrl}/upload/image`, {
       method: 'POST',
-      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}`, ...this.authHeaders },
       body,
     });
 

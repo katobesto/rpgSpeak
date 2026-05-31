@@ -390,6 +390,9 @@ Responde de forma breve y directa: máximo 2 párrafos cortos. Ve al punto esenc
   nsfwBlockedMessage: `*[Moderación: el contenido de tu mensaje no está permitido con el modo NSFW desactivado. Si deseas este tipo de interacciones, activa "Permitir contenido adulto" en Ajustes → Generación.]*`,
   // API options
   disableFallbacks: false,
+  // Cloudflare Access — para ComfyUI remoto tras túnel
+  comfyUiCfClientId: null,
+  comfyUiCfClientSecret: null,
 };
 
 export class SettingsService {

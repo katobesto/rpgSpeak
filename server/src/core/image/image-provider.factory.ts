@@ -26,6 +26,10 @@ export function createImageProvider(settings: AppSettings): ImageProvider {
 
     case 'comfyui':
     default:
-      return new ComfyUiImageProvider(settings.comfyUiUrl ?? 'http://127.0.0.1:8000');
+      return new ComfyUiImageProvider(
+        settings.comfyUiUrl ?? 'http://127.0.0.1:8001',
+        settings.comfyUiCfClientId ?? undefined,
+        settings.comfyUiCfClientSecret ?? undefined,
+      );
   }
 }

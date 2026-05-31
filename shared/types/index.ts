@@ -386,6 +386,9 @@ export interface AppSettings {
   nsfwBlockedMessage: string;
   // Opciones de API
   disableFallbacks: boolean;
+  // Cloudflare Access — para proteger ComfyUI remoto tras un túnel
+  comfyUiCfClientId: string | null;
+  comfyUiCfClientSecret: string | null;
 }
 
 // ─── API Response Types ───────────────────────────────────────────────────────

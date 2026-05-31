@@ -6,17 +6,23 @@ export class ComfyUiImageProvider implements ImageProvider {
 
   private readonly service: ComfyUiService;
 
-  constructor(baseUrl: string) {
-    this.service = new ComfyUiService(baseUrl);
+  constructor(
+    baseUrl: string,
+    cfClientId?: string,
+    cfClientSecret?: string,
+  ) {
+    this.service = new ComfyUiService(baseUrl, cfClientId, cfClientSecret);
   }
 
   async generate(req: ImageGenRequest): Promise<ImageGenResult> {
-    return this.service.generateImage('sdxl', req.prompt);
+    const workflow = req.workflowName ?? 'image_z_image_turbo';
+    return this.service.generateImage(workflow, req.prompt);
   }
 
   async generateWithReference(
     req: ImageGenRequest & { referenceImagePath: string },
   ): Promise<ImageGenResult> {
-    return this.service.generateImageWithReference('faceid_sdxl', req.prompt, req.referenceImagePath);
+    const workflow = req.workflowName ?? 'faceid_sdxl';
+    return this.service.generateImageWithReference(workflow, req.prompt, req.referenceImagePath);
   }
 }

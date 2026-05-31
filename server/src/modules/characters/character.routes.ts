@@ -122,7 +122,7 @@ export const characterRoutes: FastifyPluginAsync = async (app) => {
 
     const settingsService = new SettingsService();
     const imageProvider = createImageProvider(settingsService.getAll());
-    const { buffer, filename } = await imageProvider.generate({ prompt });
+    const { buffer, filename } = await imageProvider.generate({ prompt, workflowName: workflow });
 
     const base64 = buffer.toString('base64');
     const updated = service.addImage(req.params.id, base64, filename, false);

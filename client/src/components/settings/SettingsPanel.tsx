@@ -21,7 +21,7 @@ type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'u
 
 const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'storyEventGenerationPrompt', 'chapterGuidePrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
-const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel'];
+const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret'];
 
 export function SettingsPanel() {
   const [tab, setTab] = useState<STab>('profile');
@@ -2527,13 +2527,35 @@ function ImageProviderSection({
 
       {/* Provider-specific config */}
       {selected === 'comfyui' && (
-        <Input
-          label="URL del servidor ComfyUI"
-          value={draft.comfyUiUrl ?? 'http://127.0.0.1:8000'}
-          onChange={(e) => update('comfyUiUrl', e.target.value)}
-          placeholder="http://127.0.0.1:8000"
-          hint="Dirección local de ComfyUI. FaceID (imagen de referencia) solo disponible con este proveedor."
-        />
+        <div className="space-y-3">
+          <Input
+            label="URL del servidor ComfyUI"
+            value={draft.comfyUiUrl ?? 'http://127.0.0.1:8001'}
+            onChange={(e) => update('comfyUiUrl', e.target.value)}
+            placeholder="http://127.0.0.1:8001"
+            hint="Local o remoto (p.ej. https://comfy.tudominio.com). FaceID solo disponible con ComfyUI."
+          />
+          <div className="space-y-2">
+            <p className="text-[11px] font-medium text-text-secondary">
+              Cloudflare Access <span className="text-text-muted font-normal">(solo si ComfyUI está protegido por un túnel)</span>
+            </p>
+            <Input
+              label="CF-Access-Client-Id"
+              value={draft.comfyUiCfClientId ?? ''}
+              onChange={(e) => update('comfyUiCfClientId', e.target.value || null)}
+              placeholder="xxxxxxxx.access"
+              hint=""
+            />
+            <Input
+              label="CF-Access-Client-Secret"
+              value={draft.comfyUiCfClientSecret ?? ''}
+              onChange={(e) => update('comfyUiCfClientSecret', e.target.value || null)}
+              placeholder="yyyyyyyy…"
+              hint=""
+              type="password"
+            />
+          </div>
+        </div>
       )}
 
       {selected === 'pollinations' && (

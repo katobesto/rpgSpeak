@@ -3,6 +3,8 @@ export interface ImageGenRequest {
   negativePrompt?: string;
   width?: number;
   height?: number;
+  /** ComfyUI-specific: workflow name without the _api.json suffix. Ignored by other providers. */
+  workflowName?: string;
 }
 
 export interface ImageGenResult {

@@ -311,12 +311,26 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
         throw new ValidationError(`Imagen de avatar no encontrada en disco: ${avatarUrl}`);
       }
 
-      generationResult = await imageProvider.generateWithReference!({
-        prompt: sceneDescription,
-        referenceImagePath: avatarDiskPath,
-      });
+      try {
+        generationResult = await imageProvider.generateWithReference!({
+          prompt: sceneDescription,
+          referenceImagePath: avatarDiskPath,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        // Surface ComfyUI missing-model errors with actionable instructions
+        if (msg.includes('Modelo no encontrado') || msg.includes('not in []') || msg.includes('workflow inválido')) {
+          throw new ValidationError(
+            `${msg}\n\n` +
+            `El modo BETA con imagen de referencia requiere un checkpoint SDXL en ComfyUI. ` +
+            `Descarga un modelo SDXL (p.ej. dreamshaperXL_lightningDPMSDE.safetensors) y ` +
+            `colócalo en la carpeta "checkpoints" de tu instalación de ComfyUI.`
+          );
+        }
+        throw err;
+      }
     } else {
-      generationResult = await imageProvider.generate({ prompt: sceneDescription });
+      generationResult = await imageProvider.generate({ prompt: sceneDescription, workflowName });
     }
 
     const { buffer, filename } = generationResult;
