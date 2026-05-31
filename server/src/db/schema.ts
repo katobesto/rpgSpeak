@@ -227,7 +227,18 @@ export const contextItems = sqliteTable('context_items', {
 
 // ─── Type exports for Drizzle inference ───────────────────────────────────────
 
-// ─── Story Chapters ───────────────────────────────────────────────────────────
+// ─── Story Script Chapters (plantilla por historia) ──────────────────────────
+
+export const storyScriptChapters = sqliteTable('story_script_chapters', {
+  id:            text('id').primaryKey(),
+  storyId:       text('story_id').notNull().references(() => stories.id, { onDelete: 'cascade' }),
+  chapterNumber: integer('chapter_number').notNull(),
+  title:         text('title').notNull(),
+  description:   text('description').notNull().default(''),
+  createdAt:     text('created_at').notNull(),
+});
+
+// ─── Story Chapters (progreso por conversación) ───────────────────────────────
 
 export const storyChapters = sqliteTable('story_chapters', {
   id:             text('id').primaryKey(),
@@ -247,5 +258,6 @@ export type DbConversation = typeof conversations.$inferSelect;
 export type DbMessage = typeof messages.$inferSelect;
 export type DbMemoryEntry = typeof memoryEntries.$inferSelect;
 export type DbProvider = typeof providers.$inferSelect;
+export type DbStoryScriptChapter = typeof storyScriptChapters.$inferSelect;
 export type DbStoryChapter = typeof storyChapters.$inferSelect;
 export type DbSetting = typeof settings.$inferSelect;

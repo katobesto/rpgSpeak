@@ -152,7 +152,18 @@ export interface StoryCharacterLink {
   notes: string;
 }
 
-// ─── Story Chapter Types ──────────────────────────────────────────────────────
+// ─── Story Script (plantilla por historia) ───────────────────────────────────
+
+export interface StoryScriptChapter {
+  id:            string;
+  storyId:       string;
+  chapterNumber: number;
+  title:         string;
+  description:   string;
+  createdAt:     string;
+}
+
+// ─── Story Chapter (progreso por conversación) ────────────────────────────────
 
 export interface StoryChapter {
   id:             string;

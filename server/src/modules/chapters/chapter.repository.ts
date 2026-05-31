@@ -66,6 +66,16 @@ export class ChapterRepository {
     }
   }
 
+  /** Copia el guión maestro de una historia a esta conversación */
+  copyFromScript(conversationId: string, scriptChapters: import('@rpgspeak/shared').StoryScriptChapter[]): void {
+    if (scriptChapters.length === 0) return;
+    this.createBatch(conversationId, scriptChapters.map(c => ({
+      number:      c.chapterNumber,
+      title:       c.title,
+      description: c.description,
+    })));
+  }
+
   /** Marca el capítulo activo como completado. Devuelve el siguiente capítulo (si existe). */
   completeCurrentChapter(conversationId: string): { completed: StoryChapter; next: StoryChapter | null } | null {
     const current = this.findCurrentChapter(conversationId);
