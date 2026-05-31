@@ -575,6 +575,51 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({ success: true });
   });
 
+  // ── POST /generate/upload-scene-image ────────────────────────────────────
+  // Permite subir una imagen externa para asociarla a un mensaje del chat,
+  // igual que si hubiera sido generada por IA. Los parámetros van como query.
+  app.post('/upload-scene-image', async (req, reply) => {
+    const { conversationId, messageId } = req.query as { conversationId?: string; messageId?: string };
+    if (!conversationId || !messageId) {
+      throw new ValidationError('conversationId y messageId son requeridos como query params');
+    }
+
+    const fileData = await req.file();
+    if (!fileData) throw new ValidationError('No se recibió ningún archivo');
+
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowed.includes(fileData.mimetype)) {
+      throw new ValidationError('Tipo de archivo no permitido. Usa JPG, PNG, WebP o GIF.');
+    }
+
+    const buffer = await fileData.toBuffer();
+    if (buffer.length > 20 * 1024 * 1024) {
+      throw new ValidationError('La imagen no puede superar 20 MB.');
+    }
+
+    const msgRepo = new MessageRepository();
+    const message = msgRepo.findById(messageId);
+    if (!message) throw new NotFoundError('Message', messageId);
+
+    // Guardar junto a las imágenes generadas (mismo directorio)
+    const scenesDir = path.join(PROJECT_ROOT, 'data', 'images', 'scenes', conversationId);
+    fs.mkdirSync(scenesDir, { recursive: true });
+
+    const ext = path.extname(fileData.filename).toLowerCase() || '.jpg';
+    const savedFilename = `upload_${messageId.slice(0, 8)}_${Date.now()}${ext}`;
+    fs.writeFileSync(path.join(scenesDir, savedFilename), buffer);
+
+    const imageUrl = `/images/scenes/${conversationId}/${savedFilename}`;
+
+    // Actualizar metadata del mensaje (mismo campo que las generadas)
+    const existingMeta = (message.metadata ?? {}) as Record<string, unknown>;
+    msgRepo.update(messageId, {
+      metadata: { ...existingMeta, sceneImageUrl: imageUrl },
+    });
+
+    return reply.send({ success: true, data: { imageUrl } });
+  });
+
   // ── POST /generate/user-inspiration ──────────────────────────────────────
   // Generates a new portrait image using the user avatar as FaceID reference
   // and their appearance description as the positive prompt.

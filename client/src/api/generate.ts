@@ -1,4 +1,4 @@
-import { api } from './client.ts';
+import { api, getAuthHeader } from './client.ts';
 
 export const generateApi = {
   sceneImage: (
@@ -20,6 +20,22 @@ export const generateApi = {
 
   deleteSceneImage: (conversationId: string, messageId: string) =>
     api.deleteWithBody<{ success: true }>('/generate/scene-image', { conversationId, messageId }),
+
+  /** Sube una imagen externa y la asocia al mensaje (mismo campo sceneImageUrl). */
+  uploadSceneImage: async (conversationId: string, messageId: string, file: File): Promise<{ imageUrl: string }> => {
+    const form = new FormData();
+    form.append('image', file);
+    const resp = await fetch(
+      `/api/generate/upload-scene-image?conversationId=${encodeURIComponent(conversationId)}&messageId=${encodeURIComponent(messageId)}`,
+      { method: 'POST', headers: { ...getAuthHeader() }, body: form },
+    );
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({})) as Record<string, unknown>;
+      throw new Error(String(err.error ?? 'Error al subir la imagen'));
+    }
+    const data = await resp.json() as { success: boolean; data: { imageUrl: string } };
+    return data.data;
+  },
 
   /** Returns the raw prompt that would be sent to the LLM (without calling it). */
   buildScenePrompt: (

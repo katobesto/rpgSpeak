@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { Copy, Edit2, RefreshCw, Trash2, Check, Bug, X, Pin, Volume2, VolumeX, Loader, Wand2, Image as ImageIcon, Zap, ChevronDown, RotateCcw, Play, Square, Pause, Download, Share2 } from 'lucide-react';
+import { Copy, Edit2, RefreshCw, Trash2, Check, Bug, X, Pin, Volume2, VolumeX, Loader, Wand2, Image as ImageIcon, Zap, ChevronDown, RotateCcw, Play, Square, Pause, Download, Share2, Upload } from 'lucide-react';
 import type { Message, ChatMessage } from '@rpgspeak/shared';
 import { Avatar } from '../ui/Avatar.tsx';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -41,7 +41,9 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
   const [showSceneDebug,  setShowSceneDebug]  = useState(false);
   const [editablePrompt,  setEditablePrompt]  = useState('');
   const [generatingScene, setGeneratingScene] = useState(false);
+  const [uploadingScene,  setUploadingScene]  = useState(false);
   const [sceneError,      setSceneError]      = useState<string | null>(null);
+  const uploadInputRef = React.useRef<HTMLInputElement>(null);
 
   // Keep editable prompt in sync when sceneDesc changes (e.g. after first generation)
   React.useEffect(() => {
@@ -196,6 +198,23 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
       setShowScenePanel(false);
     } catch (err) {
       setSceneError(err instanceof Error ? err.message : 'Error al eliminar');
+    }
+  }
+
+  async function handleUploadSceneImage(file: File) {
+    if (!activeConversation?.id) return;
+    setUploadingScene(true);
+    setSceneError(null);
+    try {
+      const result = await generateApi.uploadSceneImage(activeConversation.id, message.id, file);
+      updateMessage(message.id, {
+        metadata: { ...(message.metadata ?? {}), sceneImageUrl: result.imageUrl },
+      });
+      setShowScenePanel(false);
+    } catch (err) {
+      setSceneError(err instanceof Error ? err.message : 'Error al subir la imagen');
+    } finally {
+      setUploadingScene(false);
     }
   }
 
@@ -354,12 +373,34 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
               <ActionButton icon={RefreshCw} onClick={() => {}} title="Regenerate" />
             )}
             {!isUser && !isError && (
-              <ActionButton
-                icon={generatingScene ? Loader : ImageIcon}
-                onClick={() => setShowSceneDebug(true)}
-                title="Generar imagen de escena"
-                spin={generatingScene}
-              />
+              <>
+                {/* Generar imagen con IA */}
+                <ActionButton
+                  icon={generatingScene ? Loader : ImageIcon}
+                  onClick={() => setShowSceneDebug(true)}
+                  title="Generar imagen de escena"
+                  spin={generatingScene}
+                />
+                {/* Subir imagen externa */}
+                <ActionButton
+                  icon={uploadingScene ? Loader : Upload}
+                  onClick={() => uploadInputRef.current?.click()}
+                  title="Subir imagen"
+                  spin={uploadingScene}
+                />
+                <input
+                  ref={uploadInputRef}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp,image/gif"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleUploadSceneImage(file);
+                    // Limpiar para que se pueda subir el mismo archivo de nuevo
+                    e.target.value = '';
+                  }}
+                />
+              </>
             )}
             <ActionButton
               icon={Trash2}
