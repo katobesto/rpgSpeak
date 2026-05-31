@@ -873,7 +873,7 @@ function ContinueStoryButton({
     setSending(true);
     try {
       await sendMessage({
-        message:     'Continua la historia',
+        message:     'Narrador, avanza la historia. Describe qué ocurre a continuación sin esperar mi intervención.',
         characterId: narratorMode ? undefined : (activeCharacterId ?? undefined),
       });
     } finally {

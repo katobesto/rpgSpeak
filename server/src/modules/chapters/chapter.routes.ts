@@ -81,7 +81,7 @@ export const chapterRoutes: FastifyPluginAsync = async (app) => {
       ? linkedChars.map((c) => `- ${c!.name}: ${c!.description || '(sin descripción)'}`).join('\n')
       : '(sin personajes definidos)';
 
-    const prompt = `Eres el diseñador narrativo de la siguiente campaña de rol. Basándote en la historia, el lore y los personajes activos, genera exactamente 10 capítulos para estructurar la aventura de principio a fin.
+    const prompt = `Eres el diseñador narrativo de la siguiente campaña de rol. Basándote en la historia, el lore y los personajes activos, genera exactamente 10 capítulos que estructuren la aventura de principio a fin con una progresión dramática clara.
 
 ## Historia
 ${storyContext}
@@ -89,15 +89,27 @@ ${storyContext}
 ## Personajes activos
 ${charsContext}
 
-Cada capítulo debe tener:
-- Un título corto y evocador (máximo 6 palabras)
-- Una descripción de 2-3 frases que resume los eventos principales del capítulo
+REQUISITOS DE CADA CAPÍTULO:
+- Título corto y evocador (máximo 5 palabras)
+- Descripción de 2-4 frases que incluya:
+  · UN evento o situación concreta que ocurre en este capítulo (no vaga, sino específica)
+  · AL MENOS UN PNJ o facción activa que impulsa los eventos (antagonista, aliado, neutro)
+  · La condición implícita de cierre: qué debe haber pasado para que el capítulo esté completo
+- La descripción debe ser suficientemente específica para que el narrador sepa QUÉ hacer, no solo el tono general
+
+ESTRUCTURA DRAMÁTICA ESPERADA:
+- Cap. 1-2: Introducción del conflicto, presentación del mundo y amenaza
+- Cap. 3-4: Primera escalada, los personajes se implican, primeras pérdidas o victorias
+- Cap. 5-6: Punto de giro — revelación o complicación que cambia el planteamiento inicial
+- Cap. 7-8: Crisis máxima, los recursos se agotan, el peligro es real e inmediato
+- Cap. 9: Preparación para el enfrentamiento final, alianzas o traiciones
+- Cap. 10: Clímax y resolución
 
 Responde ÚNICAMENTE con las etiquetas siguientes, una por línea, sin texto adicional:
-[CAPITULO:1|Título del capítulo 1|Descripción de 2-3 frases del capítulo 1]
-[CAPITULO:2|Título del capítulo 2|Descripción de 2-3 frases del capítulo 2]
+[CAPITULO:1|Título del capítulo 1|Descripción específica del capítulo 1]
+[CAPITULO:2|Título del capítulo 2|Descripción específica del capítulo 2]
 ...
-[CAPITULO:10|Título del capítulo 10|Descripción de 2-3 frases del capítulo 10]`;
+[CAPITULO:10|Título del capítulo 10|Descripción específica del capítulo 10]`;
 
     const s          = settings.getAll();
     const providerId = s.defaultProviderId;
