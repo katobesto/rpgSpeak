@@ -9,14 +9,15 @@ import { charactersApi } from '../../api/characters.ts';
 import { storiesApi } from '../../api/stories.ts';
 import { Button } from '../ui/Button.tsx';
 import { Input, Textarea } from '../ui/Input.tsx';
-import { Plus, Trash2, RefreshCw, Check, X, Volume2, Wifi, WifiOff, Download, CheckCircle2, Play, Square, Loader, LogOut, Users, Shield, UserCircle, RotateCcw, AlertCircle, BarChart2, Zap, Camera, Sparkles, Wand2, FlaskConical, Upload, Link2, BookOpen, Pencil } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, Check, X, Volume2, Wifi, WifiOff, Download, CheckCircle2, Play, Square, Loader, LogOut, Users, Shield, UserCircle, RotateCcw, AlertCircle, BarChart2, Zap, Camera, Sparkles, Wand2, FlaskConical, Upload, Link2, BookOpen, Pencil, DatabaseBackup, HardDriveDownload, HardDriveUpload, TriangleAlert } from 'lucide-react';
+import { backupApi } from '../../api/backup.ts';
 import type { Provider, CreateProviderDto, AppSettings, TtsSettings, TtsVoice } from '@rpgspeak/shared';
 import { useUiStore } from '../../stores/ui.store.ts';
 import { useAuthStore } from '../../stores/auth.store.ts';
 import { conversationsApi } from '../../api/conversations.ts';
 import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
 
-type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats';
+type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats' | 'backup';
 
 const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'storyEventGenerationPrompt', 'chapterGuidePrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
@@ -39,6 +40,7 @@ export function SettingsPanel() {
       { id: 'voice' as STab, label: 'Voz / TTS' },
       { id: 'stats' as STab, label: 'Estadísticas' },
       { id: 'users' as STab, label: 'Usuarios' },
+      { id: 'backup' as STab, label: 'Copia de seguridad' },
     ] : []),
   ];
 
@@ -709,6 +711,8 @@ export function SettingsPanel() {
           {tab === 'stats' && isAdmin && <StatsSection />}
 
           {tab === 'users' && isAdmin && <UsersSection />}
+
+          {tab === 'backup' && isAdmin && <BackupSection />}
         </div>
       </div>
     </div>
@@ -2798,6 +2802,216 @@ function StatCard({
       </div>
       <div className="text-2xl font-semibold text-text-primary tabular-nums">{value}</div>
       {sub && <div className={`text-[11px] ${accent ? 'text-emerald-400/80' : 'text-text-muted'}`}>{sub}</div>}
+    </div>
+  );
+}
+
+// ─── Backup section ───────────────────────────────────────────────────────────
+
+function BackupSection() {
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+
+  const [restoreFile, setRestoreFile]   = useState<File | null>(null);
+  const [confirming, setConfirming]     = useState(false);
+  const [restoring, setRestoring]       = useState(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [restoreDone, setRestoreDone]   = useState(false);
+
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  async function handleDownload() {
+    setDownloading(true);
+    setDownloadError(null);
+    try {
+      const { filename, url } = await backupApi.download();
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setDownloadError(err instanceof Error ? err.message : 'Error al descargar');
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  async function handleRestore() {
+    if (!restoreFile) return;
+    setRestoring(true);
+    setRestoreError(null);
+    try {
+      await backupApi.restore(restoreFile);
+      setRestoreDone(true);
+    } catch (err) {
+      setRestoreError(err instanceof Error ? err.message : 'Error al restaurar');
+      setRestoring(false);
+    }
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div>
+        <h3 className="text-sm font-semibold text-text-primary flex items-center gap-2">
+          <DatabaseBackup size={16} className="text-accent" />
+          Copia de seguridad
+        </h3>
+        <p className="text-xs text-text-muted mt-1 leading-relaxed">
+          Descarga o restaura toda la carpeta <code className="bg-white/8 px-1 rounded text-[11px]">data/</code> —
+          incluye la base de datos, imágenes, workflows y modelos TTS.
+        </p>
+      </div>
+
+      {/* Download card */}
+      <div className="rounded-xl border border-border p-4 space-y-3" style={{ background: 'var(--surface-2)' }}>
+        <div className="flex items-center gap-2">
+          <HardDriveDownload size={15} className="text-accent flex-shrink-0" />
+          <span className="text-sm font-semibold text-text-primary">Descargar backup</span>
+        </div>
+        <p className="text-xs text-text-muted leading-relaxed">
+          Genera un archivo <code className="bg-white/8 px-1 rounded text-[11px]">.tar.gz</code> con todo
+          el contenido de <code className="bg-white/8 px-1 rounded text-[11px]">data/</code>.
+          El tamaño depende de cuántas imágenes y voces TTS tengas almacenadas.
+        </p>
+        {downloadError && (
+          <p className="text-[11px] text-red-400 flex items-center gap-1">
+            <AlertCircle size={11} /> {downloadError}
+          </p>
+        )}
+        <button
+          onClick={handleDownload}
+          disabled={downloading}
+          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-accent/80 disabled:opacity-50 transition-colors"
+        >
+          {downloading
+            ? <><Loader size={14} className="animate-spin" /> Generando…</>
+            : <><HardDriveDownload size={14} /> Descargar backup</>}
+        </button>
+      </div>
+
+      {/* Restore card */}
+      <div
+        className="rounded-xl border p-4 space-y-3"
+        style={{ borderColor: 'var(--border)', background: 'var(--surface-2)' }}
+      >
+        <div className="flex items-center gap-2">
+          <HardDriveUpload size={15} className="text-amber-400 flex-shrink-0" />
+          <span className="text-sm font-semibold text-text-primary">Restaurar backup</span>
+        </div>
+
+        {/* Warning banner */}
+        <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/8 px-3 py-2.5">
+          <TriangleAlert size={13} className="text-amber-400 flex-shrink-0 mt-0.5" />
+          <p className="text-[11px] text-amber-300 leading-relaxed">
+            <strong>Acción destructiva.</strong> Se reemplazará toda la carpeta{' '}
+            <code className="bg-white/8 px-1 rounded">data/</code>, incluyendo la base de datos y las imágenes actuales.
+            El servidor se reiniciará automáticamente tras la restauración.
+            Haz un backup primero si tienes datos que quieres conservar.
+          </p>
+        </div>
+
+        <p className="text-xs text-text-muted leading-relaxed">
+          Selecciona un archivo <code className="bg-white/8 px-1 rounded text-[11px]">.tar.gz</code> generado
+          previamente por esta aplicación.
+        </p>
+
+        {/* File selector */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".tar.gz,.tgz,application/gzip,application/x-gzip"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0] ?? null;
+            setRestoreFile(f);
+            setRestoreError(null);
+            setConfirming(false);
+            setRestoreDone(false);
+            e.target.value = '';
+          }}
+        />
+
+        {!restoreDone ? (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={restoring}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-border text-text-secondary hover:text-text-primary hover:bg-white/8 disabled:opacity-50 transition-colors"
+              >
+                <Upload size={12} />
+                {restoreFile ? restoreFile.name : 'Seleccionar archivo…'}
+              </button>
+              {restoreFile && (
+                <span className="text-[11px] text-text-muted">
+                  {(restoreFile.size / 1024 / 1024).toFixed(1)} MB
+                </span>
+              )}
+            </div>
+
+            {restoreFile && !confirming && !restoring && (
+              <button
+                onClick={() => setConfirming(true)}
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-amber-500 text-white hover:bg-amber-600 transition-colors"
+              >
+                <HardDriveUpload size={14} />
+                Restaurar este backup
+              </button>
+            )}
+
+            {/* Confirmation step */}
+            {confirming && !restoring && (
+              <div className="rounded-lg border border-red-500/40 bg-red-500/8 p-3 space-y-2">
+                <p className="text-xs font-semibold text-red-400 flex items-center gap-1.5">
+                  <TriangleAlert size={13} />
+                  ¿Estás seguro? Esta acción no se puede deshacer.
+                </p>
+                <p className="text-[11px] text-red-300/80">
+                  Se borrará toda la data actual y se reemplazará con el contenido del archivo{' '}
+                  <strong>{restoreFile?.name}</strong>.
+                </p>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    onClick={handleRestore}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500 text-white hover:bg-red-600 transition-colors"
+                  >
+                    <Check size={12} />
+                    Sí, restaurar ahora
+                  </button>
+                  <button
+                    onClick={() => setConfirming(false)}
+                    className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary hover:bg-white/8 transition-colors"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {restoring && (
+              <div className="flex items-center gap-2 text-sm text-text-muted">
+                <Loader size={14} className="animate-spin text-accent" />
+                Subiendo y restaurando… no cierres esta pestaña.
+              </div>
+            )}
+
+            {restoreError && (
+              <p className="text-[11px] text-red-400 flex items-center gap-1">
+                <AlertCircle size={11} /> {restoreError}
+              </p>
+            )}
+          </div>
+        ) : (
+          <div className="flex items-center gap-2 text-sm text-emerald-400">
+            <CheckCircle2 size={16} />
+            Restauración completada. El servidor se está reiniciando…
+          </div>
+        )}
+      </div>
     </div>
   );
 }

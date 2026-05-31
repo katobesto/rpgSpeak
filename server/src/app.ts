@@ -27,6 +27,7 @@ import { memoriesRoutes } from './modules/memories/memories.routes.js';
 import { contextRoutes }  from './modules/context/context.routes.js';
 import { chapterRoutes }      from './modules/chapters/chapter.routes.js';
 import { storyScriptRoutes }  from './modules/chapters/story-script.routes.js';
+import { backupRoutes }       from './modules/backup/backup.routes.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -48,7 +49,9 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   await app.register(fastifyMultipart, {
-    limits: { fileSize: 10 * 1024 * 1024 }, // 10MB
+    // 4 GB ceiling — accommodates the backup/restore endpoint.
+    // Individual character/image upload routes check file size themselves.
+    limits: { fileSize: 4 * 1024 * 1024 * 1024 },
   });
 
   await app.register(fastifyWebsocket);
@@ -86,6 +89,7 @@ export async function buildApp(): Promise<FastifyInstance> {
           await prot.register(contextRoutes,      { prefix: '/context' });
           await prot.register(chapterRoutes,      { prefix: '/chapters' });
           await prot.register(storyScriptRoutes,  { prefix: '/story-script' });
+          await prot.register(backupRoutes,       { prefix: '/backup' });
         },
         { prefix: '' }
       );
