@@ -850,7 +850,7 @@ function ContinueStoryButton({
   if (isStreaming) return null;
 
   return (
-    <div className="absolute bottom-20 right-4 z-10">
+    <div className="absolute bottom-28 right-4 z-10">
       <button
         onClick={handleClick}
         disabled={sending}
