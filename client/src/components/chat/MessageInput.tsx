@@ -10,9 +10,10 @@ interface MessageInputProps {
   characters: Character[];
   activeCharacterId: string | null;
   onCharacterChange: (id: string) => void;
+  rightSlot?: React.ReactNode;
 }
 
-export function MessageInput({ characters, activeCharacterId, onCharacterChange }: MessageInputProps) {
+export function MessageInput({ characters, activeCharacterId, onCharacterChange, rightSlot }: MessageInputProps) {
   const [text, setText] = useState('');
   const [showCharMenu, setShowCharMenu] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -74,8 +75,9 @@ export function MessageInput({ characters, activeCharacterId, onCharacterChange 
 
   return (
     <div className="flex-shrink-0 border-t border-border px-4 py-3">
-      {/* Unified Narrator/Character selector — always shown */}
-      <div className="relative mb-2" ref={menuRef}>
+      {/* Selector row: character/narrator on the left, optional slot on the right */}
+      <div className="flex items-center justify-between mb-2">
+      <div className="relative" ref={menuRef}>
         <button
           onClick={() => setShowCharMenu((v) => !v)}
           className="flex items-center gap-2 text-xs text-text-secondary hover:text-text-primary transition-colors"
@@ -129,6 +131,8 @@ export function MessageInput({ characters, activeCharacterId, onCharacterChange 
             ))}
           </div>
         )}
+      </div>
+      {rightSlot && <div className="flex-shrink-0">{rightSlot}</div>}
       </div>
 
       {/* Input area */}

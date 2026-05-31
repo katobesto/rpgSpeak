@@ -324,16 +324,16 @@ export function ChatWindow() {
         highlightedMessageId={highlightedMessageId}
       />
 
-      {/* Botón flotante "Continúa la historia" */}
-      <ContinueStoryButton
-        activeCharacterId={activeCharacterId}
-        narratorMode={activeConversation.characters.length === 0}
-      />
-
       <MessageInput
         characters={characters.length > 0 ? characters : allCharacters}
         activeCharacterId={activeCharacterId}
         onCharacterChange={handleCharacterChange}
+        rightSlot={
+          <ContinueStoryButton
+            activeCharacterId={activeCharacterId}
+            narratorMode={activeConversation.characters.length === 0}
+          />
+        }
       />
 
       <GroupPanel
@@ -850,23 +850,15 @@ function ContinueStoryButton({
   if (isStreaming) return null;
 
   return (
-    <div className="absolute bottom-28 right-4 z-10">
-      <button
-        onClick={handleClick}
-        disabled={sending}
-        className="flex items-center gap-2 px-4 py-2 rounded-full shadow-lg text-xs font-semibold transition-all active:scale-95 disabled:opacity-50 border"
-        style={{
-          background:   'var(--accent)',
-          color:        '#fff',
-          borderColor:  'rgba(255,255,255,0.15)',
-          boxShadow:    '0 4px 16px rgba(0,0,0,0.35)',
-        }}
-        title="Enviar 'Continua la historia'"
-      >
-        <ChevronRight size={14} />
-        Continúa la historia
-      </button>
-    </div>
+    <button
+      onClick={handleClick}
+      disabled={sending}
+      className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border border-accent/50 text-accent hover:bg-accent/12 active:scale-95 disabled:opacity-50 transition-all"
+      title="Continúa la historia"
+    >
+      <ChevronRight size={12} />
+      Continúa la historia
+    </button>
   );
 }
 
