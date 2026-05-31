@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { X, Loader, Wand2, Image as ImageIcon, ChevronRight, User, AlertCircle, Minus, Plus, FlaskConical } from 'lucide-react';
 import { generateApi } from '../../api/generate.ts';
@@ -191,15 +192,19 @@ export function SceneDebugModal({
     return e?.hasVisualDesc;
   }).length;
 
-  return (
+  const modal = (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: 'rgba(0,0,0,0.75)' }}
+      className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6"
+      style={{ background: 'rgba(0,0,0,0.80)' }}
       onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
-        className="relative w-full max-w-2xl rounded-xl border border-border flex flex-col animate-slide-up"
-        style={{ background: 'var(--surface-1)', maxHeight: '92vh' }}
+        className="relative w-full max-w-3xl rounded-2xl border border-border flex flex-col animate-slide-up shadow-2xl"
+        style={{
+          background: 'var(--surface-1)',
+          maxHeight: 'min(92vh, 860px)',
+          minHeight: '420px',
+        }}
       >
         {/* ── Header ───────────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border flex-shrink-0">
@@ -455,7 +460,7 @@ export function SceneDebugModal({
         </div>
 
         {/* ── Footer ───────────────────────────────────────────────────────── */}
-        <div className="flex items-center justify-between px-5 py-3 border-t border-border flex-shrink-0">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-5 py-3.5 border-t border-border flex-shrink-0">
           <button
             onClick={onClose}
             className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary hover:bg-white/8 transition-colors"
@@ -463,13 +468,13 @@ export function SceneDebugModal({
             Cancelar
           </button>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {/* Step 1 → 2 */}
             {step === 'characters' && (
               <button
                 onClick={handleBuildPrompt}
                 disabled={loadingPrompt || selectedCount === 0}
-                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium bg-accent text-white hover:bg-accent/80 disabled:opacity-50 transition-colors"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium bg-accent text-white hover:bg-accent/80 disabled:opacity-50 transition-colors"
               >
                 {loadingPrompt
                   ? <><Loader size={12} className="animate-spin" /> Cargando…</>
@@ -481,7 +486,7 @@ export function SceneDebugModal({
             {(step === 'prompt' || step === 'result') && (
               <button
                 onClick={() => { setStep('characters'); setImagePrompt(''); }}
-                className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary hover:bg-white/8 border border-border transition-colors"
+                className="px-3 py-2 rounded-lg text-xs text-text-muted hover:text-text-primary hover:bg-white/8 border border-border transition-colors"
               >
                 ← Personajes
               </button>
@@ -489,7 +494,7 @@ export function SceneDebugModal({
 
             {/* Step 3: BETA toggle + generate image */}
             {step === 'result' && (
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 {/* BETA: FaceID reference toggle */}
                 <div className="flex items-center gap-1.5 border border-border rounded-lg px-2.5 py-1.5">
                   <FlaskConical size={11} className={useFaceRef ? 'text-amber-400' : 'text-text-muted'} />
@@ -505,7 +510,7 @@ export function SceneDebugModal({
                     <select
                       value={refCharId}
                       onChange={(e) => setRefCharId(e.target.value)}
-                      className="ml-1 text-[10px] bg-transparent border-none text-text-primary outline-none cursor-pointer max-w-[90px] truncate"
+                      className="ml-1 text-[10px] bg-transparent border-none text-text-primary outline-none cursor-pointer max-w-[110px] truncate"
                     >
                       {entities.filter((e) => !e.isUser && e.avatar).map((e) => (
                         <option key={e.id} value={e.id}>{e.name}</option>
@@ -517,7 +522,7 @@ export function SceneDebugModal({
                 <button
                   onClick={handleGenerateImage}
                   disabled={!imagePrompt.trim() || generatingImage || (useFaceRef && !refCharId)}
-                  className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium bg-accent text-white hover:bg-accent/80 disabled:opacity-50 transition-colors"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium bg-accent text-white hover:bg-accent/80 disabled:opacity-50 transition-colors"
                 >
                   {generatingImage
                     ? <><Loader size={12} className="animate-spin" /> Generando imagen…</>
@@ -532,6 +537,8 @@ export function SceneDebugModal({
       </div>
     </div>
   );
+
+  return createPortal(modal, document.body);
 }
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
