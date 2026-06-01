@@ -1,18 +1,26 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { X, Loader, Wand2, Image as ImageIcon, ChevronRight, User, AlertCircle, Minus, Plus, FlaskConical } from 'lucide-react';
-import { generateApi } from '../../api/generate.ts';
+import { X, Loader, Wand2, Image as ImageIcon, ChevronRight, User, AlertCircle, Minus, Plus, FlaskConical, Zap } from 'lucide-react';
+import { generateApi, streamSceneImage } from '../../api/generate.ts';
 import { useAuthStore } from '../../stores/auth.store.ts';
 import { useChatStore } from '../../stores/chat.store.ts';
 import { Avatar } from '../ui/Avatar.tsx';
 import type { Character } from '@rpgspeak/shared';
 
+const WORKFLOWS: { id: string; label: string; description: string; is4k?: boolean }[] = [
+  { id: 'image_z_image_turbo', label: 'Estándar',    description: 'Rápido · ~30s' },
+  { id: 'generador4k',         label: '4K',          description: 'Alta calidad · preview + upscale', is4k: true },
+];
+
 interface SceneDebugModalProps {
   conversationId: string;
   messageId: string;
-  onGenerate: (imagePrompt: string, opts?: { useFaceReference?: boolean; referenceCharId?: string }) => Promise<void>;
+  /** Called with the final/preview image URL + description so the parent can update the message. */
+  onDone: (imageUrl: string, sceneDescription: string, pending?: boolean) => void;
   onClose: () => void;
+  /** Pre-select a specific workflow (e.g. 'generador4k' when opening via the ⚡ button). */
+  initialWorkflow?: string;
 }
 
 type Step = 'characters' | 'prompt' | 'result';
@@ -31,8 +39,9 @@ interface SelectableEntity {
 export function SceneDebugModal({
   conversationId,
   messageId,
-  onGenerate,
+  onDone,
   onClose,
+  initialWorkflow,
 }: SceneDebugModalProps) {
   const qc = useQueryClient();
   const currentUser = useAuthStore((s) => s.user);
@@ -102,6 +111,14 @@ export function SceneDebugModal({
   // ── Step 4: ComfyUI generation ────────────────────────────────────────────
   const [generatingImage, setGeneratingImage] = useState(false);
   const [imageError,      setImageError]      = useState<string | null>(null);
+  const [progressValue,   setProgressValue]   = useState(0);
+  const [progressMax,     setProgressMax]     = useState(0);
+  const [statusMessage,   setStatusMessage]   = useState('');
+  const sseCleanupRef = useRef<(() => void) | null>(null);
+
+  // ── Workflow selector ─────────────────────────────────────────────────────
+  const defaultWorkflow = initialWorkflow ?? WORKFLOWS[0].id;
+  const [selectedWorkflow, setSelectedWorkflow] = useState(defaultWorkflow);
 
   // ── BETA: FaceID reference ────────────────────────────────────────────────
   const [useFaceRef,      setUseFaceRef]      = useState(false);
@@ -161,21 +178,51 @@ export function SceneDebugModal({
     }
   }
 
-  async function handleGenerateImage() {
+  function handleGenerateImage() {
     if (!imagePrompt.trim()) return;
     setGeneratingImage(true);
     setImageError(null);
-    try {
-      await onGenerate(imagePrompt.trim(), useFaceRef ? {
-        useFaceReference: true,
+    setProgressValue(0);
+    setProgressMax(0);
+    setStatusMessage('Iniciando…');
+
+    sseCleanupRef.current?.();
+    sseCleanupRef.current = streamSceneImage(
+      {
+        conversationId,
+        messageId,
+        workflowName: selectedWorkflow,
+        customPrompt: imagePrompt.trim(),
+        useFaceReference: useFaceRef || undefined,
         referenceCharId: refCharId || undefined,
-      } : undefined);
-      onClose();
-    } catch (err) {
-      setImageError(err instanceof Error ? err.message : 'Error al generar la imagen');
-      setGeneratingImage(false);
-    }
+      },
+      (evt) => {
+        if (evt.type === 'status') {
+          setStatusMessage(evt.message);
+        } else if (evt.type === 'progress') {
+          setProgressValue(evt.value);
+          setProgressMax(evt.max);
+          setStatusMessage(`Generando… paso ${evt.value}/${evt.max}`);
+        } else if (evt.type === 'preview') {
+          setStatusMessage('Preview lista — mejorando a 4K…');
+          onDone(evt.imageUrl, evt.sceneDescription, true);
+          // Don't close — keep showing progress for the final
+        } else if (evt.type === 'done') {
+          onDone(evt.imageUrl, evt.sceneDescription, false);
+          setGeneratingImage(false);
+          onClose();
+        } else if (evt.type === 'error') {
+          setImageError(evt.message);
+          setGeneratingImage(false);
+        }
+      },
+    );
   }
+
+  // Cleanup SSE on unmount
+  useEffect(() => {
+    return () => { sseCleanupRef.current?.(); };
+  }, []);
 
   // Pre-select all when entity list changes (e.g. after mount)
   useEffect(() => {
@@ -457,6 +504,61 @@ export function SceneDebugModal({
               </section>
             </>
           )}
+
+          {/* ════════════════════════════════════════════════════════════════
+              WORKFLOW SELECTOR (always visible after step 1)
+          ════════════════════════════════════════════════════════════════ */}
+          {step !== 'characters' && (
+            <>
+              <div className="border-t border-border" />
+              <section className="space-y-2">
+                <p className="text-[11px] font-semibold text-text-secondary">Motor de imagen</p>
+                <div className="flex gap-2">
+                  {WORKFLOWS.map((wf) => (
+                    <button
+                      key={wf.id}
+                      onClick={() => setSelectedWorkflow(wf.id)}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs transition-all ${
+                        selectedWorkflow === wf.id
+                          ? 'border-accent/60 bg-accent/10 text-accent'
+                          : 'border-border text-text-muted hover:border-border/80 hover:text-text-primary'
+                      }`}
+                    >
+                      {wf.is4k ? <Zap size={11} /> : <ImageIcon size={11} />}
+                      <span className="font-medium">{wf.label}</span>
+                      <span className="text-[10px] opacity-70">{wf.description}</span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            </>
+          )}
+
+          {/* ── Progress bar (visible during generation) ───────────────────── */}
+          {generatingImage && (
+            <>
+              <div className="border-t border-border" />
+              <section className="space-y-2">
+                <div className="flex items-center justify-between text-[11px] text-text-muted">
+                  <span className="flex items-center gap-1.5">
+                    <Loader size={11} className="animate-spin text-accent" />
+                    {statusMessage}
+                  </span>
+                  {progressMax > 0 && (
+                    <span className="font-mono tabular-nums">{progressValue}/{progressMax}</span>
+                  )}
+                </div>
+                {progressMax > 0 && (
+                  <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--surface-2)' }}>
+                    <div
+                      className="h-full rounded-full bg-accent transition-all duration-300"
+                      style={{ width: `${Math.round((progressValue / progressMax) * 100)}%` }}
+                    />
+                  </div>
+                )}
+              </section>
+            </>
+          )}
         </div>
 
         {/* ── Footer ───────────────────────────────────────────────────────── */}
@@ -525,10 +627,12 @@ export function SceneDebugModal({
                   className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-medium bg-accent text-white hover:bg-accent/80 disabled:opacity-50 transition-colors"
                 >
                   {generatingImage
-                    ? <><Loader size={12} className="animate-spin" /> Generando imagen…</>
+                    ? <><Loader size={12} className="animate-spin" /> Generando…</>
                     : useFaceRef
                       ? <><FlaskConical size={12} /> Generar (BETA)</>
-                      : <><ImageIcon size={12} /> Generar imagen</>}
+                      : selectedWorkflow === 'generador4k'
+                        ? <><Zap size={12} /> Generar 4K</>
+                        : <><ImageIcon size={12} /> Generar imagen</>}
                 </button>
               </div>
             )}

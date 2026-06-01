@@ -758,4 +758,144 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
     const imageUrl = `/images/users/${userId}/inspired/${savedFilename}`;
     return reply.send({ success: true, data: { imageUrl } });
   });
+
+  // ── POST /generate/scene-image-sse ────────────────────────────────────────
+  // Like scene-image but streams SSE events with real-time ComfyUI progress.
+  // Events: status | progress | preview | done | error
+  app.post('/scene-image-sse', async (req, reply) => {
+    const body = z.object({
+      conversationId:   z.string(),
+      messageId:        z.string(),
+      workflowName:     z.string().optional(),
+      customPrompt:     z.string().optional(),
+      useFaceReference: z.boolean().optional(),
+      referenceCharId:  z.string().optional(),
+    }).parse(req.body);
+
+    const {
+      conversationId, messageId,
+      workflowName = 'image_z_image_turbo',
+      customPrompt,
+      useFaceReference = false,
+    } = body;
+
+    reply.raw.writeHead(200, {
+      'Content-Type':  'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection':    'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    const send = (data: object) => {
+      try { reply.raw.write(`data: ${JSON.stringify(data)}\n\n`); } catch { /* client gone */ }
+    };
+
+    try {
+      const msgRepo  = new MessageRepository();
+      const provRepo = new ProviderRepository();
+      const settings = new SettingsService();
+
+      const message = msgRepo.findById(messageId);
+      if (!message) { send({ type: 'error', message: 'Mensaje no encontrado' }); reply.raw.end(); return; }
+
+      // ── Step 1: build image prompt ───────────────────────────────────────
+      let sceneDescription: string;
+      if (customPrompt?.trim()) {
+        sceneDescription = customPrompt.trim();
+      } else {
+        send({ type: 'status', message: 'Describiendo la escena…' });
+        const userId = (req as any).authUser?.userId as string | undefined;
+        const scenePrompt = await buildScenePromptText(conversationId, messageId, userId);
+        const defaultProviderId = settings.get('defaultProviderId') as string | null;
+        const defaultModelId    = settings.get('defaultModelId')    as string | null;
+        const providerRecord = defaultProviderId
+          ? provRepo.findById(defaultProviderId)
+          : provRepo.findAll()[0] ?? null;
+        if (!providerRecord) {
+          send({ type: 'error', message: 'No hay provider configurado' });
+          reply.raw.end(); return;
+        }
+        const llm = createProvider(providerRecord);
+        const llmResponse = await llm.generate({
+          messages: [{ role: 'user', content: scenePrompt }],
+          model: defaultModelId ?? '',
+          temperature: 0.7,
+          stream: false,
+        });
+        sceneDescription = llmResponse.content.trim();
+      }
+
+      send({ type: 'status', message: 'Enviando a ComfyUI…' });
+
+      // ── Step 2: generate image ───────────────────────────────────────────
+      const allSettings = settings.getAll();
+      const comfyProvider = createImageProvider(allSettings) as import('../../core/image/providers/comfyui.image-provider.js').ComfyUiImageProvider;
+      const progressiveMeta = comfyProvider.getProgressiveMeta?.(workflowName);
+
+      const scenesDir = path.join(PROJECT_ROOT, 'data', 'images', 'scenes', conversationId);
+      fs.mkdirSync(scenesDir, { recursive: true });
+      const existingMeta = (message.metadata ?? {}) as Record<string, unknown>;
+
+      if (progressiveMeta) {
+        const { waitForPreview, waitForFinal, disconnect } = await comfyProvider.startProgressiveWithProgress(
+          workflowName,
+          sceneDescription,
+          progressiveMeta.previewNodeId,
+          progressiveMeta.finalNodeId,
+          (evt) => {
+            if (evt.type === 'progress') {
+              send({ type: 'progress', value: evt.value, max: evt.max });
+            } else if (evt.type === 'node') {
+              send({ type: 'status', message: `Procesando nodo ${evt.nodeId}…` });
+            }
+          },
+        );
+
+        // Close WS if client disconnects
+        reply.raw.on('close', () => disconnect());
+
+        // Preview
+        const previewResult = await waitForPreview();
+        const previewExt = path.extname(previewResult.filename) || '.png';
+        const previewFilename = `scene_${messageId.slice(0, 8)}_preview${previewExt}`;
+        fs.writeFileSync(path.join(scenesDir, previewFilename), previewResult.buffer);
+        const previewUrl = `/images/scenes/${conversationId}/${previewFilename}`;
+        msgRepo.update(messageId, { metadata: { ...existingMeta, sceneImageUrl: previewUrl, sceneImagePending: true, sceneDescription } });
+        send({ type: 'preview', imageUrl: previewUrl, sceneDescription });
+
+        // Final (background — don't await before ending SSE)
+        waitForFinal().then((finalResult) => {
+          const finalExt = path.extname(finalResult.filename) || '.png';
+          const finalFilename = `scene_${messageId.slice(0, 8)}_final${finalExt}`;
+          fs.writeFileSync(path.join(scenesDir, finalFilename), finalResult.buffer);
+          const finalUrl = `/images/scenes/${conversationId}/${finalFilename}`;
+          const latestMeta = (msgRepo.findById(messageId)?.metadata ?? {}) as Record<string, unknown>;
+          msgRepo.update(messageId, { metadata: { ...latestMeta, sceneImageUrl: finalUrl, sceneImagePending: false } });
+          send({ type: 'done', imageUrl: finalUrl, sceneDescription });
+          reply.raw.end();
+        }).catch((err) => {
+          const latestMeta = (msgRepo.findById(messageId)?.metadata ?? {}) as Record<string, unknown>;
+          msgRepo.update(messageId, { metadata: { ...latestMeta, sceneImagePending: false } });
+          send({ type: 'error', message: `Error en upscale: ${err instanceof Error ? err.message : err}` });
+          reply.raw.end();
+        });
+
+      } else {
+        // Non-progressive workflow
+        const result = await comfyProvider.generate({ prompt: sceneDescription, workflowName });
+        const ext = path.extname(result.filename) || '.png';
+        const savedFilename = `scene_${messageId.slice(0, 8)}${ext}`;
+        fs.writeFileSync(path.join(scenesDir, savedFilename), result.buffer);
+        const imageUrl = `/images/scenes/${conversationId}/${savedFilename}`;
+        msgRepo.update(messageId, { metadata: { ...existingMeta, sceneImageUrl: imageUrl, sceneDescription } });
+        send({ type: 'done', imageUrl, sceneDescription });
+        reply.raw.end();
+      }
+
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      send({ type: 'error', message: msg });
+      reply.raw.end();
+    }
+  });
 };

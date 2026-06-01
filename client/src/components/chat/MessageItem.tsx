@@ -40,6 +40,7 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
   const sceneDesc         = (message.metadata?.sceneDescription as string | undefined) ?? null;
   const [showScenePanel,  setShowScenePanel]  = useState(false);
   const [showSceneDebug,  setShowSceneDebug]  = useState(false);
+  const [sceneInitWorkflow, setSceneInitWorkflow] = useState<string | undefined>(undefined);
   const [editablePrompt,  setEditablePrompt]  = useState('');
   const [generatingScene, setGeneratingScene] = useState(false);
   const [uploadingScene,  setUploadingScene]  = useState(false);
@@ -50,6 +51,10 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
   React.useEffect(() => {
     if (sceneDesc) setEditablePrompt(sceneDesc);
   }, [sceneDesc]);
+
+  const activeConversation = useChatStore((s) => s.activeConversation);
+  const removeMessage = useChatStore((s) => s.removeMessage);
+  const updateMessage = useChatStore((s) => s.updateMessage);
 
   // Poll for the 4K final image while the preview is pending
   React.useEffect(() => {
@@ -67,10 +72,6 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
     }, 4_000);
     return () => clearInterval(interval);
   }, [sceneImagePending, message.id, updateMessage]);
-
-  const activeConversation = useChatStore((s) => s.activeConversation);
-  const removeMessage = useChatStore((s) => s.removeMessage);
-  const updateMessage = useChatStore((s) => s.updateMessage);
 
   // TTS — settings leídos de cache (sin petición extra)
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: settingsApi.get });
@@ -393,18 +394,18 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
             )}
             {!isUser && !isError && (
               <>
-                {/* Generar imagen con IA */}
+                {/* Generar imagen de escena — estándar */}
                 <ActionButton
                   icon={generatingScene ? Loader : ImageIcon}
-                  onClick={() => setShowSceneDebug(true)}
+                  onClick={() => { setSceneInitWorkflow(undefined); setShowSceneDebug(true); }}
                   title="Generar imagen de escena"
                   spin={generatingScene}
                 />
-                {/* Generar imagen 4K (workflow generador4k) */}
+                {/* Generar imagen 4K */}
                 <ActionButton
                   icon={generatingScene ? Loader : Zap}
-                  onClick={() => handleGenerateSceneImage(undefined, { workflowName: 'generador4k' })}
-                  title="Generar imagen 4K (alta calidad, tarda más)"
+                  onClick={() => { setSceneInitWorkflow('generador4k'); setShowSceneDebug(true); }}
+                  title="Generar imagen 4K (alta calidad)"
                   spin={generatingScene}
                 />
                 {/* Subir imagen externa */}
@@ -521,8 +522,19 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
           <SceneDebugModal
             conversationId={activeConversation.id}
             messageId={message.id}
-            onGenerate={async (imagePrompt, opts) => {
-              await handleGenerateSceneImage(imagePrompt, opts);
+            initialWorkflow={sceneInitWorkflow}
+            onDone={(imageUrl, sceneDescription, pending) => {
+              updateMessage(message.id, {
+                metadata: {
+                  ...(message.metadata ?? {}),
+                  sceneImageUrl:     imageUrl,
+                  sceneImagePending: pending ?? false,
+                  sceneDescription,
+                },
+              });
+              setEditablePrompt(sceneDescription);
+              setShowScenePanel(true);
+              if (!pending) setShowSceneDebug(false);
             }}
             onClose={() => setShowSceneDebug(false)}
           />

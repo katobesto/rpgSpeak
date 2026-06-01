@@ -127,6 +127,48 @@ export class ComfyUiService {
   }
 
   // ── Queue the prompt ──────────────────────────────────────────────────────
+  // Returns both the promptId and the clientId used (needed for WS subscription).
+  async queuePromptFull(workflow: Workflow, clientId: string): Promise<string> {
+    const res = await fetch(`${this.baseUrl}/prompt`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...this.authHeaders },
+      body: JSON.stringify({ prompt: workflow, client_id: clientId }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null) as {
+        error?: { type?: string; message?: string };
+        node_errors?: Record<string, { errors?: Array<{ type?: string; details?: string }> }>;
+      } | null;
+      if (body?.error?.type === 'prompt_outputs_failed_validation' && body.node_errors) {
+        const lines: string[] = [];
+        for (const [, nodeErr] of Object.entries(body.node_errors)) {
+          for (const e of nodeErr.errors ?? []) {
+            if (e.type === 'value_not_in_list') {
+              const match = e.details?.match(/^(\w+):\s*'([^']+)'\s+not in \[/);
+              if (match) {
+                const [, field, value] = match;
+                lines.push(`Modelo no encontrado — ${field}: "${value}". Descárgalo y colócalo en la carpeta correspondiente de ComfyUI.`);
+              } else {
+                lines.push(e.details ?? e.type ?? 'error desconocido');
+              }
+            } else {
+              lines.push(e.details ?? e.type ?? 'error desconocido');
+            }
+          }
+        }
+        throw new Error(`ComfyUI: workflow inválido — ${lines.join(' | ')}`);
+      }
+      const text = body ? JSON.stringify(body) : res.statusText;
+      throw new Error(`ComfyUI: error al encolar prompt (${res.status}): ${text}`);
+    }
+    const data = (await res.json()) as { prompt_id?: string; error?: unknown };
+    if (!data.prompt_id) {
+      if (data.error) throw new Error(`ComfyUI: el workflow tiene errores — ${JSON.stringify(data.error).slice(0, 200)}`);
+      throw new Error('ComfyUI: la respuesta no incluye prompt_id');
+    }
+    return data.prompt_id;
+  }
+
   async queuePrompt(workflow: Workflow): Promise<string> {
     const clientId = `rpgspeak-${Date.now()}`;
     const res = await fetch(`${this.baseUrl}/prompt`, {
@@ -360,11 +402,6 @@ export class ComfyUiService {
   }
 
   // ── Progressive generation ─────────────────────────────────────────────────
-  // Queues the workflow once and returns two independent promises:
-  //   waitForPreview() → resolves when the quick preview node finishes
-  //   waitForFinal()   → resolves when the upscaled final node finishes
-  //
-  // Both promises share the same promptId so only one generation is queued.
   startProgressiveGeneration(
     workflowName: string,
     positivePrompt: string,
@@ -376,10 +413,7 @@ export class ComfyUiService {
   } {
     const workflow = this.loadWorkflow(workflowName);
     const patched  = this.injectPositivePrompt(workflow, positivePrompt);
-
-    // Queue once; both waiters share the same promptId promise
     const promptIdPromise = this.queuePrompt(patched);
-
     return {
       waitForPreview: async () => {
         const promptId = await promptIdPromise;
@@ -391,6 +425,98 @@ export class ComfyUiService {
       },
     };
   }
+
+  // ── Progressive generation with real-time WebSocket progress ──────────────
+  // Uses ComfyUI's WS endpoint to relay step-level progress (step N/M).
+  // onProgress is called with every progress event from ComfyUI.
+  async startProgressiveWithProgress(
+    workflowName: string,
+    positivePrompt: string,
+    previewNodeId: string,
+    finalNodeId: string,
+    onProgress: (event: ComfyProgressEvent) => void,
+  ): Promise<{
+    waitForPreview: () => Promise<{ buffer: Buffer; filename: string }>;
+    waitForFinal:   () => Promise<{ buffer: Buffer; filename: string }>;
+    disconnect:     () => void;
+  }> {
+    const clientId = `rpgspeak-${Date.now()}`;
+    const workflow = this.loadWorkflow(workflowName);
+    const patched  = this.injectPositivePrompt(workflow, positivePrompt);
+
+    // Subscribe to WS BEFORE queuing so we don't miss early events
+    const wsUrl = this.baseUrl.replace(/^http/, 'ws') + `/ws?clientId=${clientId}`;
+    let ws: import('node:stream').Duplex | null = null;
+    let wsDisconnected = false;
+
+    // Node 24 has native WebSocket; use dynamic import for compatibility
+    const disconnect = () => {
+      wsDisconnected = true;
+      try { (ws as any)?.close?.(); } catch { /* ignore */ }
+    };
+
+    // Subscribe asynchronously — don't block queuing
+    this.subscribeComfyWs(wsUrl, clientId, onProgress, () => wsDisconnected)
+      .then((socket) => { ws = socket as any; })
+      .catch(() => { /* WS is optional — generation continues without it */ });
+
+    const promptIdPromise = this.queuePromptFull(patched, clientId);
+
+    return {
+      waitForPreview: async () => {
+        const promptId = await promptIdPromise;
+        return this.waitForNodeOutput(promptId, previewNodeId);
+      },
+      waitForFinal: async () => {
+        const promptId = await promptIdPromise;
+        const result = await this.waitForNodeOutput(promptId, finalNodeId);
+        disconnect(); // done — close WS
+        return result;
+      },
+      disconnect,
+    };
+  }
+
+  // ── Subscribe to ComfyUI WebSocket for real-time progress ─────────────────
+  private async subscribeComfyWs(
+    wsUrl: string,
+    _clientId: string,
+    onProgress: (event: ComfyProgressEvent) => void,
+    isCancelled: () => boolean,
+  ): Promise<unknown> {
+    // Node 24+ native WebSocket
+    const WSClass = (globalThis as any).WebSocket as typeof WebSocket | undefined;
+    if (!WSClass) return null; // Node version without native WS — skip silently
+
+    return new Promise((resolve) => {
+      const socket = new WSClass(wsUrl);
+
+      socket.addEventListener('open', () => resolve(socket));
+      socket.addEventListener('error', () => resolve(null)); // WS optional
+
+      socket.addEventListener('message', (evt: MessageEvent) => {
+        if (isCancelled()) { socket.close(); return; }
+        try {
+          const msg = JSON.parse(evt.data as string) as {
+            type: string;
+            data?: { value?: number; max?: number; node?: string; prompt_id?: string };
+          };
+          if (msg.type === 'progress' && msg.data) {
+            onProgress({ type: 'progress', value: msg.data.value ?? 0, max: msg.data.max ?? 1 });
+          } else if (msg.type === 'executing' && msg.data?.node) {
+            onProgress({ type: 'node', nodeId: msg.data.node });
+          }
+        } catch { /* ignore malformed */ }
+      });
+    });
+  }
+}
+
+export interface ComfyProgressEvent {
+  type: 'progress' | 'node';
+  value?: number;   // for 'progress': current step
+  max?: number;     // for 'progress': total steps
+  nodeId?: string;  // for 'node': which node started executing
 }
 
 function sleep(ms: number) {

@@ -1,4 +1,4 @@
-import { ComfyUiService } from '../../../modules/characters/comfyui.service.js';
+import { ComfyUiService, type ComfyProgressEvent } from '../../../modules/characters/comfyui.service.js';
 import type { ImageProvider, ImageGenRequest, ImageGenResult } from '../image-provider.interface.js';
 
 export class ComfyUiImageProvider implements ImageProvider {
@@ -39,6 +39,16 @@ export class ComfyUiImageProvider implements ImageProvider {
     finalNodeId: string,
   ) {
     return this.service.startProgressiveGeneration(workflowName, prompt, previewNodeId, finalNodeId);
+  }
+
+  startProgressiveWithProgress(
+    workflowName: string,
+    prompt: string,
+    previewNodeId: string,
+    finalNodeId: string,
+    onProgress: (event: ComfyProgressEvent) => void,
+  ) {
+    return this.service.startProgressiveWithProgress(workflowName, prompt, previewNodeId, finalNodeId, onProgress);
   }
 
   /** Returns progressive meta if the workflow supports it, null otherwise. */

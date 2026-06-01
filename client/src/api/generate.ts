@@ -1,5 +1,72 @@
 import { api, getAuthHeader } from './client.ts';
 
+export type SceneImageSseEvent =
+  | { type: 'status';   message: string }
+  | { type: 'progress'; value: number; max: number }
+  | { type: 'preview';  imageUrl: string; sceneDescription: string }
+  | { type: 'done';     imageUrl: string; sceneDescription: string }
+  | { type: 'error';    message: string };
+
+/** Opens an SSE stream for scene-image generation. Returns a cleanup function. */
+export function streamSceneImage(
+  body: {
+    conversationId: string;
+    messageId: string;
+    workflowName?: string;
+    customPrompt?: string;
+    useFaceReference?: boolean;
+    referenceCharId?: string;
+  },
+  onEvent: (evt: SceneImageSseEvent) => void,
+): () => void {
+  const controller = new AbortController();
+
+  (async () => {
+    try {
+      const token = localStorage.getItem('rpgspeak_token');
+      const res = await fetch('/api/generate/scene-image-sse', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      });
+
+      if (!res.ok || !res.body) {
+        onEvent({ type: 'error', message: `HTTP ${res.status}` });
+        return;
+      }
+
+      const reader  = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const evt = JSON.parse(line.slice(6)) as SceneImageSseEvent;
+            onEvent(evt);
+          } catch { /* skip */ }
+        }
+      }
+    } catch (err) {
+      if ((err as Error).name !== 'AbortError') {
+        onEvent({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+      }
+    }
+  })();
+
+  return () => controller.abort();
+}
+
 export const generateApi = {
   sceneImage: (
     conversationId: string,
