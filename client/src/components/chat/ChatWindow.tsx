@@ -874,9 +874,17 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
 }
 
-function SectionHeader({ icon, title, count }: { icon: React.ReactNode; title: string; count?: number }) {
-  return (
-    <div className="flex items-center gap-2.5 mb-4">
+function SectionHeader({
+  icon, title, count, isOpen, onToggle,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  count?: number;
+  isOpen?: boolean;
+  onToggle?: () => void;
+}) {
+  const inner = (
+    <div className="flex items-center gap-2.5 mb-0 w-full">
       <div className="text-accent">{icon}</div>
       <h2 className="text-sm font-semibold text-text-primary tracking-tight">{title}</h2>
       {count !== undefined && (
@@ -885,8 +893,26 @@ function SectionHeader({ icon, title, count }: { icon: React.ReactNode; title: s
         </span>
       )}
       <div className="flex-1 h-px ml-2" style={{ background: 'var(--border)' }} />
+      {onToggle !== undefined && (
+        <ChevronDown
+          size={15}
+          className={`text-text-muted flex-shrink-0 transition-transform duration-200 ${isOpen ? '' : '-rotate-90'}`}
+        />
+      )}
     </div>
   );
+
+  if (onToggle) {
+    return (
+      <button
+        onClick={onToggle}
+        className="w-full flex items-center mb-4 hover:opacity-80 transition-opacity text-left"
+      >
+        {inner}
+      </button>
+    );
+  }
+  return <div className="flex items-center mb-4">{inner}</div>;
 }
 
 // ─── Empty state / Home screen ────────────────────────────────────────────────
@@ -913,6 +939,11 @@ function EmptyState({
   const [summaryPopupConv, setSummaryPopupConv] = useState<Conversation | null>(null);
   const [confirmChar,  setConfirmChar]  = useState<Character | null>(null);
   const [confirmStory, setConfirmStory] = useState<Story | null>(null);
+
+  // ── Acordeón — sección 1 abierta, 2 y 3 cerradas por defecto ──────────────
+  const [sec1Open, setSec1Open] = useState(true);
+  const [sec2Open, setSec2Open] = useState(false);
+  const [sec3Open, setSec3Open] = useState(false);
 
   // ── Filtros ────────────────────────────────────────────────────────────────
   const [search, setSearch]           = useState('');
@@ -944,14 +975,15 @@ function EmptyState({
 
         {/* ── 1. Historias comenzadas ──────────────────────────────────────── */}
         <section>
-          <div className="flex items-center justify-between mb-4">
-            <SectionHeader
-              icon={<MessagesSquare size={16} />}
-              title="Historias comenzadas"
-              count={sortedConvs.length}
-            />
-          </div>
+          <SectionHeader
+            icon={<MessagesSquare size={16} />}
+            title="Historias comenzadas"
+            count={sortedConvs.length}
+            isOpen={sec1Open}
+            onToggle={() => setSec1Open((v) => !v)}
+          />
 
+          {sec1Open && (<>
           {/* Barra de filtros */}
           <div className="flex flex-wrap items-center gap-2 mb-4 p-3 rounded-xl border border-border"
             style={{ background: 'var(--surface-2)' }}>
@@ -1063,7 +1095,7 @@ function EmptyState({
                     tabIndex={0}
                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') onSelectConversation(conv); }}
                     className="flex flex-col gap-3 p-4 rounded-xl border border-border hover:border-accent/50 hover:bg-accent/5 transition-all text-left group cursor-pointer"
-                    style={{ background: 'var(--surface-1)' }}
+                    style={{ background: 'var(--surface-2)' }}
                   >
                     {/* Avatars + time + owner badge */}
                     <div className="flex items-center justify-between">
@@ -1144,6 +1176,7 @@ function EmptyState({
               })}
             </div>
           )}
+          </>)}
         </section>
 
         {/* ── 2. Personajes para comenzar una charla ──────────────────────── */}
@@ -1153,14 +1186,17 @@ function EmptyState({
               icon={<Users size={16} />}
               title="Personajes para comenzar una charla"
               count={characters.length}
+              isOpen={sec2Open}
+              onToggle={() => setSec2Open((v) => !v)}
             />
+            {sec2Open && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {characters.map((char) => (
                 <button
                   key={char.id}
                   onClick={() => setConfirmChar(char)}
                   className="flex items-center gap-3 p-3.5 rounded-xl border border-border hover:border-accent/50 hover:bg-accent/5 transition-all text-left group"
-                  style={{ background: 'var(--surface-1)' }}
+                  style={{ background: 'var(--surface-2)' }}
                 >
                   <Avatar name={char.name} src={char.avatar} size="md" expandable />
                   <div className="flex-1 min-w-0">
@@ -1177,6 +1213,7 @@ function EmptyState({
                 </button>
               ))}
             </div>
+            )}
           </section>
         )}
 
@@ -1187,14 +1224,17 @@ function EmptyState({
               icon={<BookOpen size={16} />}
               title="Historias para empezar algo nuevo"
               count={stories.length}
+              isOpen={sec3Open}
+              onToggle={() => setSec3Open((v) => !v)}
             />
+            {sec3Open && (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {stories.map((story) => (
                 <button
                   key={story.id}
                   onClick={() => setConfirmStory(story)}
                   className="flex items-center gap-3 p-3.5 rounded-xl border border-border hover:border-accent/50 hover:bg-accent/5 transition-all text-left group"
-                  style={{ background: 'var(--surface-1)' }}
+                  style={{ background: 'var(--surface-2)' }}
                 >
                   <div className="w-10 h-10 rounded-xl bg-accent/10 flex items-center justify-center flex-shrink-0">
                     {story.adventureMode
@@ -1221,6 +1261,7 @@ function EmptyState({
                 </button>
               ))}
             </div>
+            )}
           </section>
         )}
 
