@@ -846,7 +846,7 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
             if (evt.type === 'progress') {
               send({ type: 'progress', value: evt.value, max: evt.max });
             } else if (evt.type === 'node') {
-              send({ type: 'status', message: `Procesando nodo ${evt.nodeId}…` });
+              send({ type: 'node', nodeId: evt.nodeId, nodeName: evt.nodeName });
             }
           },
         );

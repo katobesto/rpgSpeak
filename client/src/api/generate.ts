@@ -2,6 +2,7 @@ import { api, getAuthHeader } from './client.ts';
 
 export type SceneImageSseEvent =
   | { type: 'status';   message: string }
+  | { type: 'node';     nodeId: string; nodeName: string }
   | { type: 'progress'; value: number; max: number }
   | { type: 'preview';  imageUrl: string; sceneDescription: string }
   | { type: 'done';     imageUrl: string; sceneDescription: string }

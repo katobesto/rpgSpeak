@@ -111,8 +111,9 @@ export function SceneDebugModal({
   // ── Step 4: ComfyUI generation ────────────────────────────────────────────
   const [generatingImage, setGeneratingImage] = useState(false);
   const [imageError,      setImageError]      = useState<string | null>(null);
-  const [progressValue,   setProgressValue]   = useState(0);
-  const [progressMax,     setProgressMax]     = useState(0);
+  const [currentNode,     setCurrentNode]     = useState('');   // human-readable name
+  const [stepValue,       setStepValue]       = useState(0);    // steps within this node
+  const [stepMax,         setStepMax]         = useState(0);
   const [statusMessage,   setStatusMessage]   = useState('');
   const sseCleanupRef = useRef<(() => void) | null>(null);
 
@@ -186,6 +187,10 @@ export function SceneDebugModal({
     setProgressMax(0);
     setStatusMessage('Iniciando…');
 
+    setCurrentNode('');
+    setStepValue(0);
+    setStepMax(0);
+
     sseCleanupRef.current?.();
     sseCleanupRef.current = streamSceneImage(
       {
@@ -199,14 +204,21 @@ export function SceneDebugModal({
       (evt) => {
         if (evt.type === 'status') {
           setStatusMessage(evt.message);
+        } else if (evt.type === 'node') {
+          // New node started — update label, reset step counter for this node
+          setCurrentNode(evt.nodeName);
+          setStepValue(0);
+          setStepMax(0);
+          setStatusMessage('');
         } else if (evt.type === 'progress') {
-          setProgressValue(evt.value);
-          setProgressMax(evt.max);
-          setStatusMessage(`Generando… paso ${evt.value}/${evt.max}`);
+          setStepValue(evt.value);
+          setStepMax(evt.max);
         } else if (evt.type === 'preview') {
-          setStatusMessage('Preview lista — mejorando a 4K…');
+          setCurrentNode('Mejorando a 4K…');
+          setStepValue(0);
+          setStepMax(0);
           onDone(evt.imageUrl, evt.sceneDescription, true);
-          // Don't close — keep showing progress for the final
+          // Don't close — keep showing progress for the final upscale
         } else if (evt.type === 'done') {
           onDone(evt.imageUrl, evt.sceneDescription, false);
           setGeneratingImage(false);
@@ -534,26 +546,45 @@ export function SceneDebugModal({
             </>
           )}
 
-          {/* ── Progress bar (visible during generation) ───────────────────── */}
+          {/* ── Progress (visible during generation) ──────────────────────── */}
           {generatingImage && (
             <>
               <div className="border-t border-border" />
-              <section className="space-y-2">
-                <div className="flex items-center justify-between text-[11px] text-text-muted">
-                  <span className="flex items-center gap-1.5">
-                    <Loader size={11} className="animate-spin text-accent" />
-                    {statusMessage}
+              <section className="space-y-2.5">
+                {/* Phase name — the main feedback */}
+                <div className="flex items-center gap-2">
+                  <Loader size={12} className="animate-spin text-accent flex-shrink-0" />
+                  <span className="text-sm font-medium text-text-primary">
+                    {currentNode || statusMessage || 'Iniciando…'}
                   </span>
-                  {progressMax > 0 && (
-                    <span className="font-mono tabular-nums">{progressValue}/{progressMax}</span>
-                  )}
                 </div>
-                {progressMax > 0 && (
-                  <div className="w-full h-1.5 rounded-full overflow-hidden" style={{ background: 'var(--surface-2)' }}>
-                    <div
-                      className="h-full rounded-full bg-accent transition-all duration-300"
-                      style={{ width: `${Math.round((progressValue / progressMax) * 100)}%` }}
-                    />
+
+                {/* Step bar — only shown when there are steps in the current node */}
+                {stepMax > 0 && (
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[10px] text-text-muted">
+                      <span>paso {stepValue} de {stepMax}</span>
+                      <span className="tabular-nums">{Math.round((stepValue / stepMax) * 100)}%</span>
+                    </div>
+                    <div className="w-full h-1 rounded-full overflow-hidden" style={{ background: 'var(--surface-2)' }}>
+                      <div
+                        className="h-full rounded-full bg-accent transition-all duration-150"
+                        style={{ width: `${Math.round((stepValue / stepMax) * 100)}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Pulse dots when no step info (e.g. loading models, saving) */}
+                {stepMax === 0 && (
+                  <div className="flex gap-1">
+                    {[0,1,2].map(i => (
+                      <div
+                        key={i}
+                        className="w-1.5 h-1.5 rounded-full bg-accent/60"
+                        style={{ animation: `pulse 1.2s ease-in-out ${i * 0.2}s infinite` }}
+                      />
+                    ))}
                   </div>
                 )}
               </section>

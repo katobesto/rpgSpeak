@@ -444,19 +444,26 @@ export class ComfyUiService {
     const workflow = this.loadWorkflow(workflowName);
     const patched  = this.injectPositivePrompt(workflow, positivePrompt);
 
+    // Build nodeId → human-readable label map from this workflow
+    const nodeNameMap = new Map<string, string>(
+      Object.entries(patched).map(([id, node]) => [
+        id,
+        NODE_LABELS[node.class_type] ?? node.class_type,
+      ])
+    );
+
     // Subscribe to WS BEFORE queuing so we don't miss early events
     const wsUrl = this.baseUrl.replace(/^http/, 'ws') + `/ws?clientId=${clientId}`;
     let ws: import('node:stream').Duplex | null = null;
     let wsDisconnected = false;
 
-    // Node 24 has native WebSocket; use dynamic import for compatibility
     const disconnect = () => {
       wsDisconnected = true;
       try { (ws as any)?.close?.(); } catch { /* ignore */ }
     };
 
     // Subscribe asynchronously — don't block queuing
-    this.subscribeComfyWs(wsUrl, clientId, onProgress, () => wsDisconnected)
+    this.subscribeComfyWs(wsUrl, clientId, nodeNameMap, onProgress, () => wsDisconnected)
       .then((socket) => { ws = socket as any; })
       .catch(() => { /* WS is optional — generation continues without it */ });
 
@@ -481,30 +488,32 @@ export class ComfyUiService {
   private async subscribeComfyWs(
     wsUrl: string,
     _clientId: string,
+    nodeNameMap: Map<string, string>,
     onProgress: (event: ComfyProgressEvent) => void,
     isCancelled: () => boolean,
   ): Promise<unknown> {
-    // Node 24+ native WebSocket
     const WSClass = (globalThis as any).WebSocket as typeof WebSocket | undefined;
-    if (!WSClass) return null; // Node version without native WS — skip silently
+    if (!WSClass) return null;
 
     return new Promise((resolve) => {
       const socket = new WSClass(wsUrl);
 
       socket.addEventListener('open', () => resolve(socket));
-      socket.addEventListener('error', () => resolve(null)); // WS optional
+      socket.addEventListener('error', () => resolve(null));
 
       socket.addEventListener('message', (evt: MessageEvent) => {
         if (isCancelled()) { socket.close(); return; }
         try {
           const msg = JSON.parse(evt.data as string) as {
             type: string;
-            data?: { value?: number; max?: number; node?: string; prompt_id?: string };
+            data?: { value?: number; max?: number; node?: string | null; prompt_id?: string };
           };
           if (msg.type === 'progress' && msg.data) {
             onProgress({ type: 'progress', value: msg.data.value ?? 0, max: msg.data.max ?? 1 });
           } else if (msg.type === 'executing' && msg.data?.node) {
-            onProgress({ type: 'node', nodeId: msg.data.node });
+            const nodeId   = msg.data.node;
+            const nodeName = nodeNameMap.get(nodeId) ?? nodeId;
+            onProgress({ type: 'node', nodeId, nodeName });
           }
         } catch { /* ignore malformed */ }
       });
@@ -514,10 +523,29 @@ export class ComfyUiService {
 
 export interface ComfyProgressEvent {
   type: 'progress' | 'node';
-  value?: number;   // for 'progress': current step
-  max?: number;     // for 'progress': total steps
-  nodeId?: string;  // for 'node': which node started executing
+  value?: number;     // for 'progress': current step
+  max?: number;       // for 'progress': total steps
+  nodeId?: string;    // for 'node': which node started executing
+  nodeName?: string;  // for 'node': human-readable name of the node
 }
+
+// ── Map ComfyUI class_type → human-readable Spanish label ─────────────────
+const NODE_LABELS: Record<string, string> = {
+  KSampler:              'Generando imagen base',
+  KSamplerAdvanced:      'Generando imagen base',
+  SeedVR2VideoUpscaler:  'Escalando a 4K',
+  FaceDetailer:          'Mejorando rostros',
+  VAEDecode:             'Decodificando imagen',
+  VAEEncode:             'Codificando imagen',
+  SeedVR2LoadDiTModel:   'Cargando modelo 4K',
+  SeedVR2LoadVAEModel:   'Cargando VAE 4K',
+  SAMLoader:             'Cargando detector',
+  UltralyticsDetectorProvider: 'Preparando detector',
+  SaveImage:             'Guardando imagen',
+  CLIPTextEncode:        'Codificando prompt',
+  ImageScaleBy:          'Escalando imagen',
+  ColorCorrect:          'Corrigiendo colores',
+};
 
 function sleep(ms: number) {
   return new Promise<void>((r) => setTimeout(r, ms));
