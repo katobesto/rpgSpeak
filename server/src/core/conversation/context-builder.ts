@@ -47,6 +47,16 @@ export interface BuildContextOptions {
 const ADVENTURE_CONTEXT_NOTICE = `## Contexto de aventura activa
 Eres consciente de tu ficha RPG (stats, habilidades, inventario). Actúa de forma coherente con ellos en situaciones de combate, reto o tensión. Antes de hablar, describe brevemente entre paréntesis tu acción o gesto físico en tercera persona.`;
 
+// ── Ancla de coherencia espacial — inyectada en modo personaje individual ────
+// Prevents the character from "drifting" to their natural habitat when the
+// current scene is set elsewhere (e.g. a port character staying in a village).
+const SPATIAL_COHERENCE_NOTICE = `## Coherencia espacial — REGLA ABSOLUTA
+Tu "lugar habitual" (donde vives, trabajas o sueles estar) NO importa en este momento.
+Lo que importa es el lugar donde la conversación actual transcurre.
+Estás AQUÍ, en la escena activa — no en tu hogar ni en tu entorno habitual.
+PROHIBIDO referirte a ubicaciones, personas o situaciones de tu contexto habitual
+si la escena actual transcurre en otro lugar. Respeta siempre dónde te ha dejado la narración.`;
+
 /**
  * Assembles the full context array to send to the LLM.
  * Order: global prompt → character system prompt → story context → memory → summary → conversation history
@@ -312,17 +322,24 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
   // ── Late injections — all share the same "hold the last user message" split ──
   //
   // Injection order (furthest → closest to the generation point):
-  //   1. Context index   — world-state background knowledge
-  //   2. Memories        — character-specific past events, may include emotional coloring
-  //   3. Affinity block  — current relationship state + consent rules (most authoritative)
-  //   4. [Last user msg] ← generation starts here
-  //   5. Turn directive  ← injected by engine.ts after this function returns
+  //   1. Context index      — world-state background knowledge
+  //   2. Memories           — character-specific past events, may include emotional coloring
+  //   3. Affinity block     — current relationship state + consent rules
+  //   4. Spatial coherence  — (single-char mode only) prevents location drift
+  //   5. Narration style    — user preference for verbosity
+  //   6. Chapter guide      — most authoritative, closest to generation point
+  //   7. [Last user msg]    ← generation starts here
   //
   // Keeping these OUT of the first SYSTEM message means the large static prefix
   // (character prompt + stories) can be fully reused by the KV cache across turns,
   // even when affinity values or memory sets change.
+
+  // In single-char mode, always inject spatial coherence notice to prevent the
+  // character from drifting back to their "natural habitat" when the scene is elsewhere.
+  const spatialCoherenceBlock = !narratorMode ? SPATIAL_COHERENCE_NOTICE : null;
+
   const shouldInjectMemories = allMemories.length > 0 && memoryInjectionPrompt?.trim();
-  const needsSplit = shouldInjectMemories || Boolean(contextIndexBlock) || Boolean(affinityBlock) || Boolean(narrationStylePrompt?.trim()) || Boolean(currentChapter);
+  const needsSplit = shouldInjectMemories || Boolean(contextIndexBlock) || Boolean(affinityBlock) || Boolean(narrationStylePrompt?.trim()) || Boolean(currentChapter) || Boolean(spatialCoherenceBlock);
   const historyBody = needsSplit ? trimmedMessages.slice(0, -1) : trimmedMessages;
   const lastMessage = needsSplit ? trimmedMessages[trimmedMessages.length - 1] : null;
 
@@ -349,12 +366,17 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
     history.push({ role: 'system', content: affinityBlock });
   }
 
-  // 4. Narration style directive (user preference — overrides default verbosity)
+  // 4. Spatial coherence anchor (single-char mode) — prevents location drift
+  if (spatialCoherenceBlock && needsSplit) {
+    history.push({ role: 'system', content: spatialCoherenceBlock });
+  }
+
+  // 5. Narration style directive (user preference — overrides default verbosity)
   if (narrationStylePrompt?.trim() && needsSplit) {
     history.push({ role: 'system', content: narrationStylePrompt.trim() });
   }
 
-  // 4b. Capítulo activo del guión de campaña
+  // 6. Capítulo activo del guión de campaña (más cercano al punto de generación)
   if (currentChapter && needsSplit) {
     // Usar el prompt configurable; sustituir variables {{...}}
     const template = chapterGuidePrompt?.trim() || `## Capítulo activo: {{CAPITULO_NUMERO}} — "{{CAPITULO_TITULO}}"
