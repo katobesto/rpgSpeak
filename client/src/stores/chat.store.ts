@@ -35,6 +35,8 @@ interface ChatState extends StreamingState {
     message: string;
     characterId?: string;
     overrides?: { temperature?: number; maxTokens?: number; model?: string; providerId?: string };
+    /** Override narrator mode for this specific message (e.g. "Continúa la historia" always forces narrator) */
+    forceNarratorMode?: boolean;
   }) => Promise<void>;
   stopStreaming: (() => void) | null;
   abort: () => void;
@@ -110,8 +112,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((s) => ({ messages: s.messages.filter((m) => m.id !== id) })),
   setBranch: (branchId) => set({ activeBranchId: branchId }),
 
-  sendMessage: async ({ message, characterId, overrides }) => {
-    const { activeConversationId, activeBranchId, addMessage, selectedProviderId, selectedModelId, narratorMode } = get();
+  sendMessage: async ({ message, characterId, overrides, forceNarratorMode }) => {
+    const { activeConversationId, activeBranchId, addMessage, selectedProviderId, selectedModelId, narratorMode: storeNarratorMode } = get();
+    // forceNarratorMode allows individual calls (e.g. "Continúa la historia") to
+    // always use narrator mode regardless of what the selector currently shows.
+    const narratorMode = forceNarratorMode ?? storeNarratorMode;
     if (!activeConversationId || get().isStreaming) return;
 
     const mergedOverrides = {
