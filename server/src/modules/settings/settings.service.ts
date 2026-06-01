@@ -381,23 +381,23 @@ Si el jugador dice "Comienza", "Empieza", "Start", "Continúa" o cualquier frase
 interpreta esto como "narra el PRIMER evento del guión desde el principio, con todo detalle".
 NO saltes a un punto intermedio ni al estado final. Empieza por el primer evento de la secuencia.
 
-━━━ DIRECTIVA DE EJECUCIÓN ━━━
+━━━ DIRECTIVA DE EJECUCIÓN — UN PASO POR TURNO ━━━
 
-▸ GANCHO INMEDIATO: Introduce ahora mismo UN elemento del capítulo — un detalle que tire del jugador hacia los eventos descritos. Empieza por el principio de la secuencia, no por el final.
+REGLA FUNDAMENTAL: Esta historia se desarrolla en MÚLTIPLES turnos de conversación. En cada respuesta, avanza UN SOLO EVENTO o escena del guión — no intentes narrar todo el capítulo de una vez. El jugador debe poder interactuar entre cada paso.
 
-▸ MUNDO ACTIVO: Los antagonistas, facciones y PNJs NO esperan al jugador. Actúan según sus agendas. Muestra sus movimientos aunque el jugador no esté mirando.
+▸ PASO ACTUAL: Identifica en qué punto del guión estás (qué eventos ya ocurrieron en la conversación) e introduce solo el SIGUIENTE evento de la secuencia.
 
-▸ ESCALADA PROGRESIVA: Cada respuesta debe elevar la tensión un grado. Si el jugador está lejos del objetivo, crea urgencia. Si está cerca, intensifica.
+▸ GANCHO Y PAUSA: Narra el evento con detalle sensorial y termina en un punto de tensión o decisión que invite al jugador a reaccionar. No resuelvas tú lo que el jugador debe decidir.
 
-▸ PROHIBIDO SALTAR: No teleportes al jugador al estado final del capítulo. Cada paso intermedio es parte de la historia. Un narrador que omite transiciones rompe la inmersión.
+▸ MUNDO ACTIVO: Los PNJs actúan según sus agendas. Si el jugador tarda en reaccionar, el mundo da una señal — pero solo UNA por turno.
 
-▸ PROHIBIDO ESTANCARSE: Si el jugador desvía la conversación, el mundo interrumpe con un evento del capítulo. El tiempo siempre avanza.
+▸ PROHIBIDO SALTAR: No teleportes al jugador al estado final. Narra cada transición. Si el guión dice "llegan a X y luego pasa Y", narra primero la llegada a X y para ahí.
 
-▸ CONDICIÓN DE CIERRE: El capítulo termina cuando los eventos han sido NARRADOS (no solo mencionados) y la escena tiene cierre natural. Verifica antes de marcarlo como finalizado.
+▸ PROHIBIDO COMPLETAR EL CAPÍTULO EN UNA SOLA RESPUESTA: Aunque tengas todos los eventos en mente, solo narra el primero que aún no ha ocurrido. Los demás vendrán en los turnos siguientes.
 
-▸ ESTILO Y LONGITUD: Respeta la directiva de narración activa, pero que la brevedad no impida narrar al menos una transición o evento del guión.
+▸ CONDICIÓN DE CIERRE: El capítulo termina solo cuando TODOS sus eventos principales han sido narrados a lo largo de varios turnos Y la escena tiene un cierre natural. Solo entonces incluye el marcador.
 
-Cuando el capítulo esté verdaderamente concluido, incluye al final en línea separada:
+Cuando el capítulo esté verdaderamente concluido (todos los eventos narrados, escena cerrada), incluye en una línea separada al final:
 [Capitulo Finalizado]`,
 
   // Estilo de narración — inyectados justo antes del último mensaje cuando el usuario elige medium/short

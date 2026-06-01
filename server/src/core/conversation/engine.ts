@@ -781,10 +781,14 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     // ── Detección de fin de capítulo ─────────────────────────────────────────
     let chapterCompleted = false;
     let nextChapterNumber: number | null = null;
-    // Acepta tanto el marcador nuevo como el legacy por compatibilidad
-    const CHAPTER_DONE_RE = /\[Capitulo\s+Finalizado\]|\[FIN_CAPITULO\]/gi;
+    // Acepta marcador con/sin acento (el LLM a veces escribe Capítulo con tilde)
+    // y el legacy FIN_CAPITULO por compatibilidad
+    const CHAPTER_DONE_RE = /\[Cap[ií]tulo\s+Finalizado\]|\[FIN_CAPITULO\]/gi;
     if (CHAPTER_DONE_RE.test(cleanContent)) {
-      cleanContent = cleanContent.replace(/\[Capitulo\s+Finalizado\]\s*/gi, '').replace(/\[FIN_CAPITULO\]\s*/gi, '').trimEnd();
+      cleanContent = cleanContent
+        .replace(/\[Cap[ií]tulo\s+Finalizado\]\s*/gi, '')
+        .replace(/\[FIN_CAPITULO\]\s*/gi, '')
+        .trimEnd();
       const result = chapterRepo.completeCurrentChapter(conversationId);
       if (result) {
         chapterCompleted = true;
