@@ -193,7 +193,13 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
       `• PROHIBIDO mostrar curiosidad o atracción ante ese contacto\n` +
       `• afinidad < 40 = enfado explícito o rechazo duro; 40-60 = rechazo firme; 61-79 = rechazo claro con herida`;
 
-    affinityBlock = !fastLlmEnabled && affinitySystemPrompt?.trim()
+    // In narrator mode the LLM controls multiple characters simultaneously —
+    // the generic "tu nivel de afinidad" (singular) in affinitySystemPrompt is
+    // contradictory. Use only the consentDirective which lists each character
+    // by name with their current affinity value.
+    // In single-char mode (not narrator), include the full affinitySystemPrompt
+    // when fastLlm is off so the LLM knows the affinity tier scale.
+    affinityBlock = (!fastLlmEnabled && !narratorMode && affinitySystemPrompt?.trim())
       ? `${affinitySystemPrompt.trim()}\n\n${consentDirective}`
       : consentDirective;
   }
