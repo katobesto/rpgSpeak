@@ -402,6 +402,8 @@ export function StoriesPage() {
 export function StoryScriptPanel({ story }: { story: Story }) {
   const qc = useQueryClient();
   const [expanded, setExpanded] = useState(false);
+  const { user, isAdmin } = useAuthStore();
+  const canEdit = isAdmin || (user?.id != null && user.id === story.userId);
 
   const { data: chapters = [], isLoading } = useQuery({
     queryKey: ['story-script', story.id],
@@ -455,27 +457,29 @@ export function StoryScriptPanel({ story }: { story: Story }) {
             </div>
           ))}
 
-          <div className="flex gap-1.5 pt-1">
-            {chapters.length === 0 ? (
-              <button
-                onClick={() => generateMut.mutate(false)}
-                disabled={generateMut.isPending}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] border border-accent/50 text-accent hover:bg-accent/10 transition-colors disabled:opacity-50"
-              >
-                {generateMut.isPending ? 'Generando…' : '+ Generar guión'}
-              </button>
-            ) : (
-              <button
-                onClick={() => generateMut.mutate(true)}
-                disabled={generateMut.isPending}
-                className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] border border-border text-text-muted hover:text-text-primary hover:border-accent/40 transition-colors disabled:opacity-50"
-                title="Regenerar guión (sustituye el actual)"
-              >
-                <RefreshCw size={9} className={generateMut.isPending ? 'animate-spin' : ''} />
-                {generateMut.isPending ? 'Regenerando…' : 'Regenerar'}
-              </button>
-            )}
-          </div>
+          {canEdit && (
+            <div className="flex gap-1.5 pt-1">
+              {chapters.length === 0 ? (
+                <button
+                  onClick={() => generateMut.mutate(false)}
+                  disabled={generateMut.isPending}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] border border-accent/50 text-accent hover:bg-accent/10 transition-colors disabled:opacity-50"
+                >
+                  {generateMut.isPending ? 'Generando…' : '+ Generar guión'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => generateMut.mutate(true)}
+                  disabled={generateMut.isPending}
+                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] border border-border text-text-muted hover:text-text-primary hover:border-accent/40 transition-colors disabled:opacity-50"
+                  title="Regenerar guión (sustituye el actual)"
+                >
+                  <RefreshCw size={9} className={generateMut.isPending ? 'animate-spin' : ''} />
+                  {generateMut.isPending ? 'Regenerando…' : 'Regenerar'}
+                </button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
