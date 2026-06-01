@@ -1,4 +1,4 @@
-import { eq, and, desc, isNull } from 'drizzle-orm';
+import { eq, and, desc, isNull, max } from 'drizzle-orm';
 import { getDb } from '../../db/index.js';
 import { contextItems, type DbContextItem } from '../../db/schema.js';
 import type { ContextItem } from '@rpgspeak/shared';
@@ -124,5 +124,19 @@ export class ContextRepository {
 
   deleteByConversation(conversationId: string): void {
     this.db.delete(contextItems).where(eq(contextItems.conversationId, conversationId)).run();
+  }
+
+  /**
+   * Returns the highest messageIndexTo across all active context items for this
+   * conversation — i.e. how far the extraction has reached in the message history.
+   * Returns 0 if nothing has been extracted yet.
+   */
+  findMaxMessageIndexTo(conversationId: string): number {
+    const row = this.db
+      .select({ maxIdx: max(contextItems.messageIndexTo) })
+      .from(contextItems)
+      .where(eq(contextItems.conversationId, conversationId))
+      .get();
+    return row?.maxIdx ?? 0;
   }
 }

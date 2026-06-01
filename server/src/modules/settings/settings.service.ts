@@ -358,6 +358,11 @@ Reglas estrictas:
 - CONQUISTA: solo para misiones completadas/activas, objetos con peso narrativo, o revelaciones que cambian la historia
 - No inventes ni extrapoles — solo lo que está explícito en el fragmento`,
   contextIndexContextSize: 8192,
+  // Auto-extracción del Índice de Contexto
+  contextAutoExtractEnabled:    false,
+  contextAutoExtractInterval:   8,
+  contextAutoExtractProviderId: null,
+  contextAutoExtractModelId:    null,
   // Generación de eventos de historia
   storyEventGenerationPrompt: `Eres un diseñador narrativo de juegos de rol. A partir del contexto de la historia que se te proporciona, genera exactamente {{NUM_EVENTOS}} eventos narrativos relevantes y concretos para esta historia.
 

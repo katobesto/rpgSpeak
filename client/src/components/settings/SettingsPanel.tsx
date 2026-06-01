@@ -19,7 +19,7 @@ import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
 
 type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats' | 'backup';
 
-const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'storyEventGenerationPrompt', 'chapterGuidePrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage'];
+const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'chapterGuidePrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret'];
 
@@ -628,6 +628,43 @@ export function SettingsPanel() {
                         mono
                       />
                     </div>
+                  </Section>
+
+                  {/* ── Auto-extracción ─────────────────────────────────────── */}
+                  <Section title="Auto-extracción del Índice de Contexto">
+                    <p className="text-xs text-text-muted mb-3 leading-relaxed">
+                      Analiza automáticamente la conversación en background cada N mensajes nuevos y extrae eventos, lugares y personajes al índice. No bloquea la respuesta del LLM.
+                    </p>
+                    <ToggleRow
+                      label="Activar auto-extracción"
+                      description="Analiza la conversación en background tras cada respuesta cuando se acumulan suficientes mensajes."
+                      checked={draft.contextAutoExtractEnabled ?? false}
+                      onChange={(v) => update('contextAutoExtractEnabled', v)}
+                    />
+                    {draft.contextAutoExtractEnabled && (
+                      <div className="mt-3 space-y-3">
+                        <Input
+                          label="Intervalo (mensajes nuevos)"
+                          type="number"
+                          value={draft.contextAutoExtractInterval ?? 8}
+                          onChange={(e) => update('contextAutoExtractInterval', parseInt(e.target.value) || 8)}
+                          min={4}
+                          max={50}
+                          hint="Cada cuántos mensajes nuevos se lanza una extracción. 8 es un buen equilibrio entre frecuencia y coste."
+                        />
+                        <p className="text-[11px] text-text-muted leading-relaxed">
+                          <strong>Provider:</strong> Si no se configura uno específico, usa el LLM Rápido (si está activo) o el provider por defecto. Para mantener el coste bajo, usa un modelo rápido y barato.
+                        </p>
+                        <DefaultModelSection
+                          providers={providers}
+                          defaultProviderId={draft.contextAutoExtractProviderId ?? null}
+                          defaultModelId={draft.contextAutoExtractModelId ?? null}
+                          onProviderChange={(v) => { update('contextAutoExtractProviderId', v); update('contextAutoExtractModelId', null); }}
+                          onModelChange={(v) => update('contextAutoExtractModelId', v)}
+                          hideDescription
+                        />
+                      </div>
+                    )}
                   </Section>
                 </>
               )}

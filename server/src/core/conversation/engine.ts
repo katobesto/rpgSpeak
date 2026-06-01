@@ -12,6 +12,7 @@ import { MemoryRepository } from '../memory/memory.repository.js';
 import { NotFoundError, ProviderError } from '../../shared/errors.js';
 import { getUserById } from '../../modules/auth/auth.service.js';
 import { ChapterRepository } from '../../modules/chapters/chapter.repository.js';
+import { autoExtractContextAsync } from '../context/context-extractor.js';
 
 const providerRepo   = new ProviderRepository();
 const charRepo       = new CharacterRepository();
@@ -818,8 +819,10 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     if (!aborted) {
       convRepo.incrementCounts(conversationId, finalTokens);
       onDone({ messageId: assistantMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, chapterCompleted, nextChapterNumber });
-      // Fire-and-forget summary update
+      // Fire-and-forget background tasks (non-blocking)
       updateSummaryAsync(conversationId, provider, modelId, narratorMode);
+      const updatedConv = convRepo.findById(conversationId);
+      if (updatedConv) void autoExtractContextAsync(conversationId, updatedConv.messageCount);
     }
 
   } catch (err) {

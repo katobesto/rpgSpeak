@@ -373,6 +373,11 @@ export interface AppSettings {
   contextIndexPrompt: string;
   // Ventana de contexto (tokens) para la llamada de extracción
   contextIndexContextSize: number;
+  // Auto-extracción del Índice de Contexto (se ejecuta en background tras cada respuesta)
+  contextAutoExtractEnabled:    boolean;
+  contextAutoExtractInterval:   number;        // cada N mensajes nuevos (default 8)
+  contextAutoExtractProviderId: string | null; // null = usar fast LLM o default
+  contextAutoExtractModelId:    string | null;
   // Generación de eventos de historia
   storyEventGenerationPrompt: string;
   // Estilo de narración — prompts inyectados cuando el usuario elige Medium o Short
