@@ -376,6 +376,11 @@ Cada evento debe OCURRIR en la narrativa, con sus transiciones, descripciones y 
 Si el guión dice "llegan a la pensión", no los ubiques allí — narra el camino, la llegada, el primer vistazo.
 Si el jugador declara "voy a la pensión", no confirmes que llegó — narra el trayecto y la llegada.
 
+REGLA ESPECIAL — INICIO DE HISTORIA:
+Si el jugador dice "Comienza", "Empieza", "Start", "Continúa" o cualquier frase de arranque sin acción específica,
+interpreta esto como "narra el PRIMER evento del guión desde el principio, con todo detalle".
+NO saltes a un punto intermedio ni al estado final. Empieza por el primer evento de la secuencia.
+
 ━━━ DIRECTIVA DE EJECUCIÓN ━━━
 
 ▸ GANCHO INMEDIATO: Introduce ahora mismo UN elemento del capítulo — un detalle que tire del jugador hacia los eventos descritos. Empieza por el principio de la secuencia, no por el final.

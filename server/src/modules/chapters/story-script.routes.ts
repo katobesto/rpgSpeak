@@ -78,10 +78,12 @@ ${chars}
 
 REQUISITOS DE CADA CAPÍTULO:
 - Título corto y evocador (máximo 5 palabras)
-- Descripción de 2-4 frases que incluya:
-  · UN evento o situación concreta que ocurre (específico, no vago)
+- Descripción de 2-4 frases escrita como DIRECTIVA DE ESCENA (lo que DEBE ocurrir, no lo que ocurrió):
+  · Usa infinitivo o futuro: "El grupo debe llegar a...", "La escena abre con...", "El antagonista revela..."
+  · UN evento o situación concreta y específica que debe suceder en pantalla, narrado paso a paso
   · AL MENOS UN PNJ o facción activa que impulsa los eventos
-  · La condición implícita de cierre del capítulo
+  · La condición de cierre: qué debe haber ocurrido para que el capítulo se considere concluido
+  · IMPORTANTE: escribe los eventos en el orden en que deben NARRARSE, del primero al último
 
 ESTRUCTURA DRAMÁTICA:
 - Cap. 1-2: Introducción del conflicto y amenaza
@@ -90,6 +92,9 @@ ESTRUCTURA DRAMÁTICA:
 - Cap. 7-8: Crisis máxima, peligro real e inmediato
 - Cap. 9: Preparación para el clímax, alianzas o traiciones
 - Cap. 10: Clímax y resolución
+
+EJEMPLO DE DESCRIPCIÓN CORRECTA:
+"La escena abre con el coche averiándose en una carretera desierta bajo la lluvia. El grupo debe caminar hasta la aldea de Varen, donde buscarán refugio. La posada La Cabaña les acogerá, pero la anciana posadero les advierte de no salir tras el anochecer. El capítulo cierra cuando el grupo está instalado y ha oído la primera advertencia."
 
 Responde ÚNICAMENTE con etiquetas, una por línea, sin texto adicional:
 [CAPITULO:1|Título|Descripción específica]
