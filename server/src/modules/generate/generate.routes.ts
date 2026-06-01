@@ -330,6 +330,70 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
         throw err;
       }
     } else {
+      // ── Check for progressive workflow (preview + final) ─────────────────
+      const comfyProvider = imageProvider as import('../../core/image/providers/comfyui.image-provider.js').ComfyUiImageProvider;
+      const progressiveMeta = comfyProvider.getProgressiveMeta?.(workflowName);
+
+      if (progressiveMeta) {
+        // Progressive: return preview immediately, upscale in background
+        const scenesDir = path.join(PROJECT_ROOT, 'data', 'images', 'scenes', conversationId);
+        fs.mkdirSync(scenesDir, { recursive: true });
+        const existingMeta = (message.metadata ?? {}) as Record<string, unknown>;
+
+        const { waitForPreview, waitForFinal } = comfyProvider.startProgressiveGeneration(
+          workflowName,
+          sceneDescription,
+          progressiveMeta.previewNodeId,
+          progressiveMeta.finalNodeId,
+        );
+
+        // Wait for the quick preview image
+        const previewResult = await waitForPreview();
+        const previewExt = path.extname(previewResult.filename) || '.png';
+        const previewFilename = `scene_${messageId.slice(0, 8)}_preview${previewExt}`;
+        fs.writeFileSync(path.join(scenesDir, previewFilename), previewResult.buffer);
+        const previewUrl = `/images/scenes/${conversationId}/${previewFilename}`;
+
+        // Persist preview URL + pending flag — respond immediately
+        msgRepo.update(messageId, {
+          metadata: {
+            ...existingMeta,
+            sceneImageUrl:     previewUrl,
+            sceneImagePending: true,
+            sceneDescription:  sceneDescription,
+          },
+        });
+
+        // Background: wait for the final upscaled image, then update metadata
+        waitForFinal().then((finalResult) => {
+          const finalExt = path.extname(finalResult.filename) || '.png';
+          const finalFilename = `scene_${messageId.slice(0, 8)}_final${finalExt}`;
+          fs.writeFileSync(path.join(scenesDir, finalFilename), finalResult.buffer);
+          const finalUrl = `/images/scenes/${conversationId}/${finalFilename}`;
+          // Refresh metadata (may have changed since preview was saved)
+          const latestMsg = msgRepo.findById(messageId);
+          const latestMeta = (latestMsg?.metadata ?? {}) as Record<string, unknown>;
+          msgRepo.update(messageId, {
+            metadata: { ...latestMeta, sceneImageUrl: finalUrl, sceneImagePending: false },
+          });
+          console.log(`[scene-image] 4K final guardado: ${finalUrl}`);
+        }).catch((err) => {
+          console.error('[scene-image] Error en upscale final:', err);
+          // Clear pending flag so the UI doesn't spin forever
+          const latestMsg = msgRepo.findById(messageId);
+          const latestMeta = (latestMsg?.metadata ?? {}) as Record<string, unknown>;
+          msgRepo.update(messageId, {
+            metadata: { ...latestMeta, sceneImagePending: false },
+          });
+        });
+
+        return reply.send({
+          success: true,
+          data: { imageUrl: previewUrl, sceneDescription, pending: true },
+        });
+      }
+
+      // Standard (non-progressive) generation
       generationResult = await imageProvider.generate({ prompt: sceneDescription, workflowName });
     }
 

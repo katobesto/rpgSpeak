@@ -1,0 +1,716 @@
+{
+  "3": {
+    "inputs": {
+      "seed": 1064027589575942,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 1,
+      "model": [
+        "43",
+        0
+      ],
+      "positive": [
+        "175",
+        0
+      ],
+      "negative": [
+        "104",
+        0
+      ],
+      "latent_image": [
+        "29",
+        0
+      ]
+    },
+    "class_type": "KSampler",
+    "_meta": {
+      "title": "🎲  KSampler"
+    }
+  },
+  "8": {
+    "inputs": {
+      "samples": [
+        "3",
+        0
+      ],
+      "vae": [
+        "17",
+        0
+      ]
+    },
+    "class_type": "VAEDecode",
+    "_meta": {
+      "title": "🧬  VAE Decode"
+    }
+  },
+  "9": {
+    "inputs": {
+      "filename_prefix": "Z-Image",
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "💾  Save RAW  Image"
+    }
+  },
+  "16": {
+    "inputs": {
+      "unet_name": "z_image_turbo_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "🗂️  Load Diffusion Model"
+    }
+  },
+  "17": {
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "class_type": "VAELoader",
+    "_meta": {
+      "title": "🧬  Load VAE"
+    }
+  },
+  "18": {
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "class_type": "CLIPLoader",
+    "_meta": {
+      "title": "🔤  Load CLIP"
+    }
+  },
+  "28": {
+    "inputs": {
+      "megapixel": "2.0",
+      "aspect_ratio": "9:7 (Artful Horizon)",
+      "divisible_by": "64",
+      "custom_ratio": false,
+      "custom_aspect_ratio": "1:1"
+    },
+    "class_type": "FluxResolutionNode",
+    "_meta": {
+      "title": "🔳  Base Resolution"
+    }
+  },
+  "29": {
+    "inputs": {
+      "width": [
+        "28",
+        0
+      ],
+      "height": [
+        "28",
+        1
+      ],
+      "batch_size": 1
+    },
+    "class_type": "EmptyLatentImage",
+    "_meta": {
+      "title": "🔢  Latent Image"
+    }
+  },
+  "39": {
+    "inputs": {
+      "anything": [
+        "248",
+        0
+      ]
+    },
+    "class_type": "easy cleanGpuUsed",
+    "_meta": {
+      "title": "🧹  Clean VRAM"
+    }
+  },
+  "40": {
+    "inputs": {
+      "anything": [
+        "39",
+        0
+      ]
+    },
+    "class_type": "easy clearCacheAll",
+    "_meta": {
+      "title": "🧹  Clear Cache"
+    }
+  },
+  "43": {
+    "inputs": {
+      "PowerLoraLoaderHeaderWidget": {
+        "type": "PowerLoraLoaderHeaderWidget"
+      },
+      "lora_1": {
+        "on": false,
+        "lora": "Z-Image\\(ZIT)_CinematicShot.safetensors",
+        "strength": 0.55
+      },
+      "lora_2": {
+        "on": false,
+        "lora": "Z-Image\\(ZIT)_Asian2Caucasian_Slider.safetensors",
+        "strength": 1
+      },
+      "lora_3": {
+        "on": false,
+        "lora": "Z-Image\\(ZIT)_AfterDark_v2.safetensors",
+        "strength": 0.7
+      },
+      "➕ Add Lora": "",
+      "model": [
+        "225",
+        0
+      ],
+      "clip": [
+        "18",
+        0
+      ]
+    },
+    "class_type": "Power Lora Loader (rgthree)",
+    "_meta": {
+      "title": "🧩  Z-Image Lora Loader"
+    }
+  },
+  "52": {
+    "inputs": {
+      "temperature": 0,
+      "hue": 0,
+      "brightness": 0,
+      "contrast": 0,
+      "saturation": 0,
+      "gamma": 1,
+      "image": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "ColorCorrect",
+    "_meta": {
+      "title": "🎨  Color Grading"
+    }
+  },
+  "58": {
+    "inputs": {
+      "source": [
+        "28",
+        2
+      ]
+    },
+    "class_type": "PreviewAny",
+    "_meta": {
+      "title": "↕️  Calculated Resolution"
+    }
+  },
+  "68": {
+    "inputs": {
+      "rgthree_comparer": {
+        "images": [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_pqbzf_00017_.png&type=temp&subfolder=&rand=0.45782550353672913"
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_pqbzf_00018_.png&type=temp&subfolder=&rand=0.6793445496688328"
+          }
+        ]
+      },
+      "image_a": [
+        "243:241",
+        0
+      ],
+      "image_b": [
+        "52",
+        0
+      ]
+    },
+    "class_type": "Image Comparer (rgthree)",
+    "_meta": {
+      "title": "🆚  Compare (Detailer Image vs. Pre-Defined Image)"
+    }
+  },
+  "84": {
+    "inputs": {
+      "model_name": "sam_vit_b_01ec64.pth",
+      "device_mode": "Prefer GPU"
+    },
+    "class_type": "SAMLoader",
+    "_meta": {
+      "title": "🔍  SAM Loader (Impact)"
+    }
+  },
+  "91": {
+    "inputs": {
+      "upscale_method": "lanczos",
+      "scale_by": 0.8,
+      "image": [
+        "243:241",
+        0
+      ]
+    },
+    "class_type": "ImageScaleBy",
+    "_meta": {
+      "title": "⬇️  Downscale 4 better Upscale"
+    }
+  },
+  "92": {
+    "inputs": {
+      "model": "seedvr2_ema_7b-Q4_K_M.gguf",
+      "device": "mps",
+      "blocks_to_swap": 0,
+      "swap_io_components": false,
+      "offload_device": "mps",
+      "cache_model": true,
+      "attention_mode": "sdpa"
+    },
+    "class_type": "SeedVR2LoadDiTModel",
+    "_meta": {
+      "title": "🗂️  SeedVR2 Load DiT Model"
+    }
+  },
+  "93": {
+    "inputs": {
+      "model": "ema_vae_fp16.safetensors",
+      "device": "mps",
+      "encode_tiled": true,
+      "encode_tile_size": 1024,
+      "encode_tile_overlap": 128,
+      "decode_tiled": true,
+      "decode_tile_size": 1024,
+      "decode_tile_overlap": 128,
+      "tile_debug": "false",
+      "offload_device": "mps",
+      "cache_model": true
+    },
+    "class_type": "SeedVR2LoadVAEModel",
+    "_meta": {
+      "title": "🧬  SeedVR2 Load VAE Model"
+    }
+  },
+  "94": {
+    "inputs": {
+      "seed": 2318870095,
+      "resolution": 2560,
+      "max_resolution": 4080,
+      "batch_size": 1,
+      "uniform_batch_size": false,
+      "color_correction": "lab",
+      "temporal_overlap": 0,
+      "prepend_frames": 0,
+      "input_noise_scale": 0,
+      "latent_noise_scale": 0,
+      "offload_device": "mps",
+      "enable_debug": false,
+      "image": [
+        "91",
+        0
+      ],
+      "dit": [
+        "92",
+        0
+      ],
+      "vae": [
+        "93",
+        0
+      ]
+    },
+    "class_type": "SeedVR2VideoUpscaler",
+    "_meta": {
+      "title": "⬆️  SeedVR2 Upscaler"
+    }
+  },
+  "100": {
+    "inputs": {
+      "filename_prefix": "Z-Image",
+      "images": [
+        "94",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "💾  Save Final Image"
+    }
+  },
+  "104": {
+    "inputs": {
+      "text": "blurry image",
+      "clip": [
+        "43",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "➖  Negative Prompt (not used!)"
+    }
+  },
+  "109": {
+    "inputs": {
+      "Enable 🌱  Seed Variance Enhancer": false
+    },
+    "class_type": "FastNodeBypasser",
+    "_meta": {
+      "title": "🎚️  Enable / Disable Seed Variance"
+    }
+  },
+  "175": {
+    "inputs": {
+      "text": "cinematic photography, dimly lit rustic tavern interior, wooden beams, stone fireplace with dying embers, flickering candlelight on worn tables, a window showing distant crimson glow on horizon, tense atmosphere, | in the center, Meira, demihuman cat woman, nude, youthful sensual body, lithe feline figure, long silky hair, cat ears on head, green feline eyes with slit pupils, playful mischievous smirk, slender cat tail curling behind her, arms slightly raised as if sniffing the air, delighted expression, standing near the tavern door | on the left, Lala, slender elf archer, nude, small breasts, graceful lithe physique, blonde hair, large green eyes with hint of caution, light freckles on cheeks, pretty smile turned wary, both hands on her hips in a defiant stance, wooden longbow strapped across her back, one foot forward, alert pose | on the right, Elara, ancient vampire princess, nude, pale alabaster skin, luminous violet eyes with calculating gaze, long midnight silk hair flowing over shoulders, regal aristocratic features, faint enigmatic smile, standing tall with commanding presence, one hand resting on her hip, looking toward the window with predatory grace, shadows pooling around her | moody chiaroscuro lighting, warm firelight contrasting cool blue moonlight and crimson glow, soft shadows, high detail, intricate textures, hyper-realistic fantasy portrait, masterpiece, 8k resolution, ethereal yet tense nocturnal ambiance, sensual and eerie atmosphere",
+      "clip": [
+        "43",
+        1
+      ]
+    },
+    "class_type": "CLIPTextEncode",
+    "_meta": {
+      "title": "➕  Positive Prompt (Use natural language / 100-300 words)"
+    }
+  },
+  "225": {
+    "inputs": {
+      "shift": 3,
+      "model": [
+        "16",
+        0
+      ]
+    },
+    "class_type": "ModelSamplingAuraFlow",
+    "_meta": {
+      "title": "🔮  Model Sampling Aura Flow"
+    }
+  },
+  "228": {
+    "inputs": {
+      "Enable ✨  Face Detailer": true,
+      "Enable ✨  Eyes Detailer": true,
+      "Enable ✨  Hands Detailer": true
+    },
+    "class_type": "FastNodeBypasser",
+    "_meta": {
+      "title": "🎚️  Enable / Disable Detailer"
+    }
+  },
+  "244": {
+    "inputs": {
+      "value": 10
+    },
+    "class_type": "ImpactInt",
+    "_meta": {
+      "title": "🪜  Detailers Steps"
+    }
+  },
+  "245": {
+    "inputs": {
+      "images": [
+        "94",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Vista previa de imagen"
+    }
+  },
+  "246": {
+    "inputs": {
+      "compare_view": {
+        "__value__": [
+          "",
+          ""
+        ]
+      },
+      "image_a": [
+        "94",
+        0
+      ],
+      "image_b": [
+        "248",
+        0
+      ]
+    },
+    "class_type": "ImageCompare",
+    "_meta": {
+      "title": "Comparar Imágenes"
+    }
+  },
+  "247": {
+    "inputs": {
+      "compare_view": {
+        "__value__": [
+          "",
+          ""
+        ]
+      },
+      "image_a": [
+        "52",
+        0
+      ],
+      "image_b": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "ImageCompare",
+    "_meta": {
+      "title": "Comparar Imágenes"
+    }
+  },
+  "248": {
+    "inputs": {
+      "image": "2b7fbfee-2b10-4581-b555-27f22c038752.png"
+    },
+    "class_type": "LoadImage",
+    "_meta": {
+      "title": "Cargar Imagen"
+    }
+  },
+  "240:238": {
+    "inputs": {
+      "model_name": "bbox/face_yolov8m.pt"
+    },
+    "class_type": "UltralyticsDetectorProvider",
+    "_meta": {
+      "title": "UltralyticsDetectorProvider"
+    }
+  },
+  "240:239": {
+    "inputs": {
+      "guide_size": 512,
+      "guide_size_for": false,
+      "max_size": 1024,
+      "seed": 654725031591964,
+      "steps": [
+        "244",
+        0
+      ],
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 0.25,
+      "feather": 5,
+      "noise_mask": true,
+      "force_inpaint": true,
+      "bbox_threshold": 0.5,
+      "bbox_dilation": 10,
+      "bbox_crop_factor": 3,
+      "sam_detection_hint": "center-1",
+      "sam_dilation": 0,
+      "sam_threshold": 0.93,
+      "sam_bbox_expansion": 0,
+      "sam_mask_hint_threshold": 0.7,
+      "sam_mask_hint_use_negative": "False",
+      "drop_size": 10,
+      "wildcard": "",
+      "cycle": 1,
+      "inpaint_model": false,
+      "noise_mask_feather": 20,
+      "tiled_encode": false,
+      "tiled_decode": false,
+      "image": [
+        "40",
+        0
+      ],
+      "model": [
+        "16",
+        0
+      ],
+      "clip": [
+        "43",
+        1
+      ],
+      "vae": [
+        "17",
+        0
+      ],
+      "positive": [
+        "175",
+        0
+      ],
+      "negative": [
+        "104",
+        0
+      ],
+      "bbox_detector": [
+        "240:238",
+        0
+      ],
+      "sam_model_opt": [
+        "84",
+        0
+      ]
+    },
+    "class_type": "FaceDetailer",
+    "_meta": {
+      "title": "FaceDetailer"
+    }
+  },
+  "237:235": {
+    "inputs": {
+      "model_name": "bbox/Eyeful_v2-Paired.pt"
+    },
+    "class_type": "UltralyticsDetectorProvider",
+    "_meta": {
+      "title": "UltralyticsDetectorProvider"
+    }
+  },
+  "237:236": {
+    "inputs": {
+      "guide_size": 512,
+      "guide_size_for": false,
+      "max_size": 1024,
+      "seed": 250761940566135,
+      "steps": [
+        "244",
+        0
+      ],
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 0.3,
+      "feather": 5,
+      "noise_mask": true,
+      "force_inpaint": true,
+      "bbox_threshold": 0.5,
+      "bbox_dilation": 10,
+      "bbox_crop_factor": 3,
+      "sam_detection_hint": "center-1",
+      "sam_dilation": 0,
+      "sam_threshold": 0.93,
+      "sam_bbox_expansion": 0,
+      "sam_mask_hint_threshold": 0.7,
+      "sam_mask_hint_use_negative": "False",
+      "drop_size": 10,
+      "wildcard": "",
+      "cycle": 1,
+      "inpaint_model": false,
+      "noise_mask_feather": 20,
+      "tiled_encode": false,
+      "tiled_decode": false,
+      "image": [
+        "240:239",
+        0
+      ],
+      "model": [
+        "16",
+        0
+      ],
+      "clip": [
+        "43",
+        1
+      ],
+      "vae": [
+        "17",
+        0
+      ],
+      "positive": [
+        "175",
+        0
+      ],
+      "negative": [
+        "104",
+        0
+      ],
+      "bbox_detector": [
+        "237:235",
+        0
+      ],
+      "sam_model_opt": [
+        "84",
+        0
+      ]
+    },
+    "class_type": "FaceDetailer",
+    "_meta": {
+      "title": "EyesDetailer"
+    }
+  },
+  "243:241": {
+    "inputs": {
+      "guide_size": 512,
+      "guide_size_for": false,
+      "max_size": 1024,
+      "seed": 212106972099427,
+      "steps": [
+        "244",
+        0
+      ],
+      "cfg": 1,
+      "sampler_name": "euler",
+      "scheduler": "simple",
+      "denoise": 0.3,
+      "feather": 5,
+      "noise_mask": true,
+      "force_inpaint": true,
+      "bbox_threshold": 0.5,
+      "bbox_dilation": 10,
+      "bbox_crop_factor": 3,
+      "sam_detection_hint": "center-1",
+      "sam_dilation": 0,
+      "sam_threshold": 0.93,
+      "sam_bbox_expansion": 0,
+      "sam_mask_hint_threshold": 0.7,
+      "sam_mask_hint_use_negative": "False",
+      "drop_size": 10,
+      "wildcard": "",
+      "cycle": 1,
+      "inpaint_model": false,
+      "noise_mask_feather": 20,
+      "tiled_encode": false,
+      "tiled_decode": false,
+      "image": [
+        "237:236",
+        0
+      ],
+      "model": [
+        "16",
+        0
+      ],
+      "clip": [
+        "43",
+        1
+      ],
+      "vae": [
+        "17",
+        0
+      ],
+      "positive": [
+        "175",
+        0
+      ],
+      "negative": [
+        "104",
+        0
+      ],
+      "bbox_detector": [
+        "243:242",
+        0
+      ],
+      "sam_model_opt": [
+        "84",
+        0
+      ]
+    },
+    "class_type": "FaceDetailer",
+    "_meta": {
+      "title": "Hands Detailer"
+    }
+  },
+  "243:242": {
+    "inputs": {
+      "model_name": "bbox/hand_yolov8s.pt"
+    },
+    "class_type": "UltralyticsDetectorProvider",
+    "_meta": {
+      "title": "UltralyticsDetectorProvider"
+    }
+  }
+}

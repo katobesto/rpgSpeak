@@ -232,6 +232,8 @@ export interface MessageMetadata {
   promptTokens?: number;
   completionTokens?: number;
   cachedTokens?: number;
+  sceneImageUrl?: string;
+  sceneImagePending?: boolean;  // true mientras el upscale 4K sigue procesando
   [key: string]: unknown;
 }
 

@@ -9,7 +9,7 @@ export const generateApi = {
     useFaceReference?: boolean,
     referenceCharId?: string,
   ) =>
-    api.post<{ imageUrl: string; sceneDescription: string }>('/generate/scene-image', {
+    api.post<{ imageUrl: string; sceneDescription: string; pending?: boolean }>('/generate/scene-image', {
       conversationId,
       messageId,
       workflowName,

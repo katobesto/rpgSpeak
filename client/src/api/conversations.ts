@@ -36,6 +36,7 @@ export const conversationsApi = {
 export const messagesApi = {
   list: (conversationId: string, branchId?: string) =>
     api.get<Message[]>(`/messages?conversationId=${conversationId}${branchId ? `&branchId=${branchId}` : ''}`),
+  get: (id: string) => api.get<Message>(`/messages/${id}`),
   create: (data: CreateMessageDto & { conversationId: string; metadata?: Record<string, unknown> }) =>
     api.post<Message>('/messages', data),
   update: (id: string, content: string) =>

@@ -35,8 +35,9 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
   const [showPrompt, setShowPrompt] = useState(false);
 
   // Scene image — derived from message.metadata so it survives conversation switches
-  const sceneImageUrl  = (message.metadata?.sceneImageUrl  as string | undefined) ?? null;
-  const sceneDesc      = (message.metadata?.sceneDescription as string | undefined) ?? null;
+  const sceneImageUrl     = (message.metadata?.sceneImageUrl   as string | undefined) ?? null;
+  const sceneImagePending = (message.metadata?.sceneImagePending as boolean | undefined) ?? false;
+  const sceneDesc         = (message.metadata?.sceneDescription as string | undefined) ?? null;
   const [showScenePanel,  setShowScenePanel]  = useState(false);
   const [showSceneDebug,  setShowSceneDebug]  = useState(false);
   const [editablePrompt,  setEditablePrompt]  = useState('');
@@ -49,6 +50,23 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
   React.useEffect(() => {
     if (sceneDesc) setEditablePrompt(sceneDesc);
   }, [sceneDesc]);
+
+  // Poll for the 4K final image while the preview is pending
+  React.useEffect(() => {
+    if (!sceneImagePending || !message.id) return;
+    const interval = setInterval(async () => {
+      try {
+        const updated = await messagesApi.get(message.id);
+        const pending = updated.metadata?.sceneImagePending as boolean | undefined;
+        const url     = updated.metadata?.sceneImageUrl as string | undefined;
+        if (!pending && url) {
+          updateMessage(message.id, { metadata: updated.metadata });
+          clearInterval(interval);
+        }
+      } catch { /* ignore transient errors */ }
+    }, 4_000);
+    return () => clearInterval(interval);
+  }, [sceneImagePending, message.id, updateMessage]);
 
   const activeConversation = useChatStore((s) => s.activeConversation);
   const removeMessage = useChatStore((s) => s.removeMessage);
@@ -157,7 +175,7 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
 
   async function handleGenerateSceneImage(
     customPrompt?: string,
-    opts?: { useFaceReference?: boolean; referenceCharId?: string },
+    opts?: { useFaceReference?: boolean; referenceCharId?: string; workflowName?: string },
   ) {
     if (!activeConversation?.id) return;
     setGeneratingScene(true);
@@ -165,13 +183,14 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
     try {
       const result = await generateApi.sceneImage(
         activeConversation.id, message.id,
-        undefined, customPrompt,
+        opts?.workflowName, customPrompt,
         opts?.useFaceReference, opts?.referenceCharId,
       );
       updateMessage(message.id, {
         metadata: {
           ...(message.metadata ?? {}),
           sceneImageUrl:     result.imageUrl,
+          sceneImagePending: result.pending ?? false,
           sceneDescription:  result.sceneDescription,
         },
       });
@@ -381,6 +400,13 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
                   title="Generar imagen de escena"
                   spin={generatingScene}
                 />
+                {/* Generar imagen 4K (workflow generador4k) */}
+                <ActionButton
+                  icon={generatingScene ? Loader : Zap}
+                  onClick={() => handleGenerateSceneImage(undefined, { workflowName: 'generador4k' })}
+                  title="Generar imagen 4K (alta calidad, tarda más)"
+                  spin={generatingScene}
+                />
                 {/* Subir imagen externa */}
                 <ActionButton
                   icon={uploadingScene ? Loader : Upload}
@@ -418,7 +444,7 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
         {sceneImageUrl && (
           <div className="mt-2 max-w-sm space-y-1">
             {/* Image */}
-            <div className="rounded-xl overflow-hidden border border-border">
+            <div className="relative rounded-xl overflow-hidden border border-border">
               <img
                 src={sceneImageUrl}
                 alt="Imagen de escena generada"
@@ -426,6 +452,13 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
                 onClick={() => window.open(sceneImageUrl, '_blank')}
                 style={{ cursor: 'zoom-in' }}
               />
+              {sceneImagePending && (
+                <div className="absolute bottom-2 left-2 flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium text-white"
+                  style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)' }}>
+                  <Loader size={9} className="animate-spin flex-shrink-0" />
+                  Mejorando a 4K…
+                </div>
+              )}
             </div>
 
             {/* Toggle prompt panel */}

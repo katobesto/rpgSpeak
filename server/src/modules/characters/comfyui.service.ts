@@ -69,6 +69,21 @@ export class ComfyUiService {
     return raw as Workflow;
   }
 
+  // ── Load optional meta file (progressive workflows) ───────────────────────
+  // Returns { previewNodeId, finalNodeId } if the workflow has a _meta.json sidecar.
+  loadWorkflowMeta(name: string): { previewNodeId: string; finalNodeId: string } | null {
+    const thisFile   = fileURLToPath(import.meta.url);
+    const serverSrc  = path.dirname(thisFile);
+    const projectRoot = path.resolve(serverSrc, '../../../../');
+    const metaPath   = path.join(projectRoot, 'data', 'comfy-workflows', `${name}_meta.json`);
+    if (!fs.existsSync(metaPath)) return null;
+    try {
+      return JSON.parse(fs.readFileSync(metaPath, 'utf-8')) as { previewNodeId: string; finalNodeId: string };
+    } catch {
+      return null;
+    }
+  }
+
   // ── Inject positive prompt text ───────────────────────────────────────────
   // Looks for the CLIPTextEncode node connected to the "positive" input of a
   // KSampler-family node and replaces its text.  Falls back to the first
@@ -303,6 +318,78 @@ export class ComfyUiService {
 
     const buffer = await this.downloadImage(imageInfo.filename, imageInfo.subfolder, imageInfo.type);
     return { buffer, filename: imageInfo.filename };
+  }
+
+  // ── Wait until a specific node has produced output ────────────────────────
+  // Used for progressive workflows where an early node saves a preview image
+  // before the full pipeline (upscale, face detailer…) completes.
+  async waitForNodeOutput(
+    promptId: string,
+    nodeId: string,
+    timeoutMs = 600_000,
+  ): Promise<{ buffer: Buffer; filename: string }> {
+    const deadline = Date.now() + timeoutMs;
+    const POLL_INTERVAL = 1_500;
+
+    while (Date.now() < deadline) {
+      await sleep(POLL_INTERVAL);
+
+      const res = await fetch(`${this.baseUrl}/history/${promptId}`, {
+        headers: { ...this.authHeaders },
+      });
+      if (!res.ok) continue;
+
+      const history = (await res.json()) as Record<string, HistoryEntry>;
+      const entry = history[promptId];
+      if (!entry) continue;
+
+      if (entry.status?.status_str === 'error') {
+        throw new Error('ComfyUI: la generación terminó con error');
+      }
+
+      // Check if this specific node already has output (even if workflow is still running)
+      const nodeOutput = entry.outputs[nodeId];
+      if (nodeOutput?.images && nodeOutput.images.length > 0) {
+        const imageInfo = nodeOutput.images[0];
+        const buffer = await this.downloadImage(imageInfo.filename, imageInfo.subfolder, imageInfo.type);
+        return { buffer, filename: imageInfo.filename };
+      }
+    }
+
+    throw new Error(`ComfyUI: timeout esperando salida del nodo ${nodeId}`);
+  }
+
+  // ── Progressive generation ─────────────────────────────────────────────────
+  // Queues the workflow once and returns two independent promises:
+  //   waitForPreview() → resolves when the quick preview node finishes
+  //   waitForFinal()   → resolves when the upscaled final node finishes
+  //
+  // Both promises share the same promptId so only one generation is queued.
+  startProgressiveGeneration(
+    workflowName: string,
+    positivePrompt: string,
+    previewNodeId: string,
+    finalNodeId: string,
+  ): {
+    waitForPreview: () => Promise<{ buffer: Buffer; filename: string }>;
+    waitForFinal:   () => Promise<{ buffer: Buffer; filename: string }>;
+  } {
+    const workflow = this.loadWorkflow(workflowName);
+    const patched  = this.injectPositivePrompt(workflow, positivePrompt);
+
+    // Queue once; both waiters share the same promptId promise
+    const promptIdPromise = this.queuePrompt(patched);
+
+    return {
+      waitForPreview: async () => {
+        const promptId = await promptIdPromise;
+        return this.waitForNodeOutput(promptId, previewNodeId);
+      },
+      waitForFinal: async () => {
+        const promptId = await promptIdPromise;
+        return this.waitForNodeOutput(promptId, finalNodeId);
+      },
+    };
   }
 }
 
