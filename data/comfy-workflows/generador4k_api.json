@@ -121,7 +121,7 @@
   "39": {
     "inputs": {
       "anything": [
-        "248",
+        "8",
         0
       ]
     },
@@ -297,7 +297,7 @@
   },
   "94": {
     "inputs": {
-      "seed": 2318870095,
+      "seed": 3638370519,
       "resolution": 2560,
       "max_resolution": 4080,
       "batch_size": 1,
@@ -431,10 +431,6 @@
       "image_a": [
         "94",
         0
-      ],
-      "image_b": [
-        "248",
-        0
       ]
     },
     "class_type": "ImageCompare",
@@ -445,9 +441,11 @@
   "247": {
     "inputs": {
       "compare_view": {
-        "__value__": [
-          "",
-          ""
+        "beforeImages": [
+          "/api/view?filename=comfy.compare.a_temp_yzbcp_00001_.png&subfolder=&type=temp&rand=0.8276781806457154"
+        ],
+        "afterImages": [
+          "/api/view?filename=comfy.compare.b_temp_yzbcp_00001_.png&subfolder=&type=temp&rand=0.8276781806457154"
         ]
       },
       "image_a": [
@@ -464,15 +462,6 @@
       "title": "Comparar Imágenes"
     }
   },
-  "248": {
-    "inputs": {
-      "image": "2b7fbfee-2b10-4581-b555-27f22c038752.png"
-    },
-    "class_type": "LoadImage",
-    "_meta": {
-      "title": "Cargar Imagen"
-    }
-  },
   "240:238": {
     "inputs": {
       "model_name": "bbox/face_yolov8m.pt"
@@ -487,7 +476,7 @@
       "guide_size": 512,
       "guide_size_for": false,
       "max_size": 1024,
-      "seed": 654725031591964,
+      "seed": 380476910734587,
       "steps": [
         "244",
         0
@@ -567,7 +556,7 @@
       "guide_size": 512,
       "guide_size_for": false,
       "max_size": 1024,
-      "seed": 250761940566135,
+      "seed": 995187575453981,
       "steps": [
         "244",
         0
@@ -638,7 +627,7 @@
       "guide_size": 512,
       "guide_size_for": false,
       "max_size": 1024,
-      "seed": 212106972099427,
+      "seed": 383813605319974,
       "steps": [
         "244",
         0
