@@ -1,0 +1,140 @@
+{
+  "30": {
+    "class_type": "CLIPLoader",
+    "inputs": {
+      "clip_name": "qwen_3_4b.safetensors",
+      "type": "lumina2",
+      "device": "default"
+    },
+    "_meta": {
+      "title": "CLIPLoader"
+    }
+  },
+  "29": {
+    "class_type": "VAELoader",
+    "inputs": {
+      "vae_name": "ae.safetensors"
+    },
+    "_meta": {
+      "title": "VAELoader"
+    }
+  },
+  "33": {
+    "class_type": "ConditioningZeroOut",
+    "inputs": {
+      "conditioning": [
+        "27",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "ConditioningZeroOut"
+    }
+  },
+  "8": {
+    "class_type": "VAEDecode",
+    "inputs": {
+      "samples": [
+        "3",
+        0
+      ],
+      "vae": [
+        "29",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "VAEDecode"
+    }
+  },
+  "28": {
+    "class_type": "UNETLoader",
+    "inputs": {
+      "unet_name": "z_image_turbo_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "_meta": {
+      "title": "UNETLoader"
+    }
+  },
+  "27": {
+    "class_type": "CLIPTextEncode",
+    "inputs": {
+      "clip": [
+        "30",
+        0
+      ],
+      "text": "Hyper-realistic dark fantasy portrait of Elara GreenBlood, an ancient vampire princess with supernatural beauty and a regal, calculating gaze. She possesses an aristocratic, porcelain-pale face, sharp elegant features, and piercing, luminous violet eyes that hold centuries of secrets and hidden sorrow, She is licking her fangs. Her long, flowing midnight-black hair cascades like silk around her shoulders. She wears a decadent, high-collared gown made of deep crimson velvet and intricate black lace, adorned with antique silver filigree and obsidian ornaments. Her expression is a masterful blend of cold elegance and subtle, dangerous sensuality. The atmosphere is moody and cinematic, lit by dim candlelight that casts dramatic shadows, emphasizing her predatory grace. Ethereal moonlight filters through a gothic window, highlighting the fine textures of her royal attire and her immortal, haunting presence. High detail, 8k, masterpiece, melancholic yet powerful aesthetic."
+    },
+    "_meta": {
+      "title": "CLIPTextEncode"
+    }
+  },
+  "13": {
+    "class_type": "EmptySD3LatentImage",
+    "inputs": {
+      "width": 1024,
+      "height": 1024,
+      "batch_size": 1
+    },
+    "_meta": {
+      "title": "EmptySD3LatentImage"
+    }
+  },
+  "11": {
+    "class_type": "ModelSamplingAuraFlow",
+    "inputs": {
+      "model": [
+        "28",
+        0
+      ],
+      "shift": 3
+    },
+    "_meta": {
+      "title": "ModelSamplingAuraFlow"
+    }
+  },
+  "3": {
+    "class_type": "KSampler",
+    "inputs": {
+      "model": [
+        "11",
+        0
+      ],
+      "positive": [
+        "27",
+        0
+      ],
+      "negative": [
+        "33",
+        0
+      ],
+      "latent_image": [
+        "13",
+        0
+      ],
+      "seed": 62841490199541,
+      "steps": 8,
+      "cfg": 1,
+      "sampler_name": "res_multistep",
+      "scheduler": "simple",
+      "denoise": 1
+    },
+    "_meta": {
+      "title": "KSampler"
+    }
+  },
+  "9": {
+    "class_type": "SaveImage",
+    "inputs": {
+      "filename_prefix": "z-image-turbo",
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "_meta": {
+      "title": "SaveImage"
+    }
+  }
+}

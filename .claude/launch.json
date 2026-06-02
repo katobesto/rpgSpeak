@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "bzComfy",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["bzComfy/server.js"],
+      "port": 2500
+    }
+  ]
+}
