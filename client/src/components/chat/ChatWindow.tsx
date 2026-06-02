@@ -6,6 +6,7 @@ import { SummaryModal } from './SummaryModal.tsx';
 import { ContextModal } from './ContextModal.tsx';
 import { StatsModal } from './StatsModal.tsx';
 import { ChatSearchModal } from './ChatSearchModal.tsx';
+import { ImageGalleryModal } from './ImageGalleryModal.tsx';
 import { useChatStore } from '../../stores/chat.store.ts';
 import { useAuthStore } from '../../stores/auth.store.ts';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -32,6 +33,7 @@ import {
   MessagesSquare,
   ChevronRight,
   ChevronDown,
+  Images,
   SlidersHorizontal,
   UserCircle,
   Filter,
@@ -55,6 +57,7 @@ export function ChatWindow() {
   const [summaryModalOpen, setSummaryModalOpen] = useState(false);
   const [statsModalOpen, setStatsModalOpen] = useState(false);
   const [contextModalOpen, setContextModalOpen] = useState(false);
+  const [galleryOpen, setGalleryOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [anchorModalOpen, setAnchorModalOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -255,6 +258,13 @@ export function ChatWindow() {
 
         <div className="flex items-center gap-1">
           <button
+            onClick={() => setGalleryOpen(true)}
+            className="p-2 rounded-lg hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors"
+            title="Galería de imágenes"
+          >
+            <Images size={15} />
+          </button>
+          <button
             onClick={() => setSearchOpen(true)}
             className="p-2 rounded-lg hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors"
             title="Buscar en el chat (Ctrl+F)"
@@ -390,6 +400,17 @@ export function ChatWindow() {
           characters={characters}
           onJumpTo={handleSearchJump}
           onClose={() => setSearchOpen(false)}
+        />
+      )}
+
+      {galleryOpen && (
+        <ImageGalleryModal
+          messages={messages}
+          onClose={() => setGalleryOpen(false)}
+          onJumpTo={(idx, id) => {
+            setGalleryOpen(false);
+            handleSearchJump(idx, id);
+          }}
         />
       )}
     </div>
