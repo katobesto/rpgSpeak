@@ -63,13 +63,17 @@ function initImageInteraction() {
   }
 
   // ── Wheel: zoom at cursor ──────────────────────────
-  // Mouse wheel:      deltaY ≈ ±100  → ~10% step per notch
-  // Trackpad pinch:   deltaY ≈ ±3-10 → smooth sub-percent steps
-  // Using Math.pow(0.999, Δy) gives proportional zoom for both.
+  // On macOS, trackpad pinch fires as wheel with ctrlKey=true and deltaY ≈ ±1–10.
+  // Regular mouse wheel has deltaY ≈ ±100 per notch.
+  // We use a steeper base for pinch so a short gesture gives meaningful zoom.
+  //   Pinch  (ctrlKey): Math.pow(0.975, Δy) → ~7% per unit  → natural on trackpad
+  //   Wheel  (normal) : Math.pow(0.999, Δy) → ~10% per notch → unchanged
   wrap.addEventListener('wheel', e => {
     if (img.classList.contains('hidden')) return
     e.preventDefault()
-    const factor = Math.pow(0.999, e.deltaY)
+    const factor = e.ctrlKey
+      ? Math.pow(0.975, e.deltaY)   // trackpad pinch — high sensitivity
+      : Math.pow(0.999, e.deltaY)   // mouse wheel   — standard sensitivity
     zoomAt(e.clientX, e.clientY, factor)
   }, { passive: false })
 
