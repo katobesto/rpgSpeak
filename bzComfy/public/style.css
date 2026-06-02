@@ -489,3 +489,52 @@ textarea { resize: vertical; line-height: 1.55; }
 
 /* ── Utilities ──────────────────────────────────────── */
 .hidden { display: none !important; }
+
+/* ── Mobile ─────────────────────────────────────────── */
+@media (max-width: 640px) {
+
+  html, body { height: auto; }
+
+  .app {
+    flex-direction: column;
+    height: auto;
+    min-height: 100svh;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .sidebar {
+    width: 100%;
+    min-width: 0;
+    height: auto;
+    padding: 14px 14px 18px;
+    overflow-y: visible;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+    gap: 12px;
+  }
+
+  /* Shorter prompt on mobile — override the rows="10" attribute */
+  #prompt          { height: 110px; min-height: 80px; resize: vertical; }
+  #negative-prompt { height: 60px;  min-height: 44px; resize: vertical; }
+  .field.grow      { flex: none; }
+  .field.grow textarea { flex: none; }
+
+  /* Taller drop zone on mobile for easier tap */
+  .drop-placeholder { padding: 22px 14px; }
+
+  .viewer {
+    flex: none;
+    min-height: 80vw;
+    padding: 12px;
+  }
+
+  /* Progress panel full-width below the viewer */
+  .progress-panel { border-radius: 0; border-left: none; border-right: none; border-bottom: none; }
+
+  /* Settings panel full-width */
+  .settings-panel { width: 100%; }
+
+  /* Sidebar footer compact */
+  .sidebar-footer { padding-top: 8px; font-size: 10px; }
+}

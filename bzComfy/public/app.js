@@ -96,8 +96,66 @@ function initImageInteraction() {
     updateCursor()
   })
 
-  // ── Double-click: reset view ───────────────────────
+  // ── Double-click / double-tap: reset view ─────────
   wrap.addEventListener('dblclick', resetImageView)
+
+  // ── Touch: pinch-zoom + single-finger pan ──────────
+  let lastTouchDist = null
+  let touchStartTime = 0
+  let lastTapTime = 0
+
+  function getTouchDist(touches) {
+    const dx = touches[0].clientX - touches[1].clientX
+    const dy = touches[0].clientY - touches[1].clientY
+    return Math.sqrt(dx * dx + dy * dy)
+  }
+
+  wrap.addEventListener('touchstart', e => {
+    if (img.classList.contains('hidden')) return
+    e.preventDefault()
+    touchStartTime = Date.now()
+    if (e.touches.length === 2) {
+      lastTouchDist = getTouchDist(e.touches)
+      dragging = false
+    } else if (e.touches.length === 1) {
+      lastMouse = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+      dragging = zoom > 1.01
+    }
+  }, { passive: false })
+
+  wrap.addEventListener('touchmove', e => {
+    if (img.classList.contains('hidden')) return
+    e.preventDefault()
+    if (e.touches.length === 2 && lastTouchDist !== null) {
+      const newDist = getTouchDist(e.touches)
+      const cx = (e.touches[0].clientX + e.touches[1].clientX) / 2
+      const cy = (e.touches[0].clientY + e.touches[1].clientY) / 2
+      zoomAt(cx, cy, newDist / lastTouchDist)
+      lastTouchDist = newDist
+      dragging = false
+    } else if (e.touches.length === 1 && dragging) {
+      panX += e.touches[0].clientX - lastMouse.x
+      panY += e.touches[0].clientY - lastMouse.y
+      lastMouse = { x: e.touches[0].clientX, y: e.touches[0].clientY }
+      apply()
+    }
+  }, { passive: false })
+
+  wrap.addEventListener('touchend', e => {
+    lastTouchDist = null
+    if (e.touches.length === 0) dragging = false
+
+    // Double-tap to reset zoom (two taps within 300ms with minimal movement)
+    if (e.changedTouches.length === 1 && Date.now() - touchStartTime < 250) {
+      const now = Date.now()
+      if (now - lastTapTime < 350) {
+        resetImageView()
+        lastTapTime = 0
+      } else {
+        lastTapTime = now
+      }
+    }
+  }, { passive: false })
 }
 
 // ── Init ─────────────────────────────────────────────
@@ -362,6 +420,11 @@ async function generate() {
   setGenerating(true)
   clearStatus()
   resetViewer()
+
+  // On mobile, scroll the viewer into view so the user can see progress
+  if (window.innerWidth <= 640) {
+    document.querySelector('.viewer').scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
   showNoPreviewHint(false)
   showProgressPanel(true)
   setProgressIndeterminate(true)
