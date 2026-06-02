@@ -377,8 +377,18 @@ app.post('/api/generate', async (req, res) => {
       ws.close()
       const text = await submitRes.text()
       let detail = text
-      try { detail = JSON.parse(text)?.error?.message || text } catch {}
-      return res.status(500).json({ error: `ComfyUI error: ${detail}` })
+      try {
+        const body = JSON.parse(text)
+        // "Node 'X' not found" — custom node missing
+        if (typeof body?.error === 'string' && body.error.includes('not found')) {
+          const match = body.error.match(/Node '([^']+)' not found/)
+          const nodeName = match ? match[1] : 'desconocido'
+          detail = `Nodo "${nodeName}" no encontrado en ComfyUI. El custom node que lo provee no está instalado. Instálalo desde ComfyUI Manager y reinicia ComfyUI.`
+        } else {
+          detail = body?.error?.message || body?.error || text
+        }
+      } catch {}
+      return res.status(500).json({ error: `ComfyUI: ${detail}` })
     }
 
     const { prompt_id } = await submitRes.json()
