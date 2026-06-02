@@ -994,7 +994,175 @@ function VoiceSection({
           previewing={previewing} previewLoading={previewLoading}
           onPreview={(id) => togglePreview(id, tts.speed, tts.temperature)} />
       </Section>
+
+      {/* ── Banco de pruebas ─────────────────────────────────────────────────── */}
+      <VoiceTestBench voices={voices} speed={tts.speed} temperature={tts.temperature} />
     </>
+  );
+}
+
+// ─── Voice Test Bench ─────────────────────────────────────────────────────────
+
+const TEST_SENTENCES = [
+  {
+    label: 'Narración de escena',
+    text: 'El viento susurraba entre los árboles mientras la niebla se alzaba sobre el valle, ocultando secretos que nadie se atrevía a pronunciar en voz alta.',
+  },
+  {
+    label: 'Diálogo íntimo',
+    text: '¿De verdad crees que no lo sé? He estado esperando este momento durante años. Y ahora que estás aquí... no sé si reír o llorar.',
+  },
+  {
+    label: 'Tensión y acción',
+    text: 'No te muevas. Ni un solo paso más, o juro que no respondo de lo que pueda pasar. Tenemos muy poco tiempo y necesito que me escuches.',
+  },
+  {
+    label: 'Tono suave y cercano',
+    text: 'Oye, tranquila. Sé que todo parece imposible ahora mismo, pero estoy aquí. No te voy a dejar sola. ¿Me oyes? Juntos lo vamos a resolver.',
+  },
+  {
+    label: 'Reflexión y emoción',
+    text: 'A veces pienso que el destino nos pone donde tiene que ponernos, aunque en el momento no lo entendamos. Quizás todo esto tiene un sentido que todavía no somos capaces de ver.',
+  },
+];
+
+function VoiceTestBench({
+  voices, speed, temperature,
+}: {
+  voices: TtsVoice[];
+  speed: number;
+  temperature: number;
+}) {
+  const [selectedSentenceIdx, setSelectedSentenceIdx] = React.useState(0);
+  const [customText, setCustomText] = React.useState('');
+  const [playingId, setPlayingId] = React.useState<string | null>(null);
+  const [loadingId, setLoadingId] = React.useState<string | null>(null);
+  const audioRef = React.useRef<HTMLAudioElement | null>(null);
+
+  const activeText = customText.trim() || TEST_SENTENCES[selectedSentenceIdx].text;
+
+  // Only show available voices (cloud always available, local only if downloaded)
+  const availableVoices = voices.filter((v) => v.type === 'cloud' || v.available);
+  const femaleVoices = availableVoices.filter((v) => v.gender === 'female');
+
+  function stopCurrent() {
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.src = '';
+      audioRef.current = null;
+    }
+    setPlayingId(null);
+    setLoadingId(null);
+  }
+
+  async function playVoice(voiceId: string) {
+    if (playingId === voiceId || loadingId === voiceId) { stopCurrent(); return; }
+    stopCurrent();
+    setLoadingId(voiceId);
+    try {
+      const token = localStorage.getItem('rpgspeak_token');
+      const resp = await fetch('/api/tts/synthesize', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ text: activeText, voiceId, speed, temperature }),
+      });
+      if (!resp.ok) throw new Error('Error de síntesis');
+      const contentType = resp.headers.get('content-type') ?? 'audio/wav';
+      const blob = new Blob([await resp.arrayBuffer()], { type: contentType });
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audioRef.current = audio;
+      audio.onended = () => { URL.revokeObjectURL(url); setPlayingId(null); };
+      audio.onerror = () => { URL.revokeObjectURL(url); setPlayingId(null); };
+      setPlayingId(voiceId);
+      setLoadingId(null);
+      await audio.play();
+    } catch {
+      setLoadingId(null);
+    }
+  }
+
+  return (
+    <Section title="🎧 Banco de pruebas de voces">
+      <p className="text-xs text-text-muted mb-3 leading-relaxed">
+        Prueba cualquier voz con las frases de ejemplo o escribe tu propio texto. Solo se muestran las voces disponibles (cloud siempre, locales si están descargadas).
+      </p>
+
+      {/* Sentence picker */}
+      <div className="space-y-2 mb-3">
+        <p className="text-[11px] font-medium text-text-secondary">Frase de ejemplo:</p>
+        <div className="flex flex-wrap gap-1.5">
+          {TEST_SENTENCES.map((s, i) => (
+            <button
+              key={i}
+              onClick={() => { setSelectedSentenceIdx(i); setCustomText(''); }}
+              className={`text-[10px] px-2.5 py-1 rounded-full border transition-colors ${
+                i === selectedSentenceIdx && !customText
+                  ? 'border-accent bg-accent/15 text-accent'
+                  : 'border-border text-text-muted hover:border-accent/40 hover:text-text-primary'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+        <p className="text-[11px] text-text-muted italic px-1 leading-relaxed">
+          "{TEST_SENTENCES[selectedSentenceIdx].text.slice(0, 90)}…"
+        </p>
+      </div>
+
+      {/* Custom text */}
+      <div className="mb-4">
+        <textarea
+          value={customText}
+          onChange={(e) => setCustomText(e.target.value)}
+          placeholder="O escribe tu propio texto para probar…"
+          rows={2}
+          className="w-full text-xs bg-transparent border border-border rounded-lg px-3 py-2 text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent resize-none"
+        />
+      </div>
+
+      {/* Female voices */}
+      <div className="space-y-1.5">
+        <p className="text-[11px] font-semibold text-text-secondary flex items-center gap-1.5">
+          <span className="text-pink-400">♀</span> Voces femeninas disponibles
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+          {femaleVoices.map((v) => {
+            const isPlaying = playingId === v.id;
+            const isLoading = loadingId === v.id;
+            return (
+              <button
+                key={v.id}
+                onClick={() => playVoice(v.id)}
+                className={`flex items-center gap-2 px-3 py-2 rounded-xl border text-left transition-all ${
+                  isPlaying
+                    ? 'border-accent bg-accent/15 text-accent'
+                    : 'border-border text-text-secondary hover:border-accent/40 hover:bg-white/3'
+                }`}
+              >
+                <span className="flex-shrink-0">
+                  {isLoading
+                    ? <Loader size={11} className="animate-spin text-accent" />
+                    : isPlaying
+                    ? <Square size={11} className="text-accent fill-current" />
+                    : <Play size={11} />}
+                </span>
+                <div className="min-w-0">
+                  <p className="text-[11px] font-medium truncate">{v.name}</p>
+                  <p className="text-[9px] text-text-muted truncate">
+                    {v.type === 'cloud' ? '☁ Edge' : '⬢ local'} · {v.description?.split(',')[0]}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        {femaleVoices.length === 0 && (
+          <p className="text-xs text-text-muted italic">No hay voces femeninas disponibles. Descarga alguna voz local o verifica la conexión para las voces cloud.</p>
+        )}
+      </div>
+    </Section>
   );
 }
 

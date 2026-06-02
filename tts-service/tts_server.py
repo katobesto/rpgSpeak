@@ -329,6 +329,72 @@ VOICE_CATALOG = [
         "description":  "Voz neural masculina, acento colombiano (Microsoft)",
         "edge_voice_id": "es-CO-GonzaloNeural",
     },
+    # ── España — voces adicionales ─────────────────────────────────────────────
+    {
+        "id":           "edge_abril",
+        "name":         "Abril",
+        "gender":       "female",
+        "type":         "cloud",
+        "description":  "Voz neural femenina amigable, acento español (Microsoft)",
+        "edge_voice_id": "es-ES-AbrilNeural",
+    },
+    {
+        "id":           "edge_estrella",
+        "name":         "Estrella",
+        "gender":       "female",
+        "type":         "cloud",
+        "description":  "Voz neural femenina positiva, acento español (Microsoft)",
+        "edge_voice_id": "es-ES-EstrellaNeural",
+    },
+    {
+        "id":           "edge_laia",
+        "name":         "Laia",
+        "gender":       "female",
+        "type":         "cloud",
+        "description":  "Voz neural femenina cálida, acento español (Microsoft)",
+        "edge_voice_id": "es-ES-LaiaNeural",
+    },
+    {
+        "id":           "edge_vera",
+        "name":         "Vera",
+        "gender":       "female",
+        "type":         "cloud",
+        "description":  "Voz neural femenina clara, acento español (Microsoft)",
+        "edge_voice_id": "es-ES-VeraNeural",
+    },
+    {
+        "id":           "edge_ximena",
+        "name":         "Ximena",
+        "gender":       "female",
+        "type":         "cloud",
+        "description":  "Voz neural femenina multilingüe, acento español (Microsoft)",
+        "edge_voice_id": "es-ES-XimenaMultilingualNeural",
+    },
+    {
+        "id":           "edge_arabella",
+        "name":         "Arabella",
+        "gender":       "female",
+        "type":         "cloud",
+        "description":  "Voz neural femenina multilingüe expresiva, acento español (Microsoft)",
+        "edge_voice_id": "es-ES-ArabellaMultilingualNeural",
+    },
+    {
+        "id":           "edge_isidora",
+        "name":         "Isidora",
+        "gender":       "female",
+        "type":         "cloud",
+        "description":  "Voz neural femenina multilingüe serena, acento español (Microsoft)",
+        "edge_voice_id": "es-ES-IsidoraMultilingualNeural",
+    },
+    # ── US Spanish ─────────────────────────────────────────────────────────────
+    {
+        "id":           "edge_paloma",
+        "name":         "Paloma",
+        "gender":       "female",
+        "type":         "cloud",
+        "description":  "Voz neural femenina neutra, español americano (Microsoft)",
+        "edge_voice_id": "es-US-PalomaNeural",
+    },
 ]
 
 VOICE_MAP = {v["id"]: v for v in VOICE_CATALOG}
