@@ -238,12 +238,12 @@ export function SettingsPanel() {
                       <span className="text-accent/70 font-mono text-[10px] mr-1">[SYSTEM]</span>
                       <strong className="text-text-secondary">Primer mensaje</strong> de la petición, antes del prompt de personaje. Se aplica a todos los personajes y conversaciones.
                     </p>
-                    <Textarea
-                      value={draft.globalSystemPrompt}
-                      onChange={(e) => update('globalSystemPrompt', e.target.value)}
-                      placeholder="Instrucciones añadidas a todas las conversaciones, antes del prompt del personaje..."
+                    <RestorablePrompt
+                      settingsKey="globalSystemPrompt"
+                      value={draft.globalSystemPrompt ?? ''}
+                      onChange={(v) => update('globalSystemPrompt', v)}
                       rows={5}
-                      hint="Usar con moderación — se consume en cada petición."
+                      mono
                     />
                   </Section>
 
