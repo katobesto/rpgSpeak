@@ -115,9 +115,13 @@ function requireAuth(req, res, next) {
 const PUBLIC_PATHS = ['/login.html', '/auth/login']
 
 app.use((req, res, next) => {
-  // Archivos estáticos de login y favicon siempre accesibles
   if (PUBLIC_PATHS.includes(req.path)) return next()
   if (req.path.startsWith('/login') || req.path === '/favicon.ico') return next()
+
+  // El endpoint SSE de progreso es semi-público: el UUID del promptId
+  // ya actúa como credencial (solo obtenible tras un generate autenticado)
+  if (req.path.startsWith('/api/progress/')) return next()
+
   requireAuth(req, res, next)
 })
 
