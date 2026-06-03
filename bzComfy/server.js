@@ -86,7 +86,12 @@ app.use((req, res, next) => {
 // Sin credenciales en /api → 401 JSON
 // Sin credenciales en / (navegador) → redirect a /login.html
 function requireAuth(req, res, next) {
-  const auth  = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim()
+  // Token puede venir de:
+  //   - Header Authorization: Bearer <token>  (fetch normal)
+  //   - Query param ?token=<token>            (EventSource/SSE, que no soporta headers)
+  const authHeader = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim()
+  const authQuery  = (req.query.token || '').trim()
+  const auth       = authHeader || authQuery
 
   // 1. Sesión de usuario válida
   const session = getSession(auth)

@@ -599,7 +599,12 @@ async function generate() {
 function connectSSE(promptId) {
   if (state.eventSource) state.eventSource.close()
 
-  const es = new EventSource(`/api/progress/${promptId}`)
+  // EventSource no soporta headers personalizados — pasamos el token como query param
+  const token = getSessionToken() || getToken()
+  const sseUrl = token
+    ? `/api/progress/${promptId}?token=${encodeURIComponent(token)}`
+    : `/api/progress/${promptId}`
+  const es = new EventSource(sseUrl)
   state.eventSource = es
 
   es.onmessage = e => {
