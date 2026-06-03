@@ -208,6 +208,7 @@ async function loadConfig() {
     el('comfy-url').value        = data.comfyUrl      || ''
     el('comfy-dir').value        = data.comfyDir      || ''
     el('comfy-start-cmd').value  = data.comfyStartCmd || ''
+    el('api-token').value        = data.apiToken      || ''
     el('footer-url').textContent = data.comfyUrl
   } catch {}
 }
@@ -223,19 +224,21 @@ async function saveSettings() {
   const comfyUrl      = el('comfy-url').value.trim()
   const comfyDir      = el('comfy-dir').value.trim()
   const comfyStartCmd = el('comfy-start-cmd').value.trim()
+  const apiToken      = el('api-token').value.trim()
   if (!comfyUrl) return
 
   try {
     const res = await fetch('/api/config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ comfyUrl, comfyDir, comfyStartCmd }),
+      body: JSON.stringify({ comfyUrl, comfyDir, comfyStartCmd, apiToken }),
     })
     const data = await res.json()
     el('footer-url').textContent = data.comfyUrl
     el('comfy-url').value        = data.comfyUrl
     el('comfy-dir').value        = data.comfyDir
     el('comfy-start-cmd').value  = data.comfyStartCmd
+    el('api-token').value        = data.apiToken
     flashSettingsStatus('✓ Guardado')
   } catch {
     flashSettingsStatus('✗ Error al guardar', true)
