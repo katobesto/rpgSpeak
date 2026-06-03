@@ -36,7 +36,33 @@ try {
 const app = express()
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
 app.use(express.json({ limit: '50mb' }))
+
+// ── Archivos estáticos (web UI) — sin auth, siempre accesible ────────────────
 app.use(express.static(path.join(__dirname, 'public')))
+
+// ── CORS — solo *.javierbenzo.com puede llamar desde el navegador ─────────────
+app.use((req, res, next) => {
+  const origin = req.headers.origin || ''
+  if (origin && (origin.endsWith('.javierbenzo.com') || origin === 'https://javierbenzo.com')) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Vary', 'Origin')
+  }
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, CF-Access-Client-Id, CF-Access-Client-Secret')
+  if (req.method === 'OPTIONS') return res.sendStatus(204)
+  next()
+})
+
+// ── Auth Bearer token — solo para rutas /api/* ────────────────────────────────
+// Si no hay token configurado → modo abierto (desarrollo local).
+// El navegador lee el token de localStorage y lo envía en cada petición.
+app.use('/api', (req, res, next) => {
+  const token = config.apiToken
+  if (!token) return next()
+  const auth = req.headers.authorization || ''
+  if (auth.startsWith('Bearer ') && auth.slice(7) === token) return next()
+  return res.status(401).json({ error: 'Unauthorized — Bearer token requerido' })
+})
 
 // promptId -> { events[], listeners Set, nodeMap {} }
 const sessions = new Map()
@@ -472,6 +498,7 @@ app.get('/api/progress/:promptId', (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream')
   res.setHeader('Cache-Control', 'no-cache')
   res.setHeader('Connection', 'keep-alive')
+  res.setHeader('X-Accel-Buffering', 'no')   // evita que Cloudflare/nginx bufferice el stream
   res.flushHeaders()
 
   const send = event => res.write(`data: ${JSON.stringify(event)}\n\n`)
@@ -504,166 +531,16 @@ app.get('/api/image', async (req, res) => {
 })
 
 app.listen(PORT, () => {
-  console.log(`\n  bzComfy UI  → http://localhost:${PORT}`)
-  console.log(`  Workflows   : ${WORKFLOWS_DIR}`)
-  console.log(`  ComfyUI     : ${config.comfyUrl}`)
-})
-
-// ══════════════════════════════════════════════════════════════════════════════
-// API PROXY — puerto 3500
-// Expone la API nativa de ComfyUI con autenticación Bearer token.
-// rpgSpeak apunta su comfyUiUrl a este servidor en lugar de a ComfyUI directamente.
-// ══════════════════════════════════════════════════════════════════════════════
-
-import { createServer } from 'node:http'
-
-const PROXY_PORT = 3500
-const proxyApp   = express()
-proxyApp.use(express.json({ limit: '50mb' }))
-proxyApp.use(upload.single('image'))
-
-// ── CORS: solo *.javierbenzo.com puede llamar desde el navegador ─────────────
-proxyApp.use((req, res, next) => {
-  const origin = req.headers.origin || ''
-  if (origin && (origin.endsWith('.javierbenzo.com') || origin === 'https://javierbenzo.com')) {
-    res.setHeader('Access-Control-Allow-Origin', origin)
-    res.setHeader('Vary', 'Origin')
-  }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, CF-Access-Client-Id, CF-Access-Client-Secret')
-  if (req.method === 'OPTIONS') return res.sendStatus(204)
-  next()
-})
-
-// ── Auth: Bearer token (si está configurado) ─────────────────────────────────
-proxyApp.use((req, res, next) => {
-  const token = config.apiToken
-  if (!token) return next()                          // sin token → modo desarrollo (abierto)
-  const auth = req.headers.authorization || ''
-  if (auth.startsWith('Bearer ') && auth.slice(7) === token) return next()
-  return res.status(401).json({ error: 'Unauthorized — Bearer token requerido' })
-})
-
-// ── Helper: proxy HTTP genérico ───────────────────────────────────────────────
-async function proxyToComfy(req, res, path, opts = {}) {
-  try {
-    const url = new URL(`${config.comfyUrl}${path}`)
-    for (const [k, v] of Object.entries(req.query ?? {})) url.searchParams.set(k, v)
-
-    const fetchOpts = { method: opts.method || req.method, headers: {} }
-    if (opts.body !== undefined) {
-      fetchOpts.body    = opts.body
-      fetchOpts.headers = opts.headers || {}
-    } else if (req.body && Object.keys(req.body).length > 0) {
-      fetchOpts.body    = JSON.stringify(req.body)
-      fetchOpts.headers = { 'Content-Type': 'application/json' }
-    }
-
-    const r = await fetch(url, fetchOpts)
-    const ct = r.headers.get('content-type') || ''
-
-    if (ct.includes('application/json')) {
-      res.status(r.status).json(await r.json())
-    } else {
-      res.setHeader('Content-Type', ct)
-      res.status(r.status).send(Buffer.from(await r.arrayBuffer()))
-    }
-  } catch (err) {
-    const msg = err.code === 'ECONNREFUSED'
-      ? `ComfyUI no disponible en ${config.comfyUrl} — ¿está encendida la máquina?`
-      : err.message
-    res.status(502).json({ error: msg })
-  }
-}
-
-// ── POST /prompt — encolar workflow ──────────────────────────────────────────
-proxyApp.post('/prompt', (req, res) => proxyToComfy(req, res, '/prompt'))
-
-// ── GET /history/:promptId — estado de la generación ─────────────────────────
-proxyApp.get('/history/:promptId', (req, res) =>
-  proxyToComfy(req, res, `/history/${req.params.promptId}`))
-
-// ── GET /view — descargar imagen generada ────────────────────────────────────
-proxyApp.get('/view', (req, res) => proxyToComfy(req, res, '/view'))
-
-// ── POST /upload/image — subir imagen de referencia ──────────────────────────
-proxyApp.post('/upload/image', async (req, res) => {
-  if (!req.file) return res.status(400).json({ error: 'No image provided' })
-  try {
-    const formData = new FormData()
-    const blob = new Blob([req.file.buffer], { type: req.file.mimetype })
-    formData.append('image', blob, req.file.originalname)
-    formData.append('type', 'input')
-    formData.append('overwrite', 'true')
-    const r = await fetch(`${config.comfyUrl}/upload/image`, { method: 'POST', body: formData })
-    res.status(r.status).json(await r.json())
-  } catch (err) {
-    res.status(502).json({ error: err.message })
-  }
-})
-
-// ── GET /system_stats — estado del sistema (usado por rpgSpeak para validar) ─
-proxyApp.get('/system_stats', (req, res) => proxyToComfy(req, res, '/system_stats'))
-
-// ── GET /object_info — lista de nodos disponibles ────────────────────────────
-proxyApp.get('/object_info', (req, res) => proxyToComfy(req, res, '/object_info'))
-
-// ── POST /interrupt — parar generación ───────────────────────────────────────
-proxyApp.post('/interrupt', (req, res) => proxyToComfy(req, res, '/interrupt'))
-
-// ── GET /health — health check para rpgSpeak ─────────────────────────────────
-proxyApp.get('/health', (_req, res) => res.json({ status: 'ok', proxy: 'bzComfy', comfyUrl: config.comfyUrl }))
-
-// ── Servidor HTTP + WebSocket proxy ──────────────────────────────────────────
-const proxyServer = createServer(proxyApp)
-
-// WebSocket proxy: /ws?clientId=... → ComfyUI WS
-// rpgSpeak abre un WS para recibir progreso en tiempo real — lo pasamos tal cual.
-proxyServer.on('upgrade', (req, socket, head) => {
-  if (!req.url.startsWith('/ws')) {
-    socket.write('HTTP/1.1 404 Not Found\r\n\r\n')
-    socket.destroy()
-    return
-  }
-
-  // Validar token desde query param (los WS no envían headers Authorization)
-  const url   = new URL(req.url, `http://localhost:${PROXY_PORT}`)
-  const token = config.apiToken
-  if (token && url.searchParams.get('token') !== token) {
-    socket.write('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n')
-    socket.destroy()
-    return
-  }
-
-  // Conectar al WS de ComfyUI local
-  const comfyWsUrl = config.comfyUrl.replace(/^http/, 'ws') + req.url
-  const comfyWs    = new WebSocket(comfyWsUrl)
-
-  comfyWs.on('error', () => {
-    socket.write('HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\n\r\n')
-    socket.destroy()
-  })
-
-  comfyWs.on('open', () => {
-    // Hacer el handshake WS con el cliente y luego puentear ambos lados
-    const wss = new WebSocket.Server({ noServer: true })
-    wss.handleUpgrade(req, socket, head, (clientWs) => {
-      clientWs.on('message', (data, isBinary) => {
-        if (comfyWs.readyState === WebSocket.OPEN) comfyWs.send(data, { binary: isBinary })
-      })
-      comfyWs.on('message', (data, isBinary) => {
-        if (clientWs.readyState === WebSocket.OPEN) clientWs.send(data, { binary: isBinary })
-      })
-      clientWs.on('close', (code, reason) => comfyWs.close(code, reason))
-      comfyWs.on('close', (code, reason) => clientWs.close(code, reason))
-      clientWs.on('error', () => comfyWs.close())
-      comfyWs.on('error', () => clientWs.close())
-    })
-  })
-})
-
-proxyServer.listen(PROXY_PORT, () => {
   const tokenStatus = config.apiToken ? '🔒 con token' : '⚠️  sin token (abierto)'
-  console.log(`  API proxy   → http://localhost:${PROXY_PORT}  ${tokenStatus}`)
-  console.log(`  (ComfyUI-compatible, para rpgSpeak)\n`)
+  console.log(`\n  bzComfy  → http://localhost:${PORT}  ${tokenStatus}`)
+  console.log(`  Workflows: ${WORKFLOWS_DIR}`)
+  console.log(`  ComfyUI  : ${config.comfyUrl}\n`)
 })
+
+// ── GET /api/health — estado del servicio ────────────────────────────────────
+app.get('/api/health', (_req, res) => res.json({
+  status:    'ok',
+  service:   'bzComfy',
+  comfyUrl:  config.comfyUrl,
+  tokenSet:  !!config.apiToken,
+}))

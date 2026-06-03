@@ -1,6 +1,28 @@
-/* bzComfy frontend */
+﻿/* bzComfy frontend */
 
 const el = id => document.getElementById(id)
+
+// â”€â”€ Token helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// El token se guarda en localStorage para persistir entre recargas.
+// apiFetch() lo inyecta automÃ¡ticamente en cada llamada a /api/*.
+const TOKEN_KEY = 'bzcomfy_token'
+
+function getToken() { return localStorage.getItem(TOKEN_KEY) || '' }
+function setToken(t) {
+  if (t) localStorage.setItem(TOKEN_KEY, t)
+  else   localStorage.removeItem(TOKEN_KEY)
+}
+
+function apiFetch(url, opts = {}) {
+  const token = getToken()
+  const headers = { ...(opts.headers || {}) }
+  if (token) headers['Authorization'] = `Bearer ${token}`
+  // No aÃ±adir Content-Type si el body es FormData (el browser lo pone con boundary)
+  if (opts.body && !(opts.body instanceof FormData) && !headers['Content-Type']) {
+    headers['Content-Type'] = 'application/json'
+  }
+  return fetch(url, { ...opts, headers })
+}
 
 const state = {
   generating: false,
@@ -15,7 +37,7 @@ const state = {
   uploadPending: false,
 }
 
-// ── Image zoom / pan ──────────────────────────────────
+// â”€â”€ Image zoom / pan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Exposed so resetViewer() can reset the view.
 let resetImageView = () => {}
 
@@ -41,7 +63,7 @@ function initImageInteraction() {
   // Zoom toward the cursor position.
   // Formula derivation: for centered img, containerCenter = transformOrigin.
   //   rendered point: screen = origin + P*zoom + pan
-  //   keep P under cursor fixed → newPan = m*(1-ratio) + pan*ratio
+  //   keep P under cursor fixed â†’ newPan = m*(1-ratio) + pan*ratio
   function zoomAt(clientX, clientY, factor) {
     const rect  = wrap.getBoundingClientRect()
     const mx    = clientX - (rect.left + rect.width  / 2)
@@ -62,22 +84,22 @@ function initImageInteraction() {
     wrap.style.cursor = ''
   }
 
-  // ── Wheel: zoom at cursor ──────────────────────────
-  // On macOS, trackpad pinch fires as wheel with ctrlKey=true and deltaY ≈ ±1–10.
-  // Regular mouse wheel has deltaY ≈ ±100 per notch.
+  // â”€â”€ Wheel: zoom at cursor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // On macOS, trackpad pinch fires as wheel with ctrlKey=true and deltaY â‰ˆ Â±1â€“10.
+  // Regular mouse wheel has deltaY â‰ˆ Â±100 per notch.
   // We use a steeper base for pinch so a short gesture gives meaningful zoom.
-  //   Pinch  (ctrlKey): Math.pow(0.975, Δy) → ~7% per unit  → natural on trackpad
-  //   Wheel  (normal) : Math.pow(0.999, Δy) → ~10% per notch → unchanged
+  //   Pinch  (ctrlKey): Math.pow(0.975, Î”y) â†’ ~7% per unit  â†’ natural on trackpad
+  //   Wheel  (normal) : Math.pow(0.999, Î”y) â†’ ~10% per notch â†’ unchanged
   wrap.addEventListener('wheel', e => {
     if (img.classList.contains('hidden')) return
     e.preventDefault()
     const factor = e.ctrlKey
-      ? Math.pow(0.975, e.deltaY)   // trackpad pinch — high sensitivity
-      : Math.pow(0.999, e.deltaY)   // mouse wheel   — standard sensitivity
+      ? Math.pow(0.975, e.deltaY)   // trackpad pinch â€” high sensitivity
+      : Math.pow(0.999, e.deltaY)   // mouse wheel   â€” standard sensitivity
     zoomAt(e.clientX, e.clientY, factor)
   }, { passive: false })
 
-  // ── Left-click drag: pan ───────────────────────────
+  // â”€â”€ Left-click drag: pan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   wrap.addEventListener('mousedown', e => {
     if (e.button !== 0 || img.classList.contains('hidden')) return
     dragging = true
@@ -100,10 +122,10 @@ function initImageInteraction() {
     updateCursor()
   })
 
-  // ── Double-click / double-tap: reset view ─────────
+  // â”€â”€ Double-click / double-tap: reset view â”€â”€â”€â”€â”€â”€â”€â”€â”€
   wrap.addEventListener('dblclick', resetImageView)
 
-  // ── Touch: pinch-zoom + single-finger pan ──────────
+  // â”€â”€ Touch: pinch-zoom + single-finger pan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   let lastTouchDist = null
   let touchStartTime = 0
   let lastTapTime = 0
@@ -162,7 +184,7 @@ function initImageInteraction() {
   }, { passive: false })
 }
 
-// ── Init ─────────────────────────────────────────────
+// â”€â”€ Init â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function init() {
   await loadConfig()
@@ -199,16 +221,17 @@ async function init() {
   })
 }
 
-// ── Config ───────────────────────────────────────────
+// â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function loadConfig() {
   try {
-    const res = await fetch('/api/config')
+    const res = await apiFetch('/api/config')
     const data = await res.json()
     el('comfy-url').value        = data.comfyUrl      || ''
     el('comfy-dir').value        = data.comfyDir      || ''
     el('comfy-start-cmd').value  = data.comfyStartCmd || ''
     el('api-token').value        = data.apiToken      || ''
+    setToken(data.apiToken || '')    // inicializar localStorage con el token del servidor
     el('footer-url').textContent = data.comfyUrl
   } catch {}
 }
@@ -228,7 +251,7 @@ async function saveSettings() {
   if (!comfyUrl) return
 
   try {
-    const res = await fetch('/api/config', {
+    const res = await apiFetch('/api/config', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ comfyUrl, comfyDir, comfyStartCmd, apiToken }),
@@ -239,32 +262,33 @@ async function saveSettings() {
     el('comfy-dir').value        = data.comfyDir
     el('comfy-start-cmd').value  = data.comfyStartCmd
     el('api-token').value        = data.apiToken
-    flashSettingsStatus('✓ Guardado')
+    setToken(data.apiToken)
+    flashSettingsStatus('âœ” Guardado')
   } catch {
-    flashSettingsStatus('✗ Error al guardar', true)
+    flashSettingsStatus('âœ— Error al guardar', true)
   }
 }
 
 async function autoDetect() {
   const btn = el('detect-btn')
   btn.disabled = true
-  btn.textContent = '…'
+  btn.textContent = 'â€¦'
   try {
-    const res  = await fetch('/api/detect')
+    const res  = await apiFetch('/api/detect')
     const data = await res.json()
     if (!res.ok) {
-      flashSettingsStatus(`✗ ${data.error}`, true)
+      flashSettingsStatus(`âœ— ${data.error}`, true)
       return
     }
     el('comfy-url').value       = data.comfyUrl
     el('comfy-dir').value       = data.comfyDir
     el('comfy-start-cmd').value = data.comfyStartCmd
     const msg = data.hint
-      ? `⚠ ${data.hint}`
-      : '✓ Detectado — pulsa Guardar para confirmar'
+      ? `âš  ${data.hint}`
+      : 'âœ“ Detectado â€” pulsa Guardar para confirmar'
     flashSettingsStatus(msg, !!data.hint)
   } catch (err) {
-    flashSettingsStatus(`✗ ${err.message}`, true)
+    flashSettingsStatus(`âœ— ${err.message}`, true)
   } finally {
     btn.disabled = false
     btn.textContent = 'Auto-detectar'
@@ -274,18 +298,18 @@ async function autoDetect() {
 async function launchComfyUI() {
   const btn = el('launch-btn')
   btn.disabled = true
-  flashSettingsStatus('Iniciando ComfyUI…')
+  flashSettingsStatus('Iniciando ComfyUIâ€¦')
 
   try {
-    const res  = await fetch('/api/launch', { method: 'POST' })
+    const res  = await apiFetch('/api/launch', { method: 'POST' })
     const data = await res.json()
     if (!res.ok) {
-      flashSettingsStatus(`✗ ${data.error}`, true)
+      flashSettingsStatus(`âœ— ${data.error}`, true)
     } else {
-      flashSettingsStatus('✓ ComfyUI arrancando — espera unos segundos')
+      flashSettingsStatus('âœ“ ComfyUI arrancando â€” espera unos segundos')
     }
   } catch (err) {
-    flashSettingsStatus(`✗ ${err.message}`, true)
+    flashSettingsStatus(`âœ— ${err.message}`, true)
   } finally {
     btn.disabled = false
   }
@@ -299,11 +323,11 @@ function flashSettingsStatus(msg, isError = false) {
   s._t = setTimeout(() => s.classList.remove('show'), isError ? 4000 : 2500)
 }
 
-// ── Workflows ─────────────────────────────────────────
+// â”€â”€ Workflows â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function loadWorkflows() {
   try {
-    const res = await fetch('/api/workflows')
+    const res = await apiFetch('/api/workflows')
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     state.workflows = await res.json()
 
@@ -339,7 +363,7 @@ function onWorkflowChange() {
   }
 }
 
-// ── Reference image upload ────────────────────────────
+// â”€â”€ Reference image upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function onFileSelected(e) {
   const file = e.target.files?.[0]
@@ -355,7 +379,7 @@ function handleRefFile(file) {
   reader.readAsDataURL(file)
 
   el('ref-file-name').textContent = file.name
-  setRefStatus('Subiendo…', '')
+  setRefStatus('Subiendoâ€¦', '')
   el('drop-placeholder').classList.add('hidden')
   el('drop-preview').classList.remove('hidden')
 
@@ -370,19 +394,19 @@ async function uploadRefImage(file) {
   formData.append('image', file, file.name)
 
   try {
-    const res = await fetch('/api/upload', { method: 'POST', body: formData })
+    const res = await apiFetch('/api/upload', { method: 'POST', body: formData })
     const data = await res.json()
 
     if (!res.ok || data.error) {
-      setRefStatus(`✗ ${data.error || 'Error al subir'}`, 'err')
+      setRefStatus(`âœ— ${data.error || 'Error al subir'}`, 'err')
       state.uploadPending = false
       return
     }
 
     state.uploadedImageName = data.name
-    setRefStatus('✓ Lista', 'ok')
+    setRefStatus('âœ“ Lista', 'ok')
   } catch (err) {
-    setRefStatus(`✗ ${err.message}`, 'err')
+    setRefStatus(`âœ— ${err.message}`, 'err')
   } finally {
     state.uploadPending = false
   }
@@ -404,7 +428,7 @@ function clearRefImage() {
   el('drop-placeholder').classList.remove('hidden')
 }
 
-// ── Generate ─────────────────────────────────────────
+// â”€â”€ Generate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function generate() {
   if (state.generating) return
@@ -435,14 +459,14 @@ async function generate() {
   showNoPreviewHint(false)
   showProgressPanel(true)
   setProgressIndeterminate(true)
-  setNode('Enviando a ComfyUI…')
+  setNode('Enviando a ComfyUIâ€¦')
   setStep(0, 0)
 
   try {
     const body = { workflow, prompt, negativePrompt }
     if (state.uploadedImageName) body.referenceImageName = state.uploadedImageName
 
-    const res = await fetch('/api/generate', {
+    const res = await apiFetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
@@ -463,7 +487,7 @@ async function generate() {
   }
 }
 
-// ── SSE ──────────────────────────────────────────────
+// â”€â”€ SSE â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 function connectSSE(promptId) {
   if (state.eventSource) state.eventSource.close()
@@ -478,7 +502,7 @@ function connectSSE(promptId) {
     if (state.generating) {
       setGenerating(false)
       showProgressPanel(false)
-      showStatus('Conexión SSE perdida.', 'error')
+      showStatus('ConexiÃ³n SSE perdida.', 'error')
     }
     es.close()
   }
@@ -546,16 +570,16 @@ function finishGeneration() {
   if (state.eventSource) { state.eventSource.close(); state.eventSource = null }
 }
 
-// ── UI helpers ───────────────────────────────────────
+// â”€â”€ UI helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function stopGeneration() {
   const btn = el('stop-btn')
-  btn.textContent = '⏳ Parando…'
+  btn.textContent = 'â³ Parandoâ€¦'
   btn.disabled = true
   try {
-    await fetch('/api/stop', { method: 'POST' })
+    await apiFetch('/api/stop', { method: 'POST' })
   } finally {
-    btn.textContent = '⏹ Parar'
+    btn.textContent = 'â¹ Parar'
     btn.disabled = false
   }
 }
@@ -565,7 +589,7 @@ function setGenerating(value) {
   state.hasProgress = false
   const btn = el('generate-btn')
   btn.disabled = value
-  el('btn-label').textContent = value ? 'Generando…' : 'Generar'
+  el('btn-label').textContent = value ? 'Generandoâ€¦' : 'Generar'
   el('btn-spinner').classList.toggle('hidden', !value)
   el('stop-btn').classList.toggle('hidden', !value)
 }
@@ -616,7 +640,7 @@ function setProgressIndeterminate(on) {
 }
 
 function setNode(title) {
-  el('node-name').textContent = title || '—'
+  el('node-name').textContent = title || 'â€”'
 }
 
 function setStep(step, total) {
@@ -629,3 +653,4 @@ function setStep(step, total) {
 }
 
 document.addEventListener('DOMContentLoaded', init)
+
