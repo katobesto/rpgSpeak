@@ -2,10 +2,20 @@
 
 const el = id => document.getElementById(id)
 
-// â”€â”€ Token helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-// El token se guarda en localStorage para persistir entre recargas.
-// apiFetch() lo inyecta automÃ¡ticamente en cada llamada a /api/*.
-const TOKEN_KEY = 'bzcomfy_token'
+// ── Sesión de usuario ─────────────────────────────────────────────────────────
+// La sesión (token de login) y el apiToken (para la configuración) son
+// dos cosas distintas. La sesión autentica al usuario humano. El apiToken
+// autentica a rpgSpeak.
+const SESSION_KEY = 'bzcomfy_session'  // token de sesión (login de usuario)
+const TOKEN_KEY   = 'bzcomfy_token'    // apiToken (Bearer para rpgSpeak)
+
+let currentUser = null  // { username, role } — se rellena en init()
+
+function getSessionToken() { return localStorage.getItem(SESSION_KEY) || '' }
+function setSessionToken(t) {
+  if (t) localStorage.setItem(SESSION_KEY, t)
+  else   localStorage.removeItem(SESSION_KEY)
+}
 
 function getToken() { return localStorage.getItem(TOKEN_KEY) || '' }
 function setToken(t) {
@@ -13,15 +23,103 @@ function setToken(t) {
   else   localStorage.removeItem(TOKEN_KEY)
 }
 
+// apiFetch usa el session token (o el apiToken si no hay sesión) en cada llamada
 function apiFetch(url, opts = {}) {
-  const token = getToken()
+  const token = getSessionToken() || getToken()
   const headers = { ...(opts.headers || {}) }
   if (token) headers['Authorization'] = `Bearer ${token}`
-  // No aÃ±adir Content-Type si el body es FormData (el browser lo pone con boundary)
   if (opts.body && !(opts.body instanceof FormData) && !headers['Content-Type']) {
     headers['Content-Type'] = 'application/json'
   }
   return fetch(url, { ...opts, headers })
+}
+
+// ── Auth: verificar sesión al cargar ─────────────────────────────────────────
+async function checkAuth() {
+  const token = getSessionToken()
+  if (!token) { window.location.href = '/login.html'; return false }
+  try {
+    const res = await fetch('/auth/me', { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) { setSessionToken(''); window.location.href = '/login.html'; return false }
+    currentUser = await res.json()
+    // Mostrar botón de usuarios solo a admins
+    if (currentUser.role === 'admin') {
+      const btn = el('users-btn')
+      if (btn) btn.style.display = 'flex'
+    }
+    return true
+  } catch {
+    window.location.href = '/login.html'
+    return false
+  }
+}
+
+// ── Logout ────────────────────────────────────────────────────────────────────
+async function logout() {
+  const token = getSessionToken()
+  if (token) {
+    await fetch('/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => {})
+  }
+  setSessionToken('')
+  window.location.href = '/login.html'
+}
+
+// ── Gestión de usuarios ───────────────────────────────────────────────────────
+function openUsersModal() {
+  const modal = el('users-modal')
+  modal.style.display = 'flex'
+  loadUsers()
+}
+function closeUsersModal() {
+  el('users-modal').style.display = 'none'
+}
+
+async function loadUsers() {
+  const res = await apiFetch('/api/users')
+  if (!res.ok) return
+  const users = await res.json()
+  const list = el('users-list')
+  list.innerHTML = users.map(u => `
+    <div style=”display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #2a2a30”>
+      <div style=”flex:1”>
+        <span style=”font-size:13px;font-weight:500”>${u.username}</span>
+        <span style=”font-size:10px;margin-left:6px;padding:1px 6px;border-radius:4px;background:${u.role==='admin'?'rgba(124,111,255,.2)':'rgba(113,113,122,.2)'};color:${u.role==='admin'?'#a78bfa':'#a1a1aa'}”>${u.role}</span>
+        ${u.mustChangePassword ? '<span style=”font-size:10px;color:#fbbf24;margin-left:4px”>⚠ cambio requerido</span>' : ''}
+      </div>
+      <button onclick=”resetUserPassword('${u.id}','${u.username}')” style=”font-size:11px;background:none;border:1px solid #2a2a30;border-radius:6px;padding:3px 8px;color:#a1a1aa;cursor:pointer”>Reset pass</button>
+      ${u.id !== '1' ? `<button onclick=”deleteUser('${u.id}','${u.username}')” style=”font-size:11px;background:none;border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:3px 8px;color:#f87171;cursor:pointer”>Eliminar</button>` : ''}
+    </div>
+  `).join('')
+}
+
+async function createUser() {
+  const username = el('new-username').value.trim()
+  const password = el('new-password').value
+  const role     = el('new-role').value
+  const errEl    = el('new-user-error')
+  errEl.style.display = 'none'
+  if (!username || !password) { errEl.textContent = 'Usuario y contraseña requeridos'; errEl.style.display='block'; return }
+  const res = await apiFetch('/api/users', { method: 'POST', body: JSON.stringify({ username, password, role }) })
+  const data = await res.json()
+  if (!res.ok) { errEl.textContent = data.error; errEl.style.display='block'; return }
+  el('new-username').value = ''
+  el('new-password').value = ''
+  loadUsers()
+}
+
+async function resetUserPassword(id, username) {
+  const pw = prompt(`Nueva contraseña para “${username}”:`)
+  if (!pw) return
+  const res = await apiFetch(`/api/users/${id}`, { method: 'PUT', body: JSON.stringify({ password: pw, mustChangePassword: true }) })
+  if (res.ok) loadUsers()
+  else alert('Error al cambiar contraseña')
+}
+
+async function deleteUser(id, username) {
+  if (!confirm(`¿Eliminar usuario “${username}”?`)) return
+  const res = await apiFetch(`/api/users/${id}`, { method: 'DELETE' })
+  if (res.ok) loadUsers()
+  else { const d = await res.json(); alert(d.error) }
 }
 
 const state = {
@@ -187,6 +285,10 @@ function initImageInteraction() {
 // â”€â”€ Init â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function init() {
+  // Verificar sesión antes de cargar nada
+  const ok = await checkAuth()
+  if (!ok) return
+
   await loadConfig()
   await loadWorkflows()
   initImageInteraction()
@@ -196,6 +298,11 @@ async function init() {
   el('prompt').addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') generate()
   })
+
+  // Auth buttons
+  el('logout-btn').addEventListener('click', logout)
+  const usersBtn = el('users-btn')
+  if (usersBtn) usersBtn.addEventListener('click', openUsersModal)
 
   // Settings panel
   el('settings-btn').addEventListener('click', toggleSettings)

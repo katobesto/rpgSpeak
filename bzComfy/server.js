@@ -3,8 +3,10 @@ import WebSocket from 'ws'
 import multer from 'multer'
 import { readdir, readFile, writeFile, access } from 'fs/promises'
 import { spawn } from 'child_process'
+import { randomUUID } from 'crypto'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import * as Users from './users.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
@@ -37,6 +39,30 @@ const app = express()
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } })
 app.use(express.json({ limit: '50mb' }))
 
+// ── Sesiones de usuario en memoria ───────────────────────────────────────────
+// Map<token, { userId, username, role, expiresAt }>
+const sessions = new Map()
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000   // 24 horas
+
+function createSession(user) {
+  const token = randomUUID()
+  sessions.set(token, {
+    userId:    user.id,
+    username:  user.username,
+    role:      user.role,
+    expiresAt: Date.now() + SESSION_TTL_MS,
+  })
+  return token
+}
+
+function getSession(token) {
+  if (!token) return null
+  const s = sessions.get(token)
+  if (!s) return null
+  if (Date.now() > s.expiresAt) { sessions.delete(token); return null }
+  return s
+}
+
 // ── Archivos estáticos (web UI) — sin auth, siempre accesible ────────────────
 app.use(express.static(path.join(__dirname, 'public')))
 
@@ -53,19 +79,130 @@ app.use((req, res, next) => {
   next()
 })
 
-// ── Auth Bearer token — solo para rutas /api/* ────────────────────────────────
-// Si no hay token configurado → modo abierto (desarrollo local).
-// El navegador lee el token de localStorage y lo envía en cada petición.
-app.use('/api', (req, res, next) => {
-  const token = config.apiToken
-  if (!token) return next()
-  const auth = req.headers.authorization || ''
-  if (auth.startsWith('Bearer ') && auth.slice(7) === token) return next()
-  return res.status(401).json({ error: 'Unauthorized — Bearer token requerido' })
+// ── Auth — rutas /api/* y la raíz / ──────────────────────────────────────────
+// Acepta dos tipos de credenciales:
+//   1. Sesión de usuario: Bearer <session-token> (navegador tras login)
+//   2. API token estático: Bearer <apiToken> (rpgSpeak / machine-to-machine)
+// Sin credenciales en /api → 401 JSON
+// Sin credenciales en / (navegador) → redirect a /login.html
+function requireAuth(req, res, next) {
+  const auth  = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim()
+
+  // 1. Sesión de usuario válida
+  const session = getSession(auth)
+  if (session) { req.session = session; return next() }
+
+  // 2. API token estático (para rpgSpeak)
+  if (config.apiToken && auth === config.apiToken) {
+    req.session = { userId: 'api', username: 'api', role: 'api' }
+    return next()
+  }
+
+  // No autenticado
+  if (req.path.startsWith('/api/') || req.path.startsWith('/auth/')) {
+    return res.status(401).json({ error: 'No autenticado' })
+  }
+  // Redirigir navegador a login
+  return res.redirect('/login.html')
+}
+
+// Rutas públicas (no requieren auth)
+const PUBLIC_PATHS = ['/login.html', '/auth/login']
+
+app.use((req, res, next) => {
+  // Archivos estáticos de login y favicon siempre accesibles
+  if (PUBLIC_PATHS.includes(req.path)) return next()
+  if (req.path.startsWith('/login') || req.path === '/favicon.ico') return next()
+  requireAuth(req, res, next)
+})
+
+// ── Rutas de autenticación ────────────────────────────────────────────────────
+
+app.post('/auth/login', (req, res) => {
+  const { username, password } = req.body || {}
+  if (!username || !password) {
+    return res.status(400).json({ error: 'Usuario y contraseña requeridos' })
+  }
+  const user = Users.authenticate(username, password)
+  if (!user) return res.status(401).json({ error: 'Credenciales incorrectas' })
+
+  const token = createSession(user)
+  res.json({ token, username: user.username, role: user.role, mustChangePassword: user.mustChangePassword })
+})
+
+app.post('/auth/logout', (req, res) => {
+  const auth = (req.headers.authorization || '').replace(/^Bearer\s+/i, '').trim()
+  sessions.delete(auth)
+  res.json({ ok: true })
+})
+
+app.get('/auth/me', (req, res) => {
+  res.json({ username: req.session.username, role: req.session.role })
+})
+
+app.post('/auth/change-password', (req, res) => {
+  if (!req.session?.userId || req.session.userId === 'api') {
+    return res.status(403).json({ error: 'No permitido' })
+  }
+  const { password } = req.body || {}
+  if (!password || password.length < 6) {
+    return res.status(400).json({ error: 'La contraseña debe tener al menos 6 caracteres' })
+  }
+  try {
+    Users.updateUser(req.session.userId, { password, mustChangePassword: false })
+    res.json({ ok: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// ── Rutas de gestión de usuarios (solo admin) ─────────────────────────────────
+
+function requireAdmin(req, res, next) {
+  if (req.session?.role !== 'admin') {
+    return res.status(403).json({ error: 'Solo administradores' })
+  }
+  next()
+}
+
+app.get('/api/users', requireAdmin, (_req, res) => {
+  res.json(Users.listUsers())
+})
+
+app.post('/api/users', requireAdmin, (req, res) => {
+  const { username, password, role = 'user' } = req.body || {}
+  if (!username || !password) {
+    return res.status(400).json({ error: 'username y password requeridos' })
+  }
+  try {
+    const user = Users.createUser(username, password, role)
+    res.status(201).json(user)
+  } catch (e) {
+    res.status(400).json({ error: e.message })
+  }
+})
+
+app.put('/api/users/:id', requireAdmin, (req, res) => {
+  const { password, role, mustChangePassword } = req.body || {}
+  try {
+    const user = Users.updateUser(req.params.id, { password, role, mustChangePassword })
+    res.json(user)
+  } catch (e) {
+    res.status(400).json({ error: e.message })
+  }
+})
+
+app.delete('/api/users/:id', requireAdmin, (req, res) => {
+  try {
+    Users.deleteUser(req.params.id)
+    res.status(204).end()
+  } catch (e) {
+    res.status(400).json({ error: e.message })
+  }
 })
 
 // promptId -> { events[], listeners Set, nodeMap {} }
-const sessions = new Map()
+const genSessions = new Map()
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -424,7 +561,7 @@ app.post('/api/generate', async (req, res) => {
     const { prompt_id } = await submitRes.json()
 
     const session = { events: [], listeners: new Set(), nodeMap }
-    sessions.set(prompt_id, session)
+    genSessions.set(prompt_id, session)
 
     const push = (type, data) => {
       const event = { type, data }
@@ -492,7 +629,7 @@ app.post('/api/stop', async (_req, res) => {
 
 // Server-Sent Events — real-time progress stream
 app.get('/api/progress/:promptId', (req, res) => {
-  const session = sessions.get(req.params.promptId)
+  const session = genSessions.get(req.params.promptId)
   if (!session) return res.status(404).json({ error: 'Session not found' })
 
   res.setHeader('Content-Type', 'text/event-stream')
