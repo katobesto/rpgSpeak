@@ -3046,6 +3046,7 @@ function BackupSection() {
   const [restoreDone, setRestoreDone]       = useState(false);
   const [restoreNeedsRestart, setRestoreNeedsRestart] = useState(false);
   const [restoreMsg, setRestoreMsg]         = useState('');
+  const [restoreProgress, setRestoreProgress] = useState(0);
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -3073,7 +3074,8 @@ function BackupSection() {
     setRestoring(true);
     setRestoreError(null);
     try {
-      const result = await backupApi.restore(restoreFile);
+      setRestoreProgress(0);
+      const result = await backupApi.restore(restoreFile, (pct) => setRestoreProgress(pct));
       setRestoreDone(true);
       setRestoreNeedsRestart(result.requiresRestart);
       setRestoreMsg(result.message);
@@ -3224,9 +3226,19 @@ function BackupSection() {
             )}
 
             {restoring && (
-              <div className="flex items-center gap-2 text-sm text-text-muted">
-                <Loader size={14} className="animate-spin text-accent" />
-                Subiendo y restaurando… no cierres esta pestaña.
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 text-sm text-text-muted">
+                  <Loader size={14} className="animate-spin text-accent" />
+                  {restoreProgress < 100
+                    ? `Subiendo… ${restoreProgress}%`
+                    : 'Restaurando datos… no cierres esta pestaña.'}
+                </div>
+                <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-accent transition-all duration-300"
+                    style={{ width: `${restoreProgress}%` }}
+                  />
+                </div>
               </div>
             )}
 

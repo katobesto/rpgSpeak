@@ -26,26 +26,49 @@ export const backupApi = {
   },
 
   /**
-   * Uploads a .tar.gz backup archive to replace data/ on the server.
-   * Returns requiresRestart=true when running in Docker (no auto-restart).
-   * Returns requiresRestart=false when running under PM2 (auto-restarts).
+   * Uploads a .tar.gz backup archive using chunked upload (50MB per chunk).
+   * Bypasses Cloudflare's 100MB per-request body limit.
+   * Returns requiresRestart=true when running in Docker.
    */
-  async restore(file: File): Promise<{ requiresRestart: boolean; message: string }> {
-    const form = new FormData();
-    form.append('backup', file);
+  async restore(
+    file: File,
+    onProgress?: (pct: number) => void,
+  ): Promise<{ requiresRestart: boolean; message: string }> {
+    const CHUNK_SIZE  = 50 * 1024 * 1024; // 50MB — safely under Cloudflare's 100MB limit
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    const uploadId    = crypto.randomUUID();
 
-    const resp = await fetch('/api/backup/restore', {
-      method: 'POST',
-      headers: { ...getAuthHeader() },
-      body: form,
-    });
+    for (let i = 0; i < totalChunks; i++) {
+      const start = i * CHUNK_SIZE;
+      const end   = Math.min(start + CHUNK_SIZE, file.size);
+      const chunk = file.slice(start, end);
 
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({})) as Record<string, unknown>;
-      throw new Error(String(err.error ?? `Error ${resp.status}`));
+      const form = new FormData();
+      form.append('chunk', chunk, file.name);
+
+      const url = `/api/backup/restore-chunk?uploadId=${encodeURIComponent(uploadId)}&chunkIndex=${i}&totalChunks=${totalChunks}`;
+
+      const resp = await fetch(url, {
+        method:  'POST',
+        headers: { ...getAuthHeader() },
+        body:    form,
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({})) as Record<string, unknown>;
+        throw new Error(String(err.error ?? `Error en chunk ${i + 1}/${totalChunks} (${resp.status})`));
+      }
+
+      // Report progress (last chunk already at 100%)
+      onProgress?.(Math.round(((i + 1) / totalChunks) * 100));
+
+      // Last chunk returns the final restore result
+      if (i === totalChunks - 1) {
+        const data = await resp.json() as { success: boolean; message: string; requiresRestart: boolean };
+        return { requiresRestart: data.requiresRestart ?? false, message: data.message };
+      }
     }
 
-    const data = await resp.json() as { success: boolean; message: string; requiresRestart: boolean };
-    return { requiresRestart: data.requiresRestart ?? false, message: data.message };
+    return { requiresRestart: false, message: 'Completado' };
   },
 };
