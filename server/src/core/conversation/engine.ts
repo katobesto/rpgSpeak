@@ -13,6 +13,7 @@ import { NotFoundError, ProviderError } from '../../shared/errors.js';
 import { getUserById } from '../../modules/auth/auth.service.js';
 import { ChapterRepository } from '../../modules/chapters/chapter.repository.js';
 import { autoExtractContextAsync } from '../context/context-extractor.js';
+import { SummariesRepository } from '../../modules/summaries/summaries.repository.js';
 
 const providerRepo   = new ProviderRepository();
 const charRepo       = new CharacterRepository();
@@ -22,6 +23,7 @@ const convRepo       = new ConversationRepository();
 const settingsService = new SettingsService();
 const memRepo        = new MemoryRepository();
 const chapterRepo    = new ChapterRepository();
+const summariesRepo  = new SummariesRepository();
 
 export interface GenerateOptions {
   conversationId: string;
@@ -978,10 +980,15 @@ async function updateSummaryAsync(
     if (conv.messageCount % SUMMARY_EVERY_N !== 0) return;
 
     // Take the last 6 messages
-    const recentMessages = msgRepo.findByConversation(conversationId).slice(-6);
+    const allMessages   = msgRepo.findByConversation(conversationId);
+    const recentMessages = allMessages.slice(-6).filter((m) => m.role !== 'system');
     if (recentMessages.length < 2) return;
 
-    const currentSummary = conv.summary ?? '';
+    const messageIndexTo   = allMessages.length - 1;
+    const messageIndexFrom = Math.max(0, messageIndexTo - 5);
+
+    const settings = settingsService.getAll();
+    const maxFrases = settings.summaryMaxLength ?? 5;
     const messagesText = recentMessages
       .map((m) => `${m.role === 'user' ? 'Jugador' : (isNarrator ? 'Narrador' : 'Personaje')}: ${m.content}`)
       .join('\n\n');
@@ -992,27 +999,33 @@ async function updateSummaryAsync(
 ${messagesText}
 ---
 
-Resumen actual de la historia:
-${currentSummary || '(Sin resumen aún)'}
+Escribe un resumen de lo ocurrido en este fragmento. El resumen debe ser:
+- Objetivo y fiel a lo narrado
+- Conciso: máximo ${maxFrases} frases
+- En pasado narrativo
+- Sin explicaciones ni frases introductorias
 
-¿Hay algo en estos intercambios que sea relevante para el progreso de la historia y que no esté ya en el resumen? Si es así, actualiza el resumen añadiendo solo lo nuevo y relevante, de forma concisa (máximo 3-4 frases nuevas). Si nada es nuevo o relevante, devuelve el resumen actual sin cambios. Responde SOLO con el texto del resumen, sin explicaciones.`;
+Responde SOLO con el texto del resumen.`;
 
     const llm = createProvider(provider);
     const request: GenerateRequest = {
       messages: [
-        { role: 'system', content: 'Eres un asistente que mantiene el resumen de una historia colaborativa.' },
+        { role: 'system', content: 'Eres un asistente que resume fragmentos de historias colaborativas de rol.' },
         { role: 'user', content: prompt },
       ],
       model: modelId,
       temperature: 0.3,
       stream: false,
-      disableFallbacks: settingsService.getAll().disableFallbacks,
+      disableFallbacks: settings.disableFallbacks,
     };
 
     const response = await llm.generate(request);
     const newSummary = response.content.trim();
 
-    if (newSummary && newSummary !== currentSummary) {
+    if (newSummary) {
+      // Guardar en historial acumulativo
+      summariesRepo.create({ conversationId, content: newSummary, messageIndexFrom, messageIndexTo });
+      // Mantener conversations.summary para inyección en el contexto
       convRepo.update(conversationId, { summary: newSummary });
     }
   } catch (err) {
@@ -1038,10 +1051,15 @@ export async function triggerSummaryUpdate(conversationId: string): Promise<Conv
   const modelId = firstChar?.modelId ?? provider.defaultModel ?? settings.defaultModelId;
   if (!modelId) return conv;
 
-  const recentMessages = msgRepo.findByConversation(conversationId).slice(-6);
+  const allMessages    = msgRepo.findByConversation(conversationId);
+  const recentMessages = allMessages.slice(-6).filter((m) => m.role !== 'system');
   if (recentMessages.length < 2) return conv;
 
-  const currentSummary = conv.summary ?? '';
+  const messageIndexTo   = allMessages.length - 1;
+  const messageIndexFrom = Math.max(0, messageIndexTo - 5);
+
+  const s = settingsService.getAll();
+  const maxFrases = s.summaryMaxLength ?? 5;
   const messagesText = recentMessages
     .map((m) => `${m.role === 'user' ? 'Jugador' : 'Personaje'}: ${m.content}`)
     .join('\n\n');
@@ -1052,28 +1070,32 @@ export async function triggerSummaryUpdate(conversationId: string): Promise<Conv
 ${messagesText}
 ---
 
-Resumen actual de la historia:
-${currentSummary || '(Sin resumen aún)'}
+Escribe un resumen de lo ocurrido en este fragmento. El resumen debe ser:
+- Objetivo y fiel a lo narrado
+- Conciso: máximo ${maxFrases} frases
+- En pasado narrativo
+- Sin explicaciones ni frases introductorias
 
-¿Hay algo en estos intercambios que sea relevante para el progreso de la historia y que no esté ya en el resumen? Si es así, actualiza el resumen añadiendo solo lo nuevo y relevante, de forma concisa (máximo 3-4 frases nuevas). Si nada es nuevo o relevante, devuelve el resumen actual sin cambios. Responde SOLO con el texto del resumen, sin explicaciones.`;
+Responde SOLO con el texto del resumen.`;
 
   try {
     const llm = createProvider(provider);
     const request: GenerateRequest = {
       messages: [
-        { role: 'system', content: 'Eres un asistente que mantiene el resumen de una historia colaborativa.' },
+        { role: 'system', content: 'Eres un asistente que resume fragmentos de historias colaborativas de rol.' },
         { role: 'user', content: prompt },
       ],
       model: modelId,
       temperature: 0.3,
       stream: false,
-      disableFallbacks: settingsService.getAll().disableFallbacks,
+      disableFallbacks: s.disableFallbacks,
     };
 
     const response = await llm.generate(request);
     const newSummary = response.content.trim();
 
-    if (newSummary && newSummary !== currentSummary) {
+    if (newSummary) {
+      summariesRepo.create({ conversationId, content: newSummary, messageIndexFrom, messageIndexTo });
       convRepo.update(conversationId, { summary: newSummary });
     }
   } catch (err) {

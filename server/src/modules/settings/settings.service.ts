@@ -452,6 +452,8 @@ Responde de forma breve y directa: máximo 2 párrafos cortos. Ve al punto esenc
   // Content moderation
   allowNsfw: false,
   nsfwBlockedMessage: `*[Moderación: el contenido de tu mensaje no está permitido con el modo NSFW desactivado. Si deseas este tipo de interacciones, activa "Permitir contenido adulto" en Ajustes → Generación.]*`,
+  // Resúmenes de sucesos
+  summaryMaxLength: 5,   // máximo de frases por resumen generado
   // API options
   disableFallbacks: false,
   // Cloudflare Access — para ComfyUI remoto tras túnel

@@ -360,9 +360,8 @@ export function ChatWindow() {
       <SummaryModal
         open={summaryModalOpen}
         onClose={() => setSummaryModalOpen(false)}
-        summary={activeConversation.summary ?? null}
         conversationId={convId!}
-        onSummaryUpdated={(s) => setActiveConversation({ ...activeConversation, summary: s })}
+        messageCount={activeConversation.messageCount}
       />
 
       <StatsModal

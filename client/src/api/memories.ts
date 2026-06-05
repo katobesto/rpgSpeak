@@ -15,5 +15,8 @@ export const memoriesApi = {
     importance: number;
   }) => api.post<MemoryEntry>('/memories', data),
 
+  update: (id: string, data: { content?: string; type?: MemoryEntry['type']; importance?: number }) =>
+    api.patch<MemoryEntry>(`/memories/${id}`, data),
+
   deactivate: (id: string) => api.delete(`/memories/${id}`),
 };

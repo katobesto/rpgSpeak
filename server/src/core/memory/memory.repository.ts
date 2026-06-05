@@ -65,6 +65,17 @@ export class MemoryRepository {
     return row ? dbToEntry(row) : null;
   }
 
+  update(id: string, data: { content?: string; type?: MemoryEntry['type']; importance?: number }): MemoryEntry | null {
+    const ts = now();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const patch: any = { updatedAt: ts };
+    if (data.content    !== undefined) patch.content    = data.content;
+    if (data.type       !== undefined) patch.type       = data.type;
+    if (data.importance !== undefined) patch.importance = data.importance;
+    this.db.update(memoryEntries).set(patch).where(eq(memoryEntries.id, id)).run();
+    return this.findById(id);
+  }
+
   deactivate(id: string): void {
     this.db.update(memoryEntries).set({ isActive: false, updatedAt: now() })
       .where(eq(memoryEntries.id, id)).run();

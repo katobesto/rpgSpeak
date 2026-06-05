@@ -28,6 +28,7 @@ import { contextRoutes }  from './modules/context/context.routes.js';
 import { chapterRoutes }      from './modules/chapters/chapter.routes.js';
 import { storyScriptRoutes }  from './modules/chapters/story-script.routes.js';
 import { backupRoutes }       from './modules/backup/backup.routes.js';
+import { summariesRoutes }    from './modules/summaries/summaries.routes.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -94,6 +95,7 @@ export async function buildApp(): Promise<FastifyInstance> {
           await prot.register(chapterRoutes,      { prefix: '/chapters' });
           await prot.register(storyScriptRoutes,  { prefix: '/story-script' });
           await prot.register(backupRoutes,       { prefix: '/backup' });
+          await prot.register(summariesRoutes,    { prefix: '/summaries' });
         },
         { prefix: '' }
       );

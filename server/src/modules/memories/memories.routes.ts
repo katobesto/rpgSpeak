@@ -30,6 +30,20 @@ export const memoriesRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(201).send({ success: true, data: entry });
   });
 
+  // PATCH /memories/:id — actualizar contenido, tipo o importancia
+  app.patch<{ Params: { id: string } }>('/:id', async (req, reply) => {
+    const schema = z.object({
+      content:    z.string().min(1).max(1000).optional(),
+      type:       z.enum(['fact', 'event', 'relationship', 'preference', 'summary', 'offense', 'trauma']).optional(),
+      importance: z.number().int().min(1).max(10).optional(),
+    });
+    const result = schema.safeParse(req.body);
+    if (!result.success) throw new ValidationError(result.error.issues[0].message);
+    const updated = repo.update(req.params.id, result.data);
+    if (!updated) return reply.status(404).send({ success: false, error: 'Memory not found' });
+    return reply.send({ success: true, data: updated });
+  });
+
   // DELETE /memories/:id — soft-delete (deactivate)
   app.delete<{ Params: { id: string } }>('/:id', async (req, reply) => {
     repo.deactivate(req.params.id);

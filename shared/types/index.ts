@@ -391,6 +391,8 @@ export interface AppSettings {
   // Moderación de contenido
   allowNsfw: boolean;
   nsfwBlockedMessage: string;
+  // Resúmenes de sucesos — longitud máxima de cada resumen generado (en frases aprox.)
+  summaryMaxLength: number;
   // Opciones de API
   disableFallbacks: boolean;
   // Cloudflare Access — para proteger ComfyUI remoto tras un túnel
@@ -474,6 +476,17 @@ export interface StreamChunk {
   narrator?: boolean;
   /** The characterId stored on the persisted message (null for narrator) */
   characterId?: string | null;
+}
+
+// ─── Conversation Summary Types ───────────────────────────────────────────────
+
+export interface ConversationSummary {
+  id: string;
+  conversationId: string;
+  content: string;
+  messageIndexFrom: number;
+  messageIndexTo: number;
+  createdAt: string;
 }
 
 // ─── Context Index Types ──────────────────────────────────────────────────────

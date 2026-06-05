@@ -227,6 +227,22 @@ export function runMigrations(db: Db): void {
     )
   `);
 
+  // ─── Conversation Summaries (historial acumulativo con rangos de mensajes) ──
+  db.run(sql`
+    CREATE TABLE IF NOT EXISTS conversation_summaries (
+      id                 TEXT    PRIMARY KEY,
+      conversation_id    TEXT    NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      content            TEXT    NOT NULL,
+      message_index_from INTEGER NOT NULL DEFAULT 0,
+      message_index_to   INTEGER NOT NULL DEFAULT 0,
+      created_at         TEXT    NOT NULL
+    )
+  `);
+  db.run(sql`
+    CREATE INDEX IF NOT EXISTS idx_conv_summaries_conv
+      ON conversation_summaries(conversation_id)
+  `);
+
   // ─── User content assignments ─────────────────────────────────────────────
   db.run(sql`
     CREATE TABLE IF NOT EXISTS user_characters (

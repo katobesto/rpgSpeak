@@ -251,6 +251,19 @@ export const storyChapters = sqliteTable('story_chapters', {
   createdAt:      text('created_at').notNull(),
 });
 
+// ─── Conversation Summaries (historial acumulativo) ──────────────────────────
+
+export const conversationSummaries = sqliteTable('conversation_summaries', {
+  id:               text('id').primaryKey(),
+  conversationId:   text('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  content:          text('content').notNull(),
+  messageIndexFrom: integer('message_index_from').notNull().default(0),
+  messageIndexTo:   integer('message_index_to').notNull().default(0),
+  createdAt:        text('created_at').notNull(),
+});
+
+export type DbConversationSummary = typeof conversationSummaries.$inferSelect;
+
 export type DbContextItem = typeof contextItems.$inferSelect;
 export type DbCharacter = typeof characters.$inferSelect;
 export type DbStory = typeof stories.$inferSelect;
