@@ -350,11 +350,15 @@ export interface AppSettings {
   comfyUiUrl: string;
   sceneImagePrompt: string;
   // Image generation provider
-  imageProvider: 'comfyui' | 'pollinations' | 'gemini' | 'fal';
+  imageProvider: 'comfyui' | 'pollinations' | 'gemini' | 'fal' | 'bzcomfy';
   imageProviderApiKey: string | null;        // API key for Gemini / Fal
   pollinationsModel: string | null;          // Model for Pollinations
   geminiModel: string | null;               // Model for Gemini
   falModel: string | null;                  // Model/endpoint for Fal.ai
+  // bzComfy — remote ComfyUI proxy (Machine-to-Machine via Bearer token)
+  bzComfyUrl: string;
+  bzComfyApiToken: string | null;
+  bzComfyWorkflow: string;
   // LLM Rápido de apoyo
   fastLlmEnabled: boolean;
   fastLlmProviderId: string | null;

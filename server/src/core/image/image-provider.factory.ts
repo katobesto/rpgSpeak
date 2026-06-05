@@ -4,6 +4,7 @@ import { ComfyUiImageProvider }     from './providers/comfyui.image-provider.js'
 import { PollinationsImageProvider } from './providers/pollinations.image-provider.js';
 import { GeminiImageProvider }      from './providers/gemini.image-provider.js';
 import { FalImageProvider }         from './providers/fal.image-provider.js';
+import { BzComfyImageProvider }     from './providers/bzcomfy.image-provider.js';
 
 export function createImageProvider(settings: AppSettings): ImageProvider {
   const provider = settings.imageProvider ?? 'comfyui';
@@ -22,6 +23,13 @@ export function createImageProvider(settings: AppSettings): ImageProvider {
       return new FalImageProvider(
         settings.imageProviderApiKey ?? '',
         settings.falModel ?? undefined,
+      );
+
+    case 'bzcomfy':
+      return new BzComfyImageProvider(
+        settings.bzComfyUrl || 'https://bzcomfy.javierbenzo.com',
+        settings.bzComfyApiToken ?? '',
+        settings.bzComfyWorkflow ?? '',
       );
 
     case 'comfyui':

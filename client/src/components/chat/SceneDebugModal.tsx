@@ -183,8 +183,8 @@ export function SceneDebugModal({
     if (!imagePrompt.trim()) return;
     setGeneratingImage(true);
     setImageError(null);
-    setProgressValue(0);
-    setProgressMax(0);
+    setStepValue(0);
+    setStepMax(0);
     setStatusMessage('Iniciando…');
 
     setCurrentNode('');

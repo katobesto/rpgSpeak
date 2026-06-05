@@ -651,7 +651,10 @@ function handleEvent({ type, data }) {
         `/api/image?filename=${encodeURIComponent(img.filename)}` +
         `&subfolder=${encodeURIComponent(img.subfolder || '')}` +
         `&type=${encodeURIComponent(img.type || 'output')}`
-      showImage(url, false)
+      apiFetch(url)
+        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob() })
+        .then(blob => showImage(URL.createObjectURL(blob), false))
+        .catch(err => showStatus(`Error cargando imagen: ${err.message}`, 'error'))
       break
     }
 

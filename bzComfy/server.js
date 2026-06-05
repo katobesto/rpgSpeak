@@ -642,17 +642,23 @@ app.get('/api/progress/:promptId', (req, res) => {
   if (!session) return res.status(404).json({ error: 'Session not found' })
 
   res.setHeader('Content-Type', 'text/event-stream')
-  res.setHeader('Cache-Control', 'no-cache')
+  res.setHeader('Cache-Control', 'no-cache, no-transform')
   res.setHeader('Connection', 'keep-alive')
-  res.setHeader('X-Accel-Buffering', 'no')   // evita que Cloudflare/nginx bufferice el stream
+  res.setHeader('X-Accel-Buffering', 'no')
   res.flushHeaders()
 
   const send = event => res.write(`data: ${JSON.stringify(event)}\n\n`)
 
+  // Heartbeat every 15 s — keeps the connection alive through Cloudflare and other proxies
+  const heartbeat = setInterval(() => res.write(': ping\n\n'), 15000)
+
   // Replay queued events (handles race between POST response and SSE connect)
   for (const event of session.events) send(event)
   session.listeners.add(send)
-  req.on('close', () => session.listeners.delete(send))
+  req.on('close', () => {
+    clearInterval(heartbeat)
+    session.listeners.delete(send)
+  })
 })
 
 // Proxy output image from ComfyUI (avoids browser CORS)

@@ -1,0 +1,18 @@
+[
+  {
+    "id": "1",
+    "username": "admin",
+    "passwordHash": "2d4bec1b98102bf757254a79fb94a411:5186a3a9eec1c53d1eee4379929d4489a8f47c9d118bfd1d8a6a789506305a60438c482bf68f32204064ead626de246cfb0dd14b76cf48afa15ec30cc29f2f10",
+    "role": "admin",
+    "mustChangePassword": false,
+    "createdAt": "2026-06-03T20:08:27.570Z"
+  },
+  {
+    "id": "1780517865159",
+    "username": "claude",
+    "passwordHash": "b5d8808f12be21ab88777f8181576e1b:19a0341cfe0f353b945d02d22cddc5502ce5db7e9ed816340b248bdc1450c303b8dd27c95b7b4e627773dd1a26dd29926dbf3ae9c08bebeed5a9c7ad3ad646df",
+    "role": "admin",
+    "mustChangePassword": false,
+    "createdAt": "2026-06-03T20:17:45.185Z"
+  }
+]

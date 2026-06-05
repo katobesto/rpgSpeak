@@ -1,6 +1,6 @@
 {
-  "comfyUrl": "http://127.0.0.1:8000",
-  "comfyDir": "/Users/javiermac/Documents/ComfyUI",
-  "comfyStartCmd": "pkill -f 'main.py.*--port 8000' 2>/dev/null; sleep 1; ${comfyDir}/.venv/bin/python /Applications/ComfyUI.app/Contents/Resources/ComfyUI/main.py --user-directory ${comfyDir}/user --input-directory ${comfyDir}/input --output-directory ${comfyDir}/output --front-end-root /Applications/ComfyUI.app/Contents/Resources/ComfyUI/web_custom_versions/desktop_app --base-directory ${comfyDir} --database-url sqlite://///${comfyDir}/user/comfyui.db --extra-model-paths-config '~/Library/Application Support/ComfyUI/extra_models_config.yaml' --log-stdout --listen 127.0.0.1 --port 8000 --enable-manager --preview-method latent2rgb",
-  "apiToken": ""
+  "comfyUrl": "http://127.0.0.1:8188",
+  "comfyDir": "C:\\ai\\StabilityMatrix-win-x64\\Data\\Packages\\ComfyUI",
+  "comfyStartCmd": "python main.py --preview-method latent2rgb",
+  "apiToken": "trikipake"
 }

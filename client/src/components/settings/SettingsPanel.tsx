@@ -21,7 +21,7 @@ type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'u
 
 const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'chapterGuidePrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
-const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret'];
+const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret', 'bzComfyUrl', 'bzComfyApiToken', 'bzComfyWorkflow'];
 
 export function SettingsPanel() {
   const [tab, setTab] = useState<STab>('profile');
@@ -2656,13 +2656,14 @@ function UserAssignmentsPanel({ userId, userName }: { userId: string; userName: 
 
 // ─── Image Provider Section ────────────────────────────────────────────────────
 
-type ImageProviderType = 'comfyui' | 'pollinations' | 'gemini' | 'fal';
+type ImageProviderType = 'comfyui' | 'pollinations' | 'gemini' | 'fal' | 'bzcomfy';
 
 const IMAGE_PROVIDERS: { value: ImageProviderType; label: string; badge: string; desc: string }[] = [
-  { value: 'comfyui',     label: 'ComfyUI (local)',          badge: 'Local',    desc: 'Máximo control y calidad. Requiere instalación local. Soporta FaceID.' },
-  { value: 'pollinations', label: 'Pollinations.ai',         badge: 'Gratis',   desc: 'Completamente gratis y sin API key. FLUX.1, flux-realism, flux-anime…' },
-  { value: 'gemini',      label: 'Google Gemini Imagen 4',   badge: 'De pago',  desc: 'Imagen 4 y modelos Gemini nativos. Requiere cuenta de pago en Google AI (billing activado).' },
-  { value: 'fal',         label: 'Fal.ai',                   badge: 'De pago',  desc: 'FLUX.1-schnell, FLUX.1-dev, SD3… ~$0.003/img. 5 $ de créditos al registrarse.' },
+  { value: 'comfyui',      label: 'ComfyUI (local)',          badge: 'Local',    desc: 'Máximo control y calidad. Requiere instalación local. Soporta FaceID.' },
+  { value: 'bzcomfy',      label: 'bzComfy (remoto)',         badge: 'Local',    desc: 'ComfyUI remoto vía bzComfy proxy. Usa el token M2M para conectarse desde el VPS. Soporta FaceID.' },
+  { value: 'pollinations', label: 'Pollinations.ai',          badge: 'Gratis',   desc: 'Completamente gratis y sin API key. FLUX.1, flux-realism, flux-anime…' },
+  { value: 'gemini',       label: 'Google Gemini Imagen 4',   badge: 'De pago',  desc: 'Imagen 4 y modelos Gemini nativos. Requiere cuenta de pago en Google AI (billing activado).' },
+  { value: 'fal',          label: 'Fal.ai',                   badge: 'De pago',  desc: 'FLUX.1-schnell, FLUX.1-dev, SD3… ~$0.003/img. 5 $ de créditos al registrarse.' },
 ];
 
 const POLLINATIONS_MODELS = [
@@ -2775,6 +2776,33 @@ function ImageProviderSection({
         </div>
       )}
 
+      {selected === 'bzcomfy' && (
+        <div className="space-y-3">
+          <Input
+            label="URL de bzComfy"
+            value={draft.bzComfyUrl ?? 'https://bzcomfy.javierbenzo.com'}
+            onChange={(e) => update('bzComfyUrl', e.target.value)}
+            placeholder="https://bzcomfy.tudominio.com"
+            hint="URL pública del servidor bzComfy (con Cloudflare Tunnel o similar)."
+          />
+          <Input
+            label="API Token (M2M)"
+            value={draft.bzComfyApiToken ?? ''}
+            onChange={(e) => update('bzComfyApiToken', e.target.value || null)}
+            placeholder="trocomocho20KIKIloco"
+            hint="El mismo apiToken configurado en bzComfy/config.json. Se envía como Bearer token."
+            type="password"
+          />
+          <Input
+            label="Workflow por defecto"
+            value={draft.bzComfyWorkflow ?? ''}
+            onChange={(e) => update('bzComfyWorkflow', e.target.value)}
+            placeholder="image_z_image_turbo"
+            hint="Nombre del workflow (sin _api.json). Debe existir en data/comfy-workflows/ del equipo con bzComfy."
+          />
+        </div>
+      )}
+
       {selected === 'pollinations' && (
         <div className="space-y-3">
           <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 px-3 py-2 text-xs text-emerald-300 leading-relaxed">
@@ -2862,9 +2890,9 @@ function ImageProviderSection({
       )}
 
       {/* FaceID notice for non-ComfyUI providers */}
-      {selected !== 'comfyui' && (
+      {selected !== 'comfyui' && selected !== 'bzcomfy' && (
         <div className="rounded-lg border border-border bg-white/3 px-3 py-2 text-xs text-text-muted leading-relaxed">
-          ℹ️ FaceID (generación con imagen de referencia) solo está disponible con ComfyUI local. Con el proveedor actual, la función de "Inspiración" y el modo BETA generarán imágenes usando únicamente la descripción de texto.
+          ℹ️ FaceID (generación con imagen de referencia) solo está disponible con ComfyUI (local o bzComfy). Con el proveedor actual, la función de "Inspiración" y el modo BETA generarán imágenes usando únicamente la descripción de texto.
         </div>
       )}
     </div>
