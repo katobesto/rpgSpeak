@@ -40,6 +40,10 @@ export async function buildApp(): Promise<FastifyInstance> {
     // Increase keep-alive so long TTS synthesis requests don't get cut mid-flight
     connectionTimeout: 0,      // no connection timeout
     keepAliveTimeout: 300_000, // 5 min keep-alive
+    // Raise body limit to 4 GB — needed for backup/restore uploads.
+    // The default 1 MB limit blocks multipart uploads before @fastify/multipart
+    // even gets a chance to parse the stream (causes 413 Payload Too Large).
+    bodyLimit: 4 * 1024 * 1024 * 1024,
   });
 
   // ─── Plugins ────────────────────────────────────────────────────────────────
