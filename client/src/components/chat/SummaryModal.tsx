@@ -1,4 +1,5 @@
-import React, { useState, createPortal } from 'react';
+import React, { useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   X, RefreshCw, Trash2, Clock, BookOpen, Plus, ChevronDown, ChevronUp,
 } from 'lucide-react';
