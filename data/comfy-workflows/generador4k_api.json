@@ -91,7 +91,7 @@
   "28": {
     "inputs": {
       "megapixel": "2.0",
-      "aspect_ratio": "9:7 (Artful Horizon)",
+      "aspect_ratio": "5:7 (Balanced Portrait)",
       "divisible_by": "64",
       "custom_ratio": false,
       "custom_aspect_ratio": "1:1"
@@ -121,7 +121,7 @@
   "39": {
     "inputs": {
       "anything": [
-        "8",
+        "52",
         0
       ]
     },
@@ -177,6 +177,36 @@
       "title": "🧩  Z-Image Lora Loader"
     }
   },
+  "51": {
+    "inputs": {
+      "rgthree_comparer": {
+        "images": [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_liggz_00001_.png&type=temp&subfolder=&rand=0.45319735837838326"
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_liggz_00002_.png&type=temp&subfolder=&rand=0.17764527112256268"
+          }
+        ]
+      },
+      "image_a": [
+        "52",
+        0
+      ],
+      "image_b": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "Image Comparer (rgthree)",
+    "_meta": {
+      "title": "🆚  Compare (Color Graded Image vs. RAW Image)"
+    }
+  },
   "52": {
     "inputs": {
       "temperature": 0,
@@ -214,12 +244,12 @@
           {
             "name": "A",
             "selected": true,
-            "url": "/api/view?filename=rgthree.compare._temp_pqbzf_00017_.png&type=temp&subfolder=&rand=0.45782550353672913"
+            "url": "/api/view?filename=rgthree.compare._temp_rqjsk_00001_.png&type=temp&subfolder=&rand=0.8636281730623673"
           },
           {
             "name": "B",
             "selected": true,
-            "url": "/api/view?filename=rgthree.compare._temp_pqbzf_00018_.png&type=temp&subfolder=&rand=0.6793445496688328"
+            "url": "/api/view?filename=rgthree.compare._temp_rqjsk_00002_.png&type=temp&subfolder=&rand=0.872065729634015"
           }
         ]
       },
@@ -250,9 +280,9 @@
   "91": {
     "inputs": {
       "upscale_method": "lanczos",
-      "scale_by": 0.8,
+      "scale_by": 0.5,
       "image": [
-        "243:241",
+        "99",
         0
       ]
     },
@@ -264,11 +294,11 @@
   "92": {
     "inputs": {
       "model": "seedvr2_ema_7b-Q4_K_M.gguf",
-      "device": "mps",
+      "device": "cuda:0",
       "blocks_to_swap": 0,
       "swap_io_components": false,
-      "offload_device": "mps",
-      "cache_model": true,
+      "offload_device": "cpu",
+      "cache_model": false,
       "attention_mode": "sdpa"
     },
     "class_type": "SeedVR2LoadDiTModel",
@@ -279,7 +309,7 @@
   "93": {
     "inputs": {
       "model": "ema_vae_fp16.safetensors",
-      "device": "mps",
+      "device": "cuda:0",
       "encode_tiled": true,
       "encode_tile_size": 1024,
       "encode_tile_overlap": 128,
@@ -287,8 +317,8 @@
       "decode_tile_size": 1024,
       "decode_tile_overlap": 128,
       "tile_debug": "false",
-      "offload_device": "mps",
-      "cache_model": true
+      "offload_device": "cpu",
+      "cache_model": false
     },
     "class_type": "SeedVR2LoadVAEModel",
     "_meta": {
@@ -297,9 +327,9 @@
   },
   "94": {
     "inputs": {
-      "seed": 3638370519,
+      "seed": 763828063,
       "resolution": 2560,
-      "max_resolution": 4080,
+      "max_resolution": 4096,
       "batch_size": 1,
       "uniform_batch_size": false,
       "color_correction": "lab",
@@ -307,7 +337,7 @@
       "prepend_frames": 0,
       "input_noise_scale": 0,
       "latent_noise_scale": 0,
-      "offload_device": "mps",
+      "offload_device": "cpu",
       "enable_debug": false,
       "image": [
         "91",
@@ -327,17 +357,100 @@
       "title": "⬆️  SeedVR2 Upscaler"
     }
   },
+  "96": {
+    "inputs": {
+      "strength": 0.5,
+      "use_gpu": false,
+      "images": [
+        "94",
+        0
+      ]
+    },
+    "class_type": "FastUnsharpSharpen",
+    "_meta": {
+      "title": "🎯 Fast Unsharp Sharpen"
+    }
+  },
+  "97": {
+    "inputs": {
+      "grain_intensity": 0.01,
+      "saturation_mix": 0.2,
+      "batch_size": 4,
+      "images": [
+        "96",
+        0
+      ]
+    },
+    "class_type": "FastFilmGrain",
+    "_meta": {
+      "title": "🎞️ Fast Film Grain"
+    }
+  },
+  "98": {
+    "inputs": {
+      "anything": [
+        "243:241",
+        0
+      ]
+    },
+    "class_type": "easy cleanGpuUsed",
+    "_meta": {
+      "title": "🧹  Clean VRAM"
+    }
+  },
+  "99": {
+    "inputs": {
+      "anything": [
+        "98",
+        0
+      ]
+    },
+    "class_type": "easy clearCacheAll",
+    "_meta": {
+      "title": "🧹  Clear Cache"
+    }
+  },
   "100": {
     "inputs": {
       "filename_prefix": "Z-Image",
       "images": [
-        "94",
+        "97",
         0
       ]
     },
     "class_type": "SaveImage",
     "_meta": {
       "title": "💾  Save Final Image"
+    }
+  },
+  "101": {
+    "inputs": {
+      "rgthree_comparer": {
+        "images": [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_geepm_00017_.png&type=temp&subfolder=&rand=0.17818308137857197"
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_geepm_00018_.png&type=temp&subfolder=&rand=0.078146904572443"
+          }
+        ]
+      },
+      "image_a": [
+        "97",
+        0
+      ],
+      "image_b": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "Image Comparer (rgthree)",
+    "_meta": {
+      "title": "🆚  Compare (SeedVR2 Upscale vs. RAW Image)"
     }
   },
   "104": {
@@ -364,7 +477,7 @@
   },
   "175": {
     "inputs": {
-      "text": "cinematic photography, dimly lit rustic tavern interior, wooden beams, stone fireplace with dying embers, flickering candlelight on worn tables, a window showing distant crimson glow on horizon, tense atmosphere, | in the center, Meira, demihuman cat woman, nude, youthful sensual body, lithe feline figure, long silky hair, cat ears on head, green feline eyes with slit pupils, playful mischievous smirk, slender cat tail curling behind her, arms slightly raised as if sniffing the air, delighted expression, standing near the tavern door | on the left, Lala, slender elf archer, nude, small breasts, graceful lithe physique, blonde hair, large green eyes with hint of caution, light freckles on cheeks, pretty smile turned wary, both hands on her hips in a defiant stance, wooden longbow strapped across her back, one foot forward, alert pose | on the right, Elara, ancient vampire princess, nude, pale alabaster skin, luminous violet eyes with calculating gaze, long midnight silk hair flowing over shoulders, regal aristocratic features, faint enigmatic smile, standing tall with commanding presence, one hand resting on her hip, looking toward the window with predatory grace, shadows pooling around her | moody chiaroscuro lighting, warm firelight contrasting cool blue moonlight and crimson glow, soft shadows, high detail, intricate textures, hyper-realistic fantasy portrait, masterpiece, 8k resolution, ethereal yet tense nocturnal ambiance, sensual and eerie atmosphere",
+      "text": "Retrato cyberpunk ultrarrealista de una impresionante mujer pelirroja, piel pálida con sutiles pecas, intensos ojos color esmeralda, labios brillantes, expresión confiada y seductora, cabeza ligeramente inclinada, postura sensual. Atuendo futurista muy ajustado con tejido de alta tecnología, cuero y detalles cromados, perfectamente ceñido, acentuando las curvas. Ciudad cyberpunk iluminada con neón de noche, carteles holográficos, reflejos de lluvia, luces vibrantes magenta y cian, contraste cinematográfico. Iluminación dramática de contorno, luz principal suave en el rostro, profundidad de campo reducida, enfoque extremadamente nítido, fotorrealismo 8K, alto rango dinámico, textura de piel hiper detallada, hebras de cabello realistas, editorial de moda cyberpunk, imagen impactante, audaz e icónica.",
       "clip": [
         "43",
         1
@@ -408,60 +521,6 @@
       "title": "🪜  Detailers Steps"
     }
   },
-  "245": {
-    "inputs": {
-      "images": [
-        "94",
-        0
-      ]
-    },
-    "class_type": "PreviewImage",
-    "_meta": {
-      "title": "Vista previa de imagen"
-    }
-  },
-  "246": {
-    "inputs": {
-      "compare_view": {
-        "__value__": [
-          "",
-          ""
-        ]
-      },
-      "image_a": [
-        "94",
-        0
-      ]
-    },
-    "class_type": "ImageCompare",
-    "_meta": {
-      "title": "Comparar Imágenes"
-    }
-  },
-  "247": {
-    "inputs": {
-      "compare_view": {
-        "beforeImages": [
-          "/api/view?filename=comfy.compare.a_temp_yzbcp_00001_.png&subfolder=&type=temp&rand=0.8276781806457154"
-        ],
-        "afterImages": [
-          "/api/view?filename=comfy.compare.b_temp_yzbcp_00001_.png&subfolder=&type=temp&rand=0.8276781806457154"
-        ]
-      },
-      "image_a": [
-        "52",
-        0
-      ],
-      "image_b": [
-        "8",
-        0
-      ]
-    },
-    "class_type": "ImageCompare",
-    "_meta": {
-      "title": "Comparar Imágenes"
-    }
-  },
   "240:238": {
     "inputs": {
       "model_name": "bbox/face_yolov8m.pt"
@@ -476,7 +535,7 @@
       "guide_size": 512,
       "guide_size_for": false,
       "max_size": 1024,
-      "seed": 380476910734587,
+      "seed": 333350196358097,
       "steps": [
         "244",
         0
@@ -556,7 +615,7 @@
       "guide_size": 512,
       "guide_size_for": false,
       "max_size": 1024,
-      "seed": 995187575453981,
+      "seed": 1046551866712028,
       "steps": [
         "244",
         0
@@ -627,7 +686,7 @@
       "guide_size": 512,
       "guide_size_for": false,
       "max_size": 1024,
-      "seed": 383813605319974,
+      "seed": 162307267487215,
       "steps": [
         "244",
         0
