@@ -881,8 +881,17 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
         });
 
       } else {
-        // Non-progressive workflow
-        const result = await comfyProvider.generate({ prompt: sceneDescription, workflowName });
+        // Non-progressive workflow — use generateWithProgress if available (e.g. bzComfy)
+        const anyProvider = comfyProvider as { generateWithProgress?: Function };
+        const result = anyProvider.generateWithProgress
+          ? await anyProvider.generateWithProgress(
+              { prompt: sceneDescription, workflowName },
+              (evt: { type: string; value?: number; max?: number; nodeId?: string; nodeName?: string }) => {
+                if (evt.type === 'progress') send({ type: 'progress', value: evt.value, max: evt.max });
+                else if (evt.type === 'node') send({ type: 'node', nodeId: evt.nodeId, nodeName: evt.nodeName });
+              },
+            )
+          : await comfyProvider.generate({ prompt: sceneDescription, workflowName });
         const ext = path.extname(result.filename) || '.png';
         const savedFilename = `scene_${messageId.slice(0, 8)}${ext}`;
         fs.writeFileSync(path.join(scenesDir, savedFilename), result.buffer);

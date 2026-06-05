@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { X, Loader, Wand2, Image as ImageIcon, ChevronRight, User, AlertCircle, Minus, Plus, FlaskConical, Zap } from 'lucide-react';
 import { generateApi, streamSceneImage } from '../../api/generate.ts';
+import { settingsApi } from '../../api/settings.ts';
 import { useAuthStore } from '../../stores/auth.store.ts';
 import { useChatStore } from '../../stores/chat.store.ts';
 import { Avatar } from '../ui/Avatar.tsx';
-import type { Character } from '@rpgspeak/shared';
+import type { Character, BzWorkflow } from '@rpgspeak/shared';
 
 const WORKFLOWS: { id: string; label: string; description: string; is4k?: boolean }[] = [
   { id: 'image_z_image_turbo', label: 'Estándar',    description: 'Rápido · ~30s' },
@@ -117,9 +118,33 @@ export function SceneDebugModal({
   const [statusMessage,   setStatusMessage]   = useState('');
   const sseCleanupRef = useRef<(() => void) | null>(null);
 
+  // ── Settings + bzComfy workflow list ─────────────────────────────────────
+  const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: settingsApi.get });
+  const isBzComfy = settings?.imageProvider === 'bzcomfy';
+  const { data: bzWorkflows = [] } = useQuery<BzWorkflow[]>({
+    queryKey: ['bzcomfy-workflows'],
+    queryFn: settingsApi.bzComfyWorkflows,
+    enabled: isBzComfy,
+    staleTime: 60_000,
+  });
+
+  // Effective workflow list — bzComfy remote list or local hardcoded
+  type WorkflowOption = { id: string; label: string; description: string; is4k?: boolean };
+  const workflowOptions: WorkflowOption[] = isBzComfy
+    ? bzWorkflows.map((w) => ({ id: w.id, label: w.label, description: w.hasImageInput ? 'Con imagen de referencia' : '' }))
+    : WORKFLOWS;
+
   // ── Workflow selector ─────────────────────────────────────────────────────
-  const defaultWorkflow = initialWorkflow ?? WORKFLOWS[0].id;
+  const defaultWorkflow = initialWorkflow
+    ?? (isBzComfy ? (settings?.bzComfyWorkflow || bzWorkflows[0]?.id || '') : WORKFLOWS[0].id);
   const [selectedWorkflow, setSelectedWorkflow] = useState(defaultWorkflow);
+
+  // When bzComfy workflows load, auto-select the configured default if nothing selected
+  useEffect(() => {
+    if (isBzComfy && bzWorkflows.length > 0 && !selectedWorkflow) {
+      setSelectedWorkflow(settings?.bzComfyWorkflow || bzWorkflows[0].id);
+    }
+  }, [isBzComfy, bzWorkflows.length]);
 
   // ── BETA: FaceID reference ────────────────────────────────────────────────
   const [useFaceRef,      setUseFaceRef]      = useState(false);
@@ -525,8 +550,8 @@ export function SceneDebugModal({
               <div className="border-t border-border" />
               <section className="space-y-2">
                 <p className="text-[11px] font-semibold text-text-secondary">Motor de imagen</p>
-                <div className="flex gap-2">
-                  {WORKFLOWS.map((wf) => (
+                <div className="flex flex-wrap gap-2">
+                  {workflowOptions.map((wf) => (
                     <button
                       key={wf.id}
                       onClick={() => setSelectedWorkflow(wf.id)}
@@ -538,9 +563,12 @@ export function SceneDebugModal({
                     >
                       {wf.is4k ? <Zap size={11} /> : <ImageIcon size={11} />}
                       <span className="font-medium">{wf.label}</span>
-                      <span className="text-[10px] opacity-70">{wf.description}</span>
+                      {wf.description && <span className="text-[10px] opacity-70">{wf.description}</span>}
                     </button>
                   ))}
+                  {isBzComfy && bzWorkflows.length === 0 && (
+                    <span className="text-xs text-text-muted italic">Cargando workflows…</span>
+                  )}
                 </div>
               </section>
             </>
@@ -663,7 +691,9 @@ export function SceneDebugModal({
                       ? <><FlaskConical size={12} /> Generar (BETA)</>
                       : selectedWorkflow === 'generador4k'
                         ? <><Zap size={12} /> Generar 4K</>
-                        : <><ImageIcon size={12} /> Generar imagen</>}
+                        : isBzComfy
+                          ? <><ImageIcon size={12} /> Generar con bzComfy</>
+                          : <><ImageIcon size={12} /> Generar imagen</>}
                 </button>
               </div>
             )}

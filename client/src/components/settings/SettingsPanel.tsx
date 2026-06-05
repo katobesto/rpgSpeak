@@ -11,7 +11,7 @@ import { Button } from '../ui/Button.tsx';
 import { Input, Textarea } from '../ui/Input.tsx';
 import { Plus, Trash2, RefreshCw, Check, X, Volume2, Wifi, WifiOff, Download, CheckCircle2, Play, Square, Loader, LogOut, Users, Shield, UserCircle, RotateCcw, AlertCircle, BarChart2, Zap, Camera, Sparkles, Wand2, FlaskConical, Upload, Link2, BookOpen, Pencil, DatabaseBackup, HardDriveDownload, HardDriveUpload, TriangleAlert } from 'lucide-react';
 import { backupApi } from '../../api/backup.ts';
-import type { Provider, CreateProviderDto, AppSettings, TtsSettings, TtsVoice } from '@rpgspeak/shared';
+import type { Provider, CreateProviderDto, AppSettings, TtsSettings, TtsVoice, BzWorkflow } from '@rpgspeak/shared';
 import { useUiStore } from '../../stores/ui.store.ts';
 import { useAuthStore } from '../../stores/auth.store.ts';
 import { conversationsApi } from '../../api/conversations.ts';
@@ -2706,6 +2706,32 @@ function ImageProviderSection({
   update: (k: keyof AppSettings, v: unknown) => void;
 }) {
   const selected = (draft.imageProvider ?? 'comfyui') as ImageProviderType;
+  const [bzWorkflows, setBzWorkflows] = React.useState<BzWorkflow[]>([]);
+  const [bzWorkflowsLoading, setBzWorkflowsLoading] = React.useState(false);
+  const [bzWorkflowsError, setBzWorkflowsError] = React.useState<string | null>(null);
+
+  async function loadBzWorkflows() {
+    setBzWorkflowsLoading(true);
+    setBzWorkflowsError(null);
+    try {
+      const list = await settingsApi.bzComfyWorkflows();
+      setBzWorkflows(list);
+      if (list.length > 0 && !draft.bzComfyWorkflow) {
+        update('bzComfyWorkflow', list[0].id);
+      }
+    } catch (err) {
+      setBzWorkflowsError(err instanceof Error ? err.message : 'Error al conectar con bzComfy');
+    } finally {
+      setBzWorkflowsLoading(false);
+    }
+  }
+
+  // Auto-load when switching to bzcomfy
+  React.useEffect(() => {
+    if (selected === 'bzcomfy' && bzWorkflows.length === 0) {
+      loadBzWorkflows();
+    }
+  }, [selected]);
 
   return (
     <div className="space-y-4">
@@ -2793,13 +2819,45 @@ function ImageProviderSection({
             hint="El mismo apiToken configurado en bzComfy/config.json. Se envía como Bearer token."
             type="password"
           />
-          <Input
-            label="Workflow por defecto"
-            value={draft.bzComfyWorkflow ?? ''}
-            onChange={(e) => update('bzComfyWorkflow', e.target.value)}
-            placeholder="image_z_image_turbo"
-            hint="Nombre del workflow (sin _api.json). Debe existir en data/comfy-workflows/ del equipo con bzComfy."
-          />
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-text-secondary">Workflow por defecto</label>
+              <button
+                onClick={loadBzWorkflows}
+                disabled={bzWorkflowsLoading}
+                className="flex items-center gap-1 text-xs text-accent hover:text-accent-hover disabled:opacity-50"
+              >
+                <RefreshCw size={11} className={bzWorkflowsLoading ? 'animate-spin' : ''} />
+                Recargar
+              </button>
+            </div>
+            {bzWorkflows.length > 0 ? (
+              <select
+                value={draft.bzComfyWorkflow ?? ''}
+                onChange={(e) => update('bzComfyWorkflow', e.target.value)}
+                className="w-full bg-surface-2 border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+              >
+                <option value="">— Sin selección —</option>
+                {bzWorkflows.map((w) => (
+                  <option key={w.id} value={w.id}>{w.label}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                value={draft.bzComfyWorkflow ?? ''}
+                onChange={(e) => update('bzComfyWorkflow', e.target.value)}
+                placeholder="image_z_image_turbo"
+                className="w-full bg-surface-2 border border-border rounded-lg px-3 py-2 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+              />
+            )}
+            {bzWorkflowsError && (
+              <p className="text-xs text-red-400">{bzWorkflowsError} — escribe el nombre manualmente.</p>
+            )}
+            <p className="text-xs text-text-muted">
+              Nombre del workflow (sin _api.json). Pulsa "Recargar" para obtener la lista desde bzComfy.
+            </p>
+          </div>
         </div>
       )}
 

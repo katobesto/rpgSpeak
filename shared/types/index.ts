@@ -545,3 +545,10 @@ export type CreateProviderDto = Omit<Provider, 'id' | 'createdAt' | 'updatedAt'>
 export type UpdateProviderDto = Partial<CreateProviderDto>;
 
 export type UpdateSettingsDto = Partial<AppSettings>;
+
+export interface BzWorkflow {
+  id: string;
+  label: string;
+  hasImageInput: boolean;
+  imageInputLabel: string | null;
+}

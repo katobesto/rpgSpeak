@@ -1,6 +1,6 @@
 import fs from 'fs';
 import path from 'path';
-import type { ImageProvider, ImageGenRequest, ImageGenResult } from '../image-provider.interface.js';
+import type { ImageProvider, ImageGenRequest, ImageGenResult, ImageProgressEvent } from '../image-provider.interface.js';
 
 interface BzImageInfo {
   filename: string;
@@ -18,6 +18,13 @@ export class BzComfyImageProvider implements ImageProvider {
   ) {}
 
   async generate(req: ImageGenRequest): Promise<ImageGenResult> {
+    return this.generateWithProgress(req, () => {});
+  }
+
+  async generateWithProgress(
+    req: ImageGenRequest,
+    onProgress: (evt: ImageProgressEvent) => void,
+  ): Promise<ImageGenResult> {
     const workflow = req.workflowName ?? this.defaultWorkflow;
     if (!workflow) {
       throw new Error(
@@ -25,7 +32,7 @@ export class BzComfyImageProvider implements ImageProvider {
       );
     }
     const promptId = await this.startGeneration(workflow, req.prompt, req.negativePrompt);
-    const info = await this.waitForImage(promptId);
+    const info = await this.waitForImage(promptId, onProgress);
     const buffer = await this.downloadImage(info);
     return { buffer, filename: info.filename };
   }
@@ -44,7 +51,7 @@ export class BzComfyImageProvider implements ImageProvider {
       req.negativePrompt,
       referenceImageName,
     );
-    const info = await this.waitForImage(promptId);
+    const info = await this.waitForImage(promptId, () => {});
     const buffer = await this.downloadImage(info);
     return { buffer, filename: info.filename };
   }
@@ -82,8 +89,8 @@ export class BzComfyImageProvider implements ImageProvider {
   }
 
   // Consumes bzComfy's SSE progress stream using Node.js native fetch.
-  // Events of interest: images (has the file info), done (generation complete), error.
-  private async waitForImage(promptId: string): Promise<BzImageInfo> {
+  // Forwards progress/node events via onProgress; resolves with the final image info.
+  private async waitForImage(promptId: string, onProgress: (evt: ImageProgressEvent) => void): Promise<BzImageInfo> {
     const url =
       `${this.baseUrl}/api/progress/${encodeURIComponent(promptId)}` +
       `?token=${encodeURIComponent(this.apiToken)}`;
@@ -111,7 +118,13 @@ export class BzComfyImageProvider implements ImageProvider {
           let evt: { type: string; data: unknown };
           try { evt = JSON.parse(line.slice(6)); } catch { continue; }
 
-          if (evt.type === 'images') {
+          if (evt.type === 'progress') {
+            const d = evt.data as { step?: number; total?: number };
+            onProgress({ type: 'progress', value: d.step ?? 0, max: d.total ?? 0 });
+          } else if (evt.type === 'executing') {
+            const d = evt.data as { node?: string; title?: string };
+            if (d.node) onProgress({ type: 'node', nodeId: d.node, nodeName: d.title || d.node });
+          } else if (evt.type === 'images') {
             const d = evt.data as { images?: BzImageInfo[] };
             if (d.images && d.images.length > 0) imageInfo = d.images[0];
           } else if (evt.type === 'done') {
