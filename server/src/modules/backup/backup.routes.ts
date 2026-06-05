@@ -38,18 +38,14 @@ async function performRestore(archivePath: string, app: FastifyInstance): Promis
     throw new Error('El archivo no contiene una carpeta data/ en la raíz.');
   }
 
-  // Atomic replace
-  const dataBak = DATA_DIR + '.bak';
-  if (fs.existsSync(dataBak)) fs.rmSync(dataBak, { recursive: true, force: true });
-  fs.renameSync(DATA_DIR, dataBak);
-  try {
-    fs.renameSync(extractedData, DATA_DIR);
-  } catch {
-    fs.renameSync(dataBak, DATA_DIR);
-    fs.cpSync(extractedData, DATA_DIR, { recursive: true, force: true });
-  }
+  // Copy extracted files over the existing data/ directory.
+  // We avoid renaming data/ itself because in Docker it can be a volume
+  // mount point (EBUSY) and SQLite WAL keeps .db-shm/.db-wal open.
+  // cpSync with force:true overwrites all files; extra files not in the
+  // backup are left in place (harmless for a restore scenario).
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  fs.cpSync(extractedData, DATA_DIR, { recursive: true, force: true });
 
-  try { fs.rmSync(dataBak,    { recursive: true, force: true }); } catch {}
   try { fs.rmSync(RESTORE_TMP, { recursive: true, force: true }); } catch {}
 
   app.log.info('[backup] Restore successful');
