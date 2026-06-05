@@ -3043,7 +3043,9 @@ function BackupSection() {
   const [confirming, setConfirming]     = useState(false);
   const [restoring, setRestoring]       = useState(false);
   const [restoreError, setRestoreError] = useState<string | null>(null);
-  const [restoreDone, setRestoreDone]   = useState(false);
+  const [restoreDone, setRestoreDone]       = useState(false);
+  const [restoreNeedsRestart, setRestoreNeedsRestart] = useState(false);
+  const [restoreMsg, setRestoreMsg]         = useState('');
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -3071,8 +3073,10 @@ function BackupSection() {
     setRestoring(true);
     setRestoreError(null);
     try {
-      await backupApi.restore(restoreFile);
+      const result = await backupApi.restore(restoreFile);
       setRestoreDone(true);
+      setRestoreNeedsRestart(result.requiresRestart);
+      setRestoreMsg(result.message);
     } catch (err) {
       setRestoreError(err instanceof Error ? err.message : 'Error al restaurar');
       setRestoring(false);
@@ -3233,9 +3237,19 @@ function BackupSection() {
             )}
           </div>
         ) : (
-          <div className="flex items-center gap-2 text-sm text-emerald-400">
-            <CheckCircle2 size={16} />
-            Restauración completada. El servidor se está reiniciando…
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm text-emerald-400">
+              <CheckCircle2 size={16} />
+              {restoreMsg || 'Restauración completada.'}
+            </div>
+            {restoreNeedsRestart && (
+              <div className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/8 px-3 py-2.5">
+                <TriangleAlert size={13} className="text-amber-400 flex-shrink-0 mt-0.5" />
+                <p className="text-[11px] text-amber-300 leading-relaxed">
+                  Estás en Docker. Ve a <strong>Coolify → tu aplicación → Restart</strong> para que los datos restaurados sean efectivos.
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>

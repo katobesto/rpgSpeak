@@ -119,12 +119,25 @@ export async function backupRoutes(app: FastifyInstance) {
       try { fs.rmSync(dataBak,   { recursive: true, force: true }); } catch {}
       try { fs.rmSync(RESTORE_TMP, { recursive: true, force: true }); } catch {}
 
-      app.log.info('[backup] Restore successful — restarting in 1 s');
+      app.log.info('[backup] Restore successful');
 
-      // Send success response before restarting
-      void reply.send({ success: true, message: 'Restauración completada. El servidor se reiniciará en 1 segundo.' });
+      // En Docker (/.dockerenv existe o COOLIFY_RESOURCE_UUID está presente)
+      // NO llamamos process.exit() porque el contenedor moriría antes de enviar
+      // la respuesta HTTP, dejando al cliente esperando eternamente.
+      // En PM2 (bare metal / VPS) sí reiniciamos para que PM2 recargue con los nuevos datos.
+      const isDocker = fs.existsSync('/.dockerenv') || !!process.env.COOLIFY_RESOURCE_UUID;
 
-      // Exit so PM2 auto-restarts with the new data
+      if (isDocker) {
+        app.log.info('[backup] Docker detected — not calling process.exit(), restart container manually');
+        return reply.send({
+          success: true,
+          message: 'Restauración completada. Reinicia el contenedor desde Coolify para que los cambios tengan efecto.',
+          requiresRestart: true,
+        });
+      }
+
+      // PM2: enviar respuesta y luego reiniciar el proceso
+      void reply.send({ success: true, message: 'Restauración completada. El servidor se reiniciará en 1 segundo.', requiresRestart: false });
       setTimeout(() => process.exit(0), 1000);
 
     } catch (err) {

@@ -27,9 +27,10 @@ export const backupApi = {
 
   /**
    * Uploads a .tar.gz backup archive to replace data/ on the server.
-   * After success the server restarts automatically (PM2).
+   * Returns requiresRestart=true when running in Docker (no auto-restart).
+   * Returns requiresRestart=false when running under PM2 (auto-restarts).
    */
-  async restore(file: File): Promise<void> {
+  async restore(file: File): Promise<{ requiresRestart: boolean; message: string }> {
     const form = new FormData();
     form.append('backup', file);
 
@@ -43,5 +44,8 @@ export const backupApi = {
       const err = await resp.json().catch(() => ({})) as Record<string, unknown>;
       throw new Error(String(err.error ?? `Error ${resp.status}`));
     }
+
+    const data = await resp.json() as { success: boolean; message: string; requiresRestart: boolean };
+    return { requiresRestart: data.requiresRestart ?? false, message: data.message };
   },
 };
