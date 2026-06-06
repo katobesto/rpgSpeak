@@ -126,8 +126,10 @@ const state = {
   generating: false,
   eventSource: null,
   hasProgress: false,
-  previewFrames: 0,     // binary preview frames received this generation
-  stepsSincePreview: 0, // progress steps without a preview frame
+  previewFrames: 0,       // binary preview frames received this generation
+  stepsSincePreview: 0,   // progress steps without a preview frame
+  lastImageFetchId: 0,    // increments on every 'images' event to detect stale fetches
+  finalImageFetchId: -1,  // fetchId of the server-confirmed final image (final:true)
   // Reference image
   workflows: [],
   currentWorkflow: null,
@@ -555,6 +557,8 @@ async function generate() {
 
   state.previewFrames = 0
   state.stepsSincePreview = 0
+  state.lastImageFetchId = 0
+  state.finalImageFetchId = -1
   setGenerating(true)
   clearStatus()
   resetViewer()
@@ -647,13 +651,23 @@ function handleEvent({ type, data }) {
 
     case 'images': {
       const img = data.images[0]
+      const fetchId = ++state.lastImageFetchId
+      // If the server marked this as the authoritative final image, lock it so
+      // any slower in-flight fetch for an intermediate frame cannot overwrite it.
+      if (data.final) state.finalImageFetchId = fetchId
       const url =
         `/api/image?filename=${encodeURIComponent(img.filename)}` +
         `&subfolder=${encodeURIComponent(img.subfolder || '')}` +
         `&type=${encodeURIComponent(img.type || 'output')}`
       apiFetch(url)
         .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob() })
-        .then(blob => showImage(URL.createObjectURL(blob), false))
+        .then(blob => {
+          // Discard if a newer fetch is already in flight (unless this IS the final).
+          const isFinal = state.finalImageFetchId === fetchId
+          if (isFinal || fetchId === state.lastImageFetchId) {
+            showImage(URL.createObjectURL(blob), false)
+          }
+        })
         .catch(err => showStatus(`Error cargando imagen: ${err.message}`, 'error'))
       break
     }

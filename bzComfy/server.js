@@ -599,13 +599,45 @@ app.post('/api/generate', async (req, res) => {
           break
         case 'executing':
           if (msg.data.node === null) {
-            push('done', {})
-            ws.close()
+            // Workflow complete — query ComfyUI history for the authoritative final image.
+            // This avoids race conditions and handles custom save nodes whose `executed`
+            // output doesn't include images (e.g. multi-pass workflows like generador4k).
+            ;(async () => {
+              try {
+                const histRes = await fetch(`${config.comfyUrl}/history/${prompt_id}`)
+                if (histRes.ok) {
+                  const hist = await histRes.json()
+                  const outputs = hist[prompt_id]?.outputs ?? {}
+                  // Sort node IDs numerically to find the last save node.
+                  // Prefer nodes whose title contains "final".
+                  const nodeIds = Object.keys(outputs).sort((a, b) => Number(a) - Number(b))
+                  let finalImages = null
+                  let finalFromTitle = false
+                  for (const nodeId of nodeIds) {
+                    const imgs = outputs[nodeId]?.images
+                    if (!imgs?.length) continue
+                    const title = (session.nodeMap[nodeId] || '').toLowerCase()
+                    if (title.includes('final')) {
+                      finalImages = imgs
+                      finalFromTitle = true
+                    } else if (!finalFromTitle) {
+                      // Keep the last node with images as fallback
+                      finalImages = imgs
+                    }
+                  }
+                  if (finalImages) push('images', { images: finalImages, final: true })
+                }
+              } catch {}
+              push('done', {})
+              ws.close()
+            })()
           } else {
             push('executing', { node: msg.data.node, title: session.nodeMap[msg.data.node] || msg.data.node })
           }
           break
         case 'executed':
+          // Push intermediate images for live preview during multi-pass workflows.
+          // The authoritative final image is pushed from history when the workflow completes.
           if (msg.data.output?.images?.length > 0) push('images', { images: msg.data.output.images })
           break
         case 'execution_error':
