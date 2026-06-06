@@ -128,8 +128,8 @@ const state = {
   hasProgress: false,
   previewFrames: 0,       // binary preview frames received this generation
   stepsSincePreview: 0,   // progress steps without a preview frame
-  lastImageFetchId: 0,    // increments on every 'images' event to detect stale fetches
-  finalImageFetchId: -1,  // fetchId of the server-confirmed final image (final:true)
+  pendingFinalImage: null,   // image info to fetch+show when done fires
+  pendingFinalLocked: false, // true once a final:true image has been identified
   // Reference image
   workflows: [],
   currentWorkflow: null,
@@ -557,8 +557,8 @@ async function generate() {
 
   state.previewFrames = 0
   state.stepsSincePreview = 0
-  state.lastImageFetchId = 0
-  state.finalImageFetchId = -1
+  state.pendingFinalImage = null
+  state.pendingFinalLocked = false
   setGenerating(true)
   clearStatus()
   resetViewer()
@@ -651,32 +651,41 @@ function handleEvent({ type, data }) {
 
     case 'images': {
       const img = data.images[0]
-      const fetchId = ++state.lastImageFetchId
-      // If the server marked this as the authoritative final image, lock it so
-      // any slower in-flight fetch for an intermediate frame cannot overwrite it.
-      if (data.final) state.finalImageFetchId = fetchId
-      const url =
-        `/api/image?filename=${encodeURIComponent(img.filename)}` +
-        `&subfolder=${encodeURIComponent(img.subfolder || '')}` +
-        `&type=${encodeURIComponent(img.type || 'output')}`
-      apiFetch(url)
-        .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob() })
-        .then(blob => {
-          const isFinal = state.finalImageFetchId === fetchId
-          // Only show if this is the confirmed final image, OR if no final was ever
-          // declared AND this is still the last fetch in flight.
-          // Without the second guard, a "compare" node that fires after "Save Final Image"
-          // would win (smaller file, resolves first) and overwrite the 4K result.
-          const isLastWithNoFinal = fetchId === state.lastImageFetchId && state.finalImageFetchId === -1
-          if (isFinal || isLastWithNoFinal) {
-            showImage(URL.createObjectURL(blob), false)
-          }
-        })
-        .catch(err => showStatus(`Error cargando imagen: ${err.message}`, 'error'))
+      // Track which image to show when done fires.
+      // Once a final:true image is identified, ignore all later events.
+      if (!state.pendingFinalLocked) {
+        state.pendingFinalImage = img
+        if (data.final) state.pendingFinalLocked = true
+      }
+      // Show intermediate images immediately for live feedback, but only
+      // while we haven't yet identified the definitive final image.
+      // This prevents the compare node (runs after final save) from showing.
+      if (!state.pendingFinalLocked) {
+        const url =
+          `/api/image?filename=${encodeURIComponent(img.filename)}` +
+          `&subfolder=${encodeURIComponent(img.subfolder || '')}` +
+          `&type=${encodeURIComponent(img.type || 'output')}`
+        apiFetch(url)
+          .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob() })
+          .then(blob => showImage(URL.createObjectURL(blob), false))
+          .catch(err => showStatus(`Error cargando imagen: ${err.message}`, 'error'))
+      }
       break
     }
 
     case 'done':
+      // Fetch the definitive final image exactly once — no race conditions.
+      if (state.pendingFinalImage) {
+        const img = state.pendingFinalImage
+        const url =
+          `/api/image?filename=${encodeURIComponent(img.filename)}` +
+          `&subfolder=${encodeURIComponent(img.subfolder || '')}` +
+          `&type=${encodeURIComponent(img.type || 'output')}`
+        apiFetch(url)
+          .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob() })
+          .then(blob => showImage(URL.createObjectURL(blob), false))
+          .catch(err => showStatus(`Error cargando imagen final: ${err.message}`, 'error'))
+      }
       finishGeneration()
       break
 
