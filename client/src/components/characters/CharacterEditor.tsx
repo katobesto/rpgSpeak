@@ -5,7 +5,7 @@ import { providersApi } from '../../api/providers.ts';
 import { Modal } from '../ui/Modal.tsx';
 import { Button } from '../ui/Button.tsx';
 import { Input, Textarea } from '../ui/Input.tsx';
-import { Plus, Trash2, Sword, Sparkles, Image, Star, Loader2, Wand2 } from 'lucide-react';
+import { Plus, Trash2, Sword, Sparkles, Image, Star, Loader2, Wand2, Copy, Check } from 'lucide-react';
 import type { Character, CreateCharacterDto, RpgStats } from '@rpgspeak/shared';
 import { useChatStore } from '../../stores/chat.store.ts';
 import { AvatarCropModal } from './AvatarCropModal.tsx';
@@ -70,6 +70,16 @@ export function CharacterEditor({ character, open, onClose }: CharacterEditorPro
   const [newStatVal, setNewStatVal] = useState('');
   const [generatingDesc, setGeneratingDesc] = useState(false);
   const [descError, setDescError] = useState<string | null>(null);
+  const [descCopied, setDescCopied] = useState(false);
+
+  function copyImageDesc() {
+    const text = form.imageDescription?.trim();
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      setDescCopied(true);
+      setTimeout(() => setDescCopied(false), 1500);
+    });
+  }
   const [generatingComfy, setGeneratingComfy] = useState(false);
   const [comfyError, setComfyError] = useState<string | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -322,6 +332,16 @@ export function CharacterEditor({ character, open, onClose }: CharacterEditorPro
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-medium text-text-secondary">Descripción para generador de imágenes</label>
+                {form.imageDescription?.trim() && (
+                  <button
+                    onClick={copyImageDesc}
+                    className="flex items-center gap-1 text-xs text-text-muted hover:text-text-primary transition-colors"
+                    title="Copiar prompt"
+                  >
+                    {descCopied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                    {descCopied ? 'Copiado' : 'Copiar'}
+                  </button>
+                )}
               </div>
               <Textarea
                 value={form.imageDescription ?? ''}

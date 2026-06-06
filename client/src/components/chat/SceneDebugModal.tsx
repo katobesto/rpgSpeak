@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { X, Loader, Wand2, Image as ImageIcon, ChevronRight, User, AlertCircle, Minus, Plus, FlaskConical, Zap } from 'lucide-react';
+import { X, Loader, Wand2, Image as ImageIcon, ChevronRight, User, AlertCircle, Minus, Plus, FlaskConical, Zap, Copy, Check } from 'lucide-react';
 import { generateApi, streamSceneImage } from '../../api/generate.ts';
 import { settingsApi } from '../../api/settings.ts';
 import { useAuthStore } from '../../stores/auth.store.ts';
@@ -116,7 +116,16 @@ export function SceneDebugModal({
   const [stepValue,       setStepValue]       = useState(0);    // steps within this node
   const [stepMax,         setStepMax]         = useState(0);
   const [statusMessage,   setStatusMessage]   = useState('');
+  const [promptCopied,    setPromptCopied]    = useState(false);
   const sseCleanupRef = useRef<(() => void) | null>(null);
+
+  function copyPrompt() {
+    if (!imagePrompt.trim()) return;
+    navigator.clipboard.writeText(imagePrompt).then(() => {
+      setPromptCopied(true);
+      setTimeout(() => setPromptCopied(false), 1500);
+    });
+  }
 
   // ── Settings + bzComfy workflow list ─────────────────────────────────────
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: settingsApi.get });
@@ -520,7 +529,19 @@ export function SceneDebugModal({
             <>
               <div className="border-t border-border" />
               <section className="space-y-2">
-                <SectionLabel n={3} text="Prompt de imagen resultante" />
+                <div className="flex items-center justify-between">
+                  <SectionLabel n={3} text="Prompt de imagen resultante" />
+                  {imagePrompt.trim() && (
+                    <button
+                      onClick={copyPrompt}
+                      className="flex items-center gap-1 text-xs text-text-muted hover:text-text-primary transition-colors"
+                      title="Copiar prompt"
+                    >
+                      {promptCopied ? <Check size={12} className="text-emerald-400" /> : <Copy size={12} />}
+                      {promptCopied ? 'Copiado' : 'Copiar'}
+                    </button>
+                  )}
+                </div>
                 <p className="text-[11px] text-text-muted">
                   Prompt que se enviará a ComfyUI. Puedes editarlo antes de generar.
                 </p>
