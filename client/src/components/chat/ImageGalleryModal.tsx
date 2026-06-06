@@ -134,13 +134,17 @@ function GalleryLightbox({ image, index, total, onClose, onPrev, onNext, onJumpT
 // ─── ImageGalleryModal ────────────────────────────────────────────────────────
 
 export function ImageGalleryModal({ messages, onClose, onJumpTo }: ImageGalleryModalProps) {
-  const images: GalleryImage[] = messages
-    .map((m, idx) => ({
-      messageId:  m.id,
-      messageIdx: idx,
-      imageUrl:   (m.metadata?.sceneImageUrl as string | undefined) ?? '',
-    }))
-    .filter((g) => !!g.imageUrl);
+  const images: GalleryImage[] = messages.flatMap((m, idx) => {
+    const meta = m.metadata ?? {};
+    if (Array.isArray((meta as any).sceneImages)) {
+      return ((meta as any).sceneImages as Array<{ url: string; pending?: boolean }>)
+        .filter((i) => !i.pending && !!i.url)
+        .map((i) => ({ messageId: m.id, messageIdx: idx, imageUrl: i.url }));
+    }
+    const legacyUrl = (meta as any).sceneImageUrl as string | undefined;
+    if (legacyUrl) return [{ messageId: m.id, messageIdx: idx, imageUrl: legacyUrl }];
+    return [];
+  });
 
   const [lightboxIdx, setLightboxIdx] = useState<number | null>(null);
 
@@ -203,7 +207,7 @@ export function ImageGalleryModal({ messages, onClose, onJumpTo }: ImageGalleryM
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
               {images.map((img, i) => (
                 <div
-                  key={img.messageId}
+                  key={`${img.messageId}_${i}`}
                   className="group relative aspect-square rounded-xl overflow-hidden border border-border cursor-pointer hover:border-accent/50 transition-all"
                   onClick={() => setLightboxIdx(i)}
                 >
