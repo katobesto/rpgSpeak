@@ -599,51 +599,20 @@ app.post('/api/generate', async (req, res) => {
           break
         case 'executing':
           if (msg.data.node === null) {
-            // Workflow complete — query ComfyUI history for the authoritative final image.
-            // This avoids race conditions and handles custom save nodes whose `executed`
-            // output doesn't include images (e.g. multi-pass workflows like generador4k).
-            ;(async () => {
-              try {
-                const histRes = await fetch(`${config.comfyUrl}/history/${prompt_id}`)
-                if (histRes.ok) {
-                  const hist = await histRes.json()
-                  const outputs = hist[prompt_id]?.outputs ?? {}
-                  // Sort node IDs numerically to find the correct final save node.
-                  // A node is considered "final" if:
-                  //   • its display title (_meta.title) contains "final", OR
-                  //   • any of its output filenames start with "final" (filename_prefix in SaveImage)
-                  // If no "final" node is found, fall back to the last node with images.
-                  const nodeIds = Object.keys(outputs).sort((a, b) => Number(a) - Number(b))
-                  let finalImages = null
-                  let finalFromTitle = false
-                  for (const nodeId of nodeIds) {
-                    const imgs = outputs[nodeId]?.images
-                    if (!imgs?.length) continue
-                    const title = (session.nodeMap[nodeId] || '').toLowerCase()
-                    const filenameHasFinal = imgs.some(img =>
-                      img.filename?.toLowerCase().startsWith('final')
-                    )
-                    if (title.includes('final') || filenameHasFinal) {
-                      finalImages = imgs
-                      finalFromTitle = true
-                    } else if (!finalFromTitle) {
-                      finalImages = imgs
-                    }
-                  }
-                  if (finalImages) push('images', { images: finalImages, final: true })
-                }
-              } catch {}
-              push('done', {})
-              ws.close()
-            })()
+            push('done', {})
+            ws.close()
           } else {
             push('executing', { node: msg.data.node, title: session.nodeMap[msg.data.node] || msg.data.node })
           }
           break
         case 'executed':
-          // Push intermediate images for live preview during multi-pass workflows.
-          // The authoritative final image is pushed from history when the workflow completes.
-          if (msg.data.output?.images?.length > 0) push('images', { images: msg.data.output.images })
+          if (msg.data.output?.images?.length > 0) {
+            const imgs = msg.data.output.images
+            // Mark as final if any output filename starts with "final" (SaveImage filename_prefix).
+            // This is detected synchronously from the WS stream — no async history fetch needed.
+            const isFinal = imgs.some(img => img.filename?.toLowerCase().startsWith('final'))
+            push('images', { images: imgs, final: isFinal || undefined })
+          }
           break
         case 'execution_error':
           push('error', { message: msg.data.exception_message || 'Execution error' })

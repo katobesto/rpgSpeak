@@ -104,6 +104,7 @@ export class BzComfyImageProvider implements ImageProvider {
     const decoder = new TextDecoder();
     let buf = '';
     let imageInfo: BzImageInfo | null = null;
+    let finalImageLocked = false;  // once final:true arrives, don't overwrite with later events
 
     try {
       while (true) {
@@ -128,8 +129,11 @@ export class BzComfyImageProvider implements ImageProvider {
             const d = evt.data as { image?: string };
             if (d.image) onProgress({ type: 'preview', dataUrl: d.image });
           } else if (evt.type === 'images') {
-            const d = evt.data as { images?: BzImageInfo[] };
-            if (d.images && d.images.length > 0) imageInfo = d.images[0];
+            const d = evt.data as { images?: BzImageInfo[]; final?: boolean };
+            if (d.images && d.images.length > 0 && !finalImageLocked) {
+              imageInfo = d.images[0];
+              if (d.final) finalImageLocked = true;
+            }
           } else if (evt.type === 'done') {
             if (!imageInfo) throw new Error('bzComfy: generación completa pero sin imagen');
             return imageInfo;
