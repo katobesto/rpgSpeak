@@ -290,6 +290,8 @@ export interface TtsSettings {
   temperature: number;
   /** Automatically play TTS for new AI messages */
   autoPlay: boolean;
+  /** Optional Bearer token for cloud/remote TTS services that require auth */
+  authToken?: string;
   /** Lista de sustituciones de texto para mejorar la pronunciación */
   replacements: TtsTextReplacement[];
 }

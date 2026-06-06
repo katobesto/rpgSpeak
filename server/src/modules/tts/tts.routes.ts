@@ -10,11 +10,15 @@ function ttsBaseUrl(): string {
   return (s.ttsSettings?.serviceUrl ?? 'http://localhost:8020').replace(/\/$/, '');
 }
 
-/** Fetch from the Python service with a timeout. */
+/** Fetch from the Python service with a timeout, adding auth header if configured. */
 async function fetchTts(path: string, init?: RequestInit & { timeoutMs?: number }) {
   const { timeoutMs = 120_000, ...rest } = init ?? {};
+  const token = settingsService.getAll().ttsSettings?.authToken;
+  const headers: Record<string, string> = { ...(rest.headers as Record<string, string> ?? {}) };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   return fetch(`${ttsBaseUrl()}${path}`, {
     ...rest,
+    headers,
     signal: AbortSignal.timeout(timeoutMs),
   });
 }

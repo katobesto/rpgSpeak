@@ -946,6 +946,17 @@ function VoiceSection({
                 <RefreshCw size={13} className={statusLoading ? 'animate-spin' : ''} />
               </button>
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-text-secondary">Token de autenticación <span className="text-text-muted font-normal">(solo servicios en la nube)</span></label>
+            <input
+              type="password"
+              value={tts.authToken ?? ''}
+              onChange={(e) => setTts({ authToken: e.target.value || undefined })}
+              className="w-full rounded-lg px-3 py-2 text-sm border border-border bg-transparent text-text-primary focus:outline-none focus:ring-1 focus:ring-accent font-mono"
+              placeholder="Bearer token — deja vacío para servicio local"
+              autoComplete="off"
+            />
             {status && (
               <div className={`flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-lg border ${
                 status.online ? 'border-green-500/30 bg-green-500/8 text-green-400' : 'border-red-500/30 bg-red-500/8 text-red-400'
