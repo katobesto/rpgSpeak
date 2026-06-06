@@ -160,9 +160,9 @@ function initImageInteraction() {
   }
 
   function updateCursor() {
-    if (dragging)                        { wrap.style.cursor = ‘grabbing’; return }
-    if (zoom > computeFitZoom() * 1.01)  { wrap.style.cursor = ‘grab’;     return }
-    wrap.style.cursor = ‘’
+    if (dragging)                        { wrap.style.cursor = 'grabbing'; return }
+    if (zoom > computeFitZoom() * 1.01)  { wrap.style.cursor = 'grab';     return }
+    wrap.style.cursor = ''
   }
 
   // Zoom toward the cursor position.
@@ -187,15 +187,15 @@ function initImageInteraction() {
   resetImageView = () => {
     zoom = computeFitZoom(); panX = 0; panY = 0
     apply()
-    wrap.style.cursor = ‘’
+    wrap.style.cursor = ''
   }
 
   // â”€â”€ Wheel: zoom at cursor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // On macOS, trackpad pinch fires as wheel with ctrlKey=true and deltaY â‰ˆ Â±1â€“10.
   // Regular mouse wheel has deltaY â‰ˆ Â±100 per notch.
   // We use a steeper base for pinch so a short gesture gives meaningful zoom.
-  //   Pinch  (ctrlKey): Math.pow(0.975, Î”y) â†’ ~7% per unit  â†’ natural on trackpad
-  //   Wheel  (normal) : Math.pow(0.999, Î”y) â†’ ~10% per notch â†’ unchanged
+  //   Pinch  (ctrlKey): Math.pow(0.975, Î”y) â†' ~7% per unit  â†' natural on trackpad
+  //   Wheel  (normal) : Math.pow(0.999, Î”y) â†' ~10% per notch â†' unchanged
   wrap.addEventListener('wheel', e => {
     if (img.classList.contains('hidden')) return
     e.preventDefault()
