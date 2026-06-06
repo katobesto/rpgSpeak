@@ -662,9 +662,13 @@ function handleEvent({ type, data }) {
       apiFetch(url)
         .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob() })
         .then(blob => {
-          // Discard if a newer fetch is already in flight (unless this IS the final).
           const isFinal = state.finalImageFetchId === fetchId
-          if (isFinal || fetchId === state.lastImageFetchId) {
+          // Only show if this is the confirmed final image, OR if no final was ever
+          // declared AND this is still the last fetch in flight.
+          // Without the second guard, a "compare" node that fires after "Save Final Image"
+          // would win (smaller file, resolves first) and overwrite the 4K result.
+          const isLastWithNoFinal = fetchId === state.lastImageFetchId && state.finalImageFetchId === -1
+          if (isFinal || isLastWithNoFinal) {
             showImage(URL.createObjectURL(blob), false)
           }
         })
