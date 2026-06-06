@@ -11,7 +11,6 @@ import { SettingsService } from '../../modules/settings/settings.service.js';
 import { MemoryRepository } from '../memory/memory.repository.js';
 import { NotFoundError, ProviderError } from '../../shared/errors.js';
 import { getUserById } from '../../modules/auth/auth.service.js';
-import { ChapterRepository } from '../../modules/chapters/chapter.repository.js';
 import { autoExtractContextAsync } from '../context/context-extractor.js';
 import { SummariesRepository } from '../../modules/summaries/summaries.repository.js';
 
@@ -22,7 +21,6 @@ const msgRepo        = new MessageRepository();
 const convRepo       = new ConversationRepository();
 const settingsService = new SettingsService();
 const memRepo        = new MemoryRepository();
-const chapterRepo    = new ChapterRepository();
 const summariesRepo  = new SummariesRepository();
 
 export interface GenerateOptions {
@@ -48,7 +46,7 @@ export interface AffinityUpdate {
 export interface StreamOptions extends GenerateOptions {
   signal?: AbortSignal;
   onToken: (token: string) => void;
-  onDone: (response: { messageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string; chapterCompleted?: boolean; nextChapterNumber?: number | null }) => void;
+  onDone: (response: { messageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string }) => void;
   onError: (error: Error) => void;
 }
 
@@ -577,9 +575,6 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       ownerStyle === 'medium' ? (settings.narrationMediumPrompt || undefined) :
       undefined;
 
-    // Capítulo activo del guión de campaña (si existe para esta conversación)
-    const currentChapter = chapterRepo.findCurrentChapter(conversationId) ?? null;
-
     const rawContext = await buildContext({
       character: character ?? groupCharacters[0],
       stories: linkedStories,
@@ -606,8 +601,6 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       embeddingProviderId: settings.embeddingProviderId,
       embeddingModel:      settings.embeddingModel,
       narrationStylePrompt,
-      currentChapter,
-      chapterGuidePrompt: settings.chapterGuidePrompt || undefined,
     });
 
     // Use character's contextLength, then settings default, then 32768
@@ -781,25 +774,6 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       cleanContent = accumulated.replace(/\[AFINIDAD:[^\]]+\]/g, '').trimEnd();
     }
 
-    // ── Detección de fin de capítulo ─────────────────────────────────────────
-    let chapterCompleted = false;
-    let nextChapterNumber: number | null = null;
-    // Acepta marcador con/sin acento (el LLM a veces escribe Capítulo con tilde)
-    // y el legacy FIN_CAPITULO por compatibilidad
-    const CHAPTER_DONE_RE = /\[Cap[ií]tulo\s+Finalizado\]|\[FIN_CAPITULO\]/gi;
-    if (CHAPTER_DONE_RE.test(cleanContent)) {
-      cleanContent = cleanContent
-        .replace(/\[Cap[ií]tulo\s+Finalizado\]\s*/gi, '')
-        .replace(/\[FIN_CAPITULO\]\s*/gi, '')
-        .trimEnd();
-      const result = chapterRepo.completeCurrentChapter(conversationId);
-      if (result) {
-        chapterCompleted = true;
-        nextChapterNumber = result.next?.chapterNumber ?? null;
-        console.log(`[chapters] Chapter ${result.completed.chapterNumber} completed for conv ${conversationId}${result.next ? `, next: ${result.next.chapterNumber}` : ' (fin de guión)'}`);
-      }
-    }
-
     // Always persist whatever content was generated (full or partial)
     msgRepo.update(assistantMsg.id, {
       content: cleanContent,
@@ -820,7 +794,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
 
     if (!aborted) {
       convRepo.incrementCounts(conversationId, finalTokens);
-      onDone({ messageId: assistantMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, chapterCompleted, nextChapterNumber });
+      onDone({ messageId: assistantMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent });
       // Fire-and-forget background tasks (non-blocking)
       updateSummaryAsync(conversationId, provider, modelId, narratorMode);
       const updatedConv = convRepo.findById(conversationId);

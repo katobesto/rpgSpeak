@@ -1,11 +1,9 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { createPortal } from 'react-dom';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   MessageSquare, Users, BookOpen, Settings, ChevronLeft, ChevronRight, Plus, Zap,
   MoreHorizontal, Trash2, AlertTriangle, Sword, ChevronDown, ChevronUp, LogOut, KeyRound, X,
-  Search, SlidersHorizontal, UserCircle, ScrollText, CheckCircle2, Circle, MoreVertical,
-  CheckCheck, RotateCcw, PlayCircle,
+  Search, SlidersHorizontal, UserCircle,
 } from 'lucide-react';
 import { useUiStore } from '../../stores/ui.store.ts';
 import { useChatStore } from '../../stores/chat.store.ts';
@@ -15,10 +13,9 @@ import { conversationsApi } from '../../api/conversations.ts';
 import { charactersApi } from '../../api/characters.ts';
 import { storiesApi } from '../../api/stories.ts';
 import { authApi } from '../../api/auth.ts';
-import { chaptersApi } from '../../api/chapters.ts';
 import { api } from '../../api/client.ts';
 import { Avatar } from '../ui/Avatar.tsx';
-import type { Character, Conversation, User, StoryChapter } from '@rpgspeak/shared';
+import type { Character, Conversation, User } from '@rpgspeak/shared';
 
 function useDebounce<T>(value: T, delay = 300): T {
   const [debounced, setDebounced] = useState(value);
@@ -298,11 +295,6 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
         </div>
       )}
 
-      {/* Chapters Panel — when conversation has linked stories */}
-      {!collapsed && activeConversation && activeConversation.stories.length > 0 && (
-        <ChaptersSidebarPanel conversationId={activeConversation.id} />
-      )}
-
       {/* Adventure Status Panel — only when not collapsed and adventure active */}
       {!collapsed && isAdventureActive && activeConversation && (
         <AdventureSidebarPanel
@@ -368,245 +360,6 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
 
       {changePwdOpen && (
         <ChangePasswordModal onClose={() => setChangePwdOpen(false)} />
-      )}
-    </div>
-  );
-}
-
-// ─── Chapters Sidebar Panel ───────────────────────────────────────────────────
-
-function ChaptersSidebarPanel({ conversationId }: { conversationId: string }) {
-  const [open, setOpen]             = useState(true);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [menu, setMenu]             = useState<{ id: string; top: number; left: number } | null>(null);
-  const menuPortalRef               = useRef<HTMLDivElement>(null);
-  const qc = useQueryClient();
-
-  // Cerrar menú al hacer clic fuera (en el portal)
-  useEffect(() => {
-    if (!menu) return;
-    function onClickOutside(e: MouseEvent) {
-      if (menuPortalRef.current && !menuPortalRef.current.contains(e.target as Node)) {
-        setMenu(null);
-      }
-    }
-    document.addEventListener('mousedown', onClickOutside);
-    return () => document.removeEventListener('mousedown', onClickOutside);
-  }, [menu]);
-
-  // Calcular posición del menú desde el botón ⋮
-  const openMenu = useCallback((e: React.MouseEvent<HTMLButtonElement>, chId: string) => {
-    e.stopPropagation();
-    if (menu?.id === chId) { setMenu(null); return; }
-    const rect = e.currentTarget.getBoundingClientRect();
-    // Mostrar debajo del botón, alineado a la derecha
-    setMenu({ id: chId, top: rect.bottom + 4, left: rect.right - 176 });
-  }, [menu]);
-
-  useEffect(() => {
-    function handler(e: Event) {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.conversationId === conversationId) {
-        qc.invalidateQueries({ queryKey: ['chapters', conversationId] });
-      }
-    }
-    window.addEventListener('rpgspeak:chapterCompleted', handler);
-    return () => window.removeEventListener('rpgspeak:chapterCompleted', handler);
-  }, [conversationId, qc]);
-
-  const { data: chapters = [], isLoading } = useQuery({
-    queryKey: ['chapters', conversationId],
-    queryFn:  () => chaptersApi.list(conversationId),
-    staleTime: 5_000,
-  });
-
-  const completedCount = chapters.filter(c => c.isCompleted).length;
-  const currentChapter = chapters.find(c => !c.isCompleted) ?? null;
-  const hasChapters    = chapters.length > 0;
-
-  const generateMut = useMutation({
-    mutationFn: () => chaptersApi.generate(conversationId),
-    onSuccess:  () => qc.invalidateQueries({ queryKey: ['chapters', conversationId] }),
-  });
-
-  const actionMut = useMutation({
-    mutationFn: ({ id, action }: { id: string; action: 'complete' | 'uncomplete' | 'activate' }) =>
-      chaptersApi.setAction(id, action),
-    onSuccess:  () => {
-      qc.invalidateQueries({ queryKey: ['chapters', conversationId] });
-      setMenu(null);
-    },
-  });
-
-  function doAction(id: string, action: 'complete' | 'uncomplete' | 'activate') {
-    actionMut.mutate({ id, action });
-  }
-
-  return (
-    // overflow-hidden evita que el texto empuje el ancho del sidebar
-    <div className="border-t border-border flex-shrink-0 overflow-hidden" style={{ background: 'var(--surface-1)' }}>
-
-      {/* Header colapsable */}
-      <button
-        onClick={() => setOpen(v => !v)}
-        className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/4 transition-colors min-w-0"
-      >
-        <div className="flex items-center gap-2 min-w-0 overflow-hidden">
-          <ScrollText size={12} className="text-accent flex-shrink-0" />
-          <span className="text-[11px] font-semibold text-accent uppercase tracking-wider flex-shrink-0">Guión</span>
-          {hasChapters && (
-            <span className="text-[10px] text-text-muted flex-shrink-0">
-              {completedCount}/{chapters.length}
-            </span>
-          )}
-        </div>
-        {open
-          ? <ChevronDown size={12} className="text-text-muted flex-shrink-0" />
-          : <ChevronUp   size={12} className="text-text-muted flex-shrink-0" />
-        }
-      </button>
-
-      {open && (
-        <div className="overflow-y-auto overflow-x-hidden" style={{ maxHeight: '260px' }}>
-          <div className="px-3 pb-3 space-y-0.5">
-
-            {isLoading && (
-              <p className="text-[10px] text-text-muted italic py-1">Cargando guión…</p>
-            )}
-
-            {!isLoading && !hasChapters && (
-              <div className="space-y-1.5 py-1">
-                <p className="text-[10px] text-text-muted italic">Sin guión generado.</p>
-                <button
-                  onClick={() => generateMut.mutate()}
-                  disabled={generateMut.isPending}
-                  className="w-full flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-accent/40 text-accent text-[10px] hover:bg-accent/10 transition-colors disabled:opacity-50"
-                >
-                  {generateMut.isPending ? 'Generando…' : '+ Generar guión'}
-                </button>
-              </div>
-            )}
-
-            {chapters.map((ch) => {
-              const isCurrent   = ch.id === currentChapter?.id;
-              const isCompleted = ch.isCompleted;
-              const isExpanded  = expandedId === ch.id;
-              // isMenuOpen solo se usa para el estilo del botón ⋮ (el menú real es un portal)
-              const isMenuOpen  = menu?.id === ch.id;
-
-              return (
-                <div key={ch.id} className={`transition-opacity ${isCompleted ? 'opacity-50' : ''}`}>
-                  {/* Fila del capítulo */}
-                  <div className="flex items-center gap-1 py-1 min-w-0 overflow-hidden group/ch">
-                    {/* Icono estado */}
-                    <div className="flex-shrink-0">
-                      {isCompleted
-                        ? <CheckCircle2 size={11} className="text-emerald-400" />
-                        : isCurrent
-                        ? <Sword size={11} className="text-accent" />
-                        : <Circle size={11} className="text-text-muted" />
-                      }
-                    </div>
-
-                    {/* Título truncado */}
-                    <p className={`text-[11px] font-medium leading-tight truncate flex-1 min-w-0 ${
-                      isCompleted ? 'line-through text-text-muted' :
-                      isCurrent   ? 'text-accent' : 'text-text-secondary'
-                    }`}>
-                      {ch.chapterNumber}. {ch.title}
-                    </p>
-
-                    {/* Botón expandir descripción */}
-                    {ch.description && (
-                      <button
-                        onClick={() => setExpandedId(isExpanded ? null : ch.id)}
-                        className="flex-shrink-0 p-0.5 rounded text-text-muted hover:text-text-primary transition-colors opacity-0 group-hover/ch:opacity-100"
-                        title={isExpanded ? 'Ocultar' : 'Ver descripción'}
-                      >
-                        {isExpanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-                      </button>
-                    )}
-
-                    {/* Botón ⋮ — el menú se renderiza fuera del DOM via portal */}
-                    <button
-                      onClick={(e) => openMenu(e, ch.id)}
-                      className={`flex-shrink-0 p-0.5 rounded text-text-muted hover:text-text-primary transition-colors ${
-                        menu?.id === ch.id ? 'opacity-100' : 'opacity-0 group-hover/ch:opacity-100'
-                      }`}
-                      title="Acciones"
-                    >
-                      <MoreVertical size={11} />
-                    </button>
-                  </div>
-
-                  {/* Descripción desplegable */}
-                  {isExpanded && ch.description && (
-                    <p
-                      className="text-[10px] text-text-muted leading-relaxed pl-4 pr-1 pb-1.5"
-                      style={{ overflowWrap: 'anywhere', wordBreak: 'break-word', maxWidth: '100%' }}
-                    >
-                      {ch.description}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
-
-          </div>
-        </div>
-      )}
-
-      {/* Portal del menú — renderizado en document.body para escapar overflow:hidden */}
-      {menu && createPortal(
-        <div
-          ref={menuPortalRef}
-          className="w-44 rounded-xl border border-border shadow-2xl py-1 animate-slide-up"
-          style={{
-            position:   'fixed',
-            top:        menu.top,
-            left:       Math.max(4, menu.left),
-            zIndex:     9999,
-            background: 'var(--surface-2)',
-          }}
-        >
-          {(() => {
-            const ch          = chapters.find(c => c.id === menu.id);
-            const isCurrent   = ch?.id === currentChapter?.id;
-            const isCompleted = ch?.isCompleted;
-            if (!ch) return null;
-            return (
-              <>
-                {!isCurrent && (
-                  <button
-                    onClick={() => doAction(ch.id, 'activate')}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-accent/10 text-left text-xs text-text-primary"
-                  >
-                    <PlayCircle size={12} className="text-accent" />
-                    Marcar como activo
-                  </button>
-                )}
-                {!isCompleted ? (
-                  <button
-                    onClick={() => doAction(ch.id, 'complete')}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-emerald-500/10 text-left text-xs text-text-primary"
-                  >
-                    <CheckCheck size={12} className="text-emerald-400" />
-                    Marcar como completado
-                  </button>
-                ) : (
-                  <button
-                    onClick={() => doAction(ch.id, 'uncomplete')}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-amber-500/10 text-left text-xs text-text-primary"
-                  >
-                    <RotateCcw size={12} className="text-amber-400" />
-                    Marcar como pendiente
-                  </button>
-                )}
-              </>
-            );
-          })()}
-        </div>,
-        document.body
       )}
     </div>
   );

@@ -2,13 +2,12 @@ import React, { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { storiesApi } from '../../api/stories.ts';
 import { charactersApi } from '../../api/characters.ts';
-import { storyScriptApi } from '../../api/story-script.ts';
 import { Modal } from '../ui/Modal.tsx';
 import { Button } from '../ui/Button.tsx';
 import { Input, Textarea } from '../ui/Input.tsx';
 import { Avatar } from '../ui/Avatar.tsx';
-import type { Story, CreateStoryDto } from '@rpgspeak/shared';
-import { Plus, Trash2, Search, Wand2, ScrollText, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
+import type { Story, CreateStoryDto, StoryLocation } from '@rpgspeak/shared';
+import { Plus, Trash2, Search, Wand2, ChevronDown, ChevronUp, MapPin } from 'lucide-react';
 
 /** crypto.randomUUID() only works in secure contexts (HTTPS / localhost).
  *  When serving from LAN over plain HTTP, fall back to a Math.random UUID v4. */
@@ -35,6 +34,7 @@ const DEFAULT_STORY: CreateStoryDto = {
   narrativeRules: '',
   worldLore: '',
   persistentEvents: [],
+  locations: [],
   stateVariables: {},
   timeline: [],
   behaviorRestrictions: [],
@@ -43,15 +43,15 @@ const DEFAULT_STORY: CreateStoryDto = {
   characters: [],
 };
 
-type TabId = 'basic' | 'context' | 'events' | 'rules' | 'characters' | 'script';
+type TabId = 'basic' | 'context' | 'events' | 'locations' | 'rules' | 'characters';
 
 const TABS: { id: TabId; label: string }[] = [
   { id: 'basic', label: 'Basic' },
   { id: 'context', label: 'Context & Lore' },
   { id: 'events', label: 'Events' },
+  { id: 'locations', label: 'Ubicaciones' },
   { id: 'rules', label: 'Rules' },
   { id: 'characters', label: 'Personajes' },
-  { id: 'script', label: '📜 Guión' },
 ];
 
 export function StoryEditor({ story, open, onClose }: StoryEditorProps) {
@@ -92,6 +92,29 @@ export function StoryEditor({ story, open, onClose }: StoryEditorProps) {
       set('persistentEvents', [...form.persistentEvents, ...result.events]);
     },
   });
+
+  const generateLocationsMut = useMutation({
+    mutationFn: () => {
+      if (!story) throw new Error('Guarda la historia antes de generar ubicaciones');
+      return storiesApi.generateLocations(story.id, 5);
+    },
+    onSuccess: (result) => {
+      set('locations', [...(form.locations ?? []), ...result.locations]);
+    },
+  });
+
+  function addLocation() {
+    set('locations', [
+      ...(form.locations ?? []),
+      { id: randomId(), name: '', description: '', contents: '', exits: '', atmosphere: '' },
+    ]);
+  }
+
+  function updateLocation(i: number, field: keyof StoryLocation, value: string) {
+    const updated = [...(form.locations ?? [])];
+    updated[i] = { ...updated[i], [field]: value };
+    set('locations', updated);
+  }
 
   function addEvent() {
     set('persistentEvents', [
@@ -384,139 +407,96 @@ export function StoryEditor({ story, open, onClose }: StoryEditorProps) {
           );
         })()}
 
-        {tab === 'script' && story && (
-          <ScriptTab storyId={story.id} />
-        )}
-        {tab === 'script' && !story && (
-          <p className="text-sm text-text-muted text-center py-8">
-            Guarda la historia primero para poder generar su guión.
-          </p>
+        {tab === 'locations' && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                {generateLocationsMut.isError && (
+                  <span className="text-xs text-red-400">
+                    {(generateLocationsMut.error as Error)?.message ?? 'Error al generar'}
+                  </span>
+                )}
+                {!story && (
+                  <span className="text-xs text-text-muted">Guarda la historia primero para generar ubicaciones</span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                {story && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => generateLocationsMut.mutate()}
+                    loading={generateLocationsMut.isPending}
+                    title="Genera 5 ubicaciones con el LLM principal basándose en el contexto de la historia"
+                  >
+                    <Wand2 size={13} />
+                    {generateLocationsMut.isPending ? 'Generando…' : 'Generar con IA'}
+                  </Button>
+                )}
+                <Button size="sm" variant="outline" onClick={addLocation}><Plus size={13} /> Añadir</Button>
+              </div>
+            </div>
+
+            {(form.locations ?? []).length === 0 && !generateLocationsMut.isPending && (
+              <div className="rounded-xl border border-dashed border-border px-6 py-10 text-center space-y-2">
+                <MapPin size={28} className="text-text-muted mx-auto opacity-40" />
+                <p className="text-sm text-text-muted">Sin ubicaciones definidas.</p>
+                <p className="text-xs text-text-muted opacity-70">
+                  Añade ubicaciones manualmente o usa "Generar con IA". El LLM usará estas tarjetas como referencia espacial y no inventará lugares fuera de ellas.
+                </p>
+              </div>
+            )}
+
+            {(form.locations ?? []).map((loc, i) => (
+              <div key={loc.id} className="rounded-xl border border-border p-4 space-y-3">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs font-medium text-text-secondary flex items-center gap-1.5">
+                    <MapPin size={11} className="text-accent" /> Ubicación {i + 1}
+                  </span>
+                  <button
+                    onClick={() => set('locations', (form.locations ?? []).filter((_, idx) => idx !== i))}
+                    className="text-text-muted hover:text-red-400"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </div>
+                <Input
+                  label="Nombre *"
+                  value={loc.name}
+                  onChange={(e) => updateLocation(i, 'name', e.target.value)}
+                  placeholder="ej. Sala del trono, Calabozo norte, Pasillo este"
+                />
+                <Textarea
+                  label="Descripción"
+                  value={loc.description}
+                  onChange={(e) => updateLocation(i, 'description', e.target.value)}
+                  placeholder="Aspecto visual, dimensiones, atmósfera general…"
+                  rows={2}
+                />
+                <Textarea
+                  label="Contenido"
+                  value={loc.contents}
+                  onChange={(e) => updateLocation(i, 'contents', e.target.value)}
+                  placeholder="Muebles, objetos, características fijas del lugar…"
+                  rows={2}
+                />
+                <Input
+                  label="Salidas"
+                  value={loc.exits}
+                  onChange={(e) => updateLocation(i, 'exits', e.target.value)}
+                  placeholder="ej. puerta sur → corredor este, escalera → piso superior"
+                />
+                <Input
+                  label="Atmósfera"
+                  value={loc.atmosphere}
+                  onChange={(e) => updateLocation(i, 'atmosphere', e.target.value)}
+                  placeholder="Luz, temperatura, olores, sonidos ambientales…"
+                />
+              </div>
+            ))}
+          </div>
         )}
       </div>
     </Modal>
-  );
-}
-
-// ─── Script Tab ───────────────────────────────────────────────────────────────
-
-function ScriptTab({ storyId }: { storyId: string }) {
-  const qc = useQueryClient();
-  const [expanded, setExpanded] = useState<string | null>(null);
-
-  const { data: chapters = [], isLoading, refetch } = useQuery({
-    queryKey: ['story-script', storyId],
-    queryFn:  () => storyScriptApi.get(storyId),
-    staleTime: 30_000,
-  });
-
-  const generateMut = useMutation({
-    mutationFn: (regenerate: boolean) => storyScriptApi.generate(storyId, regenerate),
-    onSuccess:  () => {
-      qc.invalidateQueries({ queryKey: ['story-script', storyId] });
-      qc.invalidateQueries({ queryKey: ['story-script-exists', storyId] });
-    },
-  });
-
-  const deleteMut = useMutation({
-    mutationFn: () => storyScriptApi.delete(storyId),
-    onSuccess:  () => {
-      qc.invalidateQueries({ queryKey: ['story-script', storyId] });
-      qc.invalidateQueries({ queryKey: ['story-script-exists', storyId] });
-    },
-  });
-
-  if (isLoading) {
-    return <p className="text-sm text-text-muted py-8 text-center">Cargando guión…</p>;
-  }
-
-  return (
-    <div className="space-y-4">
-      {/* Header con acciones */}
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-text-primary">Guión de campaña</p>
-          <p className="text-xs text-text-muted mt-0.5">
-            {chapters.length > 0
-              ? `${chapters.length} capítulos — se copian automáticamente a cada chat nuevo`
-              : 'Sin guión. Genera uno para estructurar la historia.'}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {chapters.length > 0 && (
-            <button
-              onClick={() => { if (confirm('¿Eliminar el guión de esta historia?')) deleteMut.mutate(); }}
-              disabled={deleteMut.isPending}
-              className="px-2.5 py-1.5 rounded-lg text-xs border border-red-500/30 text-red-400 hover:bg-red-500/10 transition-colors disabled:opacity-50"
-            >
-              Eliminar
-            </button>
-          )}
-          <Button
-            size="sm"
-            onClick={() => generateMut.mutate(chapters.length > 0)}
-            loading={generateMut.isPending}
-          >
-            <ScrollText size={13} />
-            {chapters.length > 0 ? 'Regenerar' : 'Generar guión'}
-          </Button>
-        </div>
-      </div>
-
-      {generateMut.isPending && (
-        <div className="flex items-center gap-2 px-3 py-2.5 rounded-xl border border-accent/30 text-xs text-accent"
-          style={{ background: 'rgba(var(--accent-rgb,99,102,241),0.06)' }}>
-          <span className="w-3 h-3 rounded-full border-2 border-accent border-t-transparent animate-spin flex-shrink-0" />
-          Generando guión con IA… puede tardar unos segundos.
-        </div>
-      )}
-
-      {/* Lista de capítulos */}
-      {chapters.length > 0 && (
-        <div className="space-y-1.5">
-          {chapters.map(ch => (
-            <div key={ch.id}
-              className="rounded-xl border border-border overflow-hidden"
-              style={{ background: 'var(--surface-2)' }}
-            >
-              {/* Fila del capítulo */}
-              <button
-                onClick={() => setExpanded(expanded === ch.id ? null : ch.id)}
-                className="w-full flex items-center gap-3 px-3 py-2.5 text-left hover:bg-white/4 transition-colors"
-              >
-                <span className="text-[11px] text-text-muted tabular-nums flex-shrink-0 w-5 text-right">
-                  {ch.chapterNumber}.
-                </span>
-                <span className="text-sm font-medium flex-1 text-text-primary truncate">
-                  {ch.title}
-                </span>
-                {expanded === ch.id
-                  ? <ChevronUp size={13} className="text-text-muted flex-shrink-0" />
-                  : <ChevronDown size={13} className="text-text-muted flex-shrink-0" />
-                }
-              </button>
-
-              {/* Descripción desplegable */}
-              {expanded === ch.id && (
-                <div className="px-3 pb-3 pt-0.5 border-t border-border">
-                  <p className="text-xs text-text-secondary leading-relaxed">
-                    {ch.description}
-                  </p>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {chapters.length === 0 && !generateMut.isPending && (
-        <div className="rounded-xl border border-dashed border-border px-6 py-10 text-center space-y-2">
-          <ScrollText size={28} className="text-text-muted mx-auto opacity-40" />
-          <p className="text-sm text-text-muted">Esta historia no tiene guión todavía.</p>
-          <p className="text-xs text-text-muted opacity-70">
-            Pulsa "Generar guión" para que la IA cree 10 capítulos basados en el contexto de la historia.
-          </p>
-        </div>
-      )}
-    </div>
   );
 }

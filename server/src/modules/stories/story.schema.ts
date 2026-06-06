@@ -1,5 +1,16 @@
 import { z } from 'zod';
 
+const storyLocationSchema = z.array(
+  z.object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().default(''),
+    contents: z.string().default(''),
+    exits: z.string().default(''),
+    atmosphere: z.string().default(''),
+  })
+);
+
 const storyEventSchema = z.array(
   z.object({
     id: z.string(),
@@ -35,6 +46,7 @@ export const createStorySchema = z.object({
   narrativeRules: z.string().max(4000).default(''),
   worldLore: z.string().max(8000).default(''),
   persistentEvents: storyEventSchema.default([]),
+  locations: storyLocationSchema.default([]),
   stateVariables: z.record(z.union([z.string(), z.number(), z.boolean()])).default({}),
   timeline: timelineSchema.default([]),
   behaviorRestrictions: z.array(z.string()).default([]),

@@ -120,6 +120,7 @@ export interface Story {
   narrativeRules: string;
   worldLore: string;
   persistentEvents: StoryEvent[];
+  locations: StoryLocation[];
   stateVariables: Record<string, string | number | boolean>;
   timeline: TimelineEntry[];
   behaviorRestrictions: string[];
@@ -139,6 +140,15 @@ export interface StoryEvent {
   importance: number;
 }
 
+export interface StoryLocation {
+  id: string;
+  name: string;
+  description: string;
+  contents: string;
+  exits: string;
+  atmosphere: string;
+}
+
 export interface TimelineEntry {
   id: string;
   label: string;
@@ -150,30 +160,6 @@ export interface StoryCharacterLink {
   characterId: string;
   role: string;
   notes: string;
-}
-
-// ─── Story Script (plantilla por historia) ───────────────────────────────────
-
-export interface StoryScriptChapter {
-  id:            string;
-  storyId:       string;
-  chapterNumber: number;
-  title:         string;
-  description:   string;
-  createdAt:     string;
-}
-
-// ─── Story Chapter (progreso por conversación) ────────────────────────────────
-
-export interface StoryChapter {
-  id:             string;
-  conversationId: string;
-  chapterNumber:  number;
-  title:          string;
-  description:    string;
-  isCompleted:    boolean;
-  completedAt:    string | null;
-  createdAt:      string;
 }
 
 // ─── Conversation Types ───────────────────────────────────────────────────────
@@ -387,12 +373,11 @@ export interface AppSettings {
   contextAutoExtractModelId:    string | null;
   // Generación de eventos de historia
   storyEventGenerationPrompt: string;
+  // Generación de ubicaciones de historia
+  storyLocationGenerationPrompt: string;
   // Estilo de narración — prompts inyectados cuando el usuario elige Medium o Short
   narrationMediumPrompt: string;
   narrationShortPrompt:  string;
-  // Guión de campaña — prompt inyectado junto al capítulo activo
-  // Variables: {{CAPITULO_NUMERO}}, {{CAPITULO_TITULO}}, {{CAPITULO_DESCRIPCION}}
-  chapterGuidePrompt: string;
   // Moderación de contenido
   allowNsfw: boolean;
   nsfwBlockedMessage: string;

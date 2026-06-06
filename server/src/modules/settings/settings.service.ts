@@ -407,45 +407,25 @@ INSTRUCCIONES:
 Responde ÚNICAMENTE con etiquetas en este formato exacto, una por línea. Sin texto adicional antes ni después.
 
 [EVENTO:título corto y evocador|disparador que activa el evento|descripción de lo que ocurre cuando se activa|importancia del 1 al 10]`,
-  // Guión de campaña — inyectado junto al capítulo activo antes del último turno
-  // Variables: {{CAPITULO_NUMERO}}, {{CAPITULO_TITULO}}, {{CAPITULO_DESCRIPCION}}
-  chapterGuidePrompt: `━━━ CAPÍTULO ACTIVO: {{CAPITULO_NUMERO}} — "{{CAPITULO_TITULO}}" ━━━
+  // Generación de ubicaciones de historia
+  storyLocationGenerationPrompt: `Eres un diseñador de mundos para juegos de rol. A partir del contexto de la historia que se te proporciona, genera exactamente {{NUM_UBICACIONES}} ubicaciones concretas y detalladas que existen en este mundo.
 
-▼ GUIÓN DE EVENTOS PENDIENTES DE NARRAR ▼
-(Estos eventos AÚN NO han ocurrido en la historia. Son el destino, no el punto de partida.)
+CONTEXTO DE LA HISTORIA:
+{{CONTEXTO_HISTORIA}}
 
-{{CAPITULO_DESCRIPCION}}
+INSTRUCCIONES:
+- Cada ubicación debe encajar de forma natural en el mundo y tono de la historia
+- Nombre: identificador corto y evocador del lugar ("Sala del trono", "Callejón del mercado", "Cueva norte")
+- Descripción: aspecto visual, dimensiones, atmósfera general (2-3 frases)
+- Contenido: qué hay en el lugar — muebles, objetos, características fijas. Sé específico (1-2 frases)
+- Salidas: qué conexiones existen hacia otros lugares. Sé concreto: "puerta sur → corredor este", "escalera → piso superior". Si es un callejón sin salida, dilo
+- Atmósfera: luz, temperatura, olores, sonidos ambientales (1 frase)
 
-━━━ REGLA CRÍTICA — NARRACIÓN PROGRESIVA ━━━
+REGLA CRÍTICA: Las salidas deben ser consistentes con otras ubicaciones. Si la "Sala del trono" tiene "puerta norte → antesala", entonces la "Antesala" debe tener "puerta sur → sala del trono".
 
-NUNCA asumas que el jugador ya conoce o ya ha vivido los eventos descritos arriba.
-Cada evento debe OCURRIR en la narrativa, con sus transiciones, descripciones y detalles sensoriales.
-Si el guión dice "llegan a la pensión", no los ubiques allí — narra el camino, la llegada, el primer vistazo.
-Si el jugador declara "voy a la pensión", no confirmes que llegó — narra el trayecto y la llegada.
+Responde ÚNICAMENTE con etiquetas en este formato exacto, una por línea. Sin texto adicional antes ni después.
 
-REGLA ESPECIAL — INICIO DE HISTORIA:
-Si el jugador dice "Comienza", "Empieza", "Start", "Continúa" o cualquier frase de arranque sin acción específica,
-interpreta esto como "narra el PRIMER evento del guión desde el principio, con todo detalle".
-NO saltes a un punto intermedio ni al estado final. Empieza por el primer evento de la secuencia.
-
-━━━ DIRECTIVA DE EJECUCIÓN — UN PASO POR TURNO ━━━
-
-REGLA FUNDAMENTAL: Esta historia se desarrolla en MÚLTIPLES turnos de conversación. En cada respuesta, avanza UN SOLO EVENTO o escena del guión — no intentes narrar todo el capítulo de una vez. El jugador debe poder interactuar entre cada paso.
-
-▸ PASO ACTUAL: Identifica en qué punto del guión estás (qué eventos ya ocurrieron en la conversación) e introduce solo el SIGUIENTE evento de la secuencia.
-
-▸ GANCHO Y PAUSA: Narra el evento con detalle sensorial y termina en un punto de tensión o decisión que invite al jugador a reaccionar. No resuelvas tú lo que el jugador debe decidir.
-
-▸ MUNDO ACTIVO: Los PNJs actúan según sus agendas. Si el jugador tarda en reaccionar, el mundo da una señal — pero solo UNA por turno.
-
-▸ PROHIBIDO SALTAR: No teleportes al jugador al estado final. Narra cada transición. Si el guión dice "llegan a X y luego pasa Y", narra primero la llegada a X y para ahí.
-
-▸ PROHIBIDO COMPLETAR EL CAPÍTULO EN UNA SOLA RESPUESTA: Aunque tengas todos los eventos en mente, solo narra el primero que aún no ha ocurrido. Los demás vendrán en los turnos siguientes.
-
-▸ CONDICIÓN DE CIERRE: El capítulo termina solo cuando TODOS sus eventos principales han sido narrados a lo largo de varios turnos Y la escena tiene un cierre natural. Solo entonces incluye el marcador.
-
-Cuando el capítulo esté verdaderamente concluido (todos los eventos narrados, escena cerrada), incluye en una línea separada al final:
-[Capitulo Finalizado]`,
+[UBICACION:nombre|descripción|contenido|salidas|atmósfera]`,
 
   // Estilo de narración — inyectados justo antes del último mensaje cuando el usuario elige medium/short
   narrationMediumPrompt: `## Estilo de respuesta: MODERADO

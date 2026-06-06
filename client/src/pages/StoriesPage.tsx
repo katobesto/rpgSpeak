@@ -7,10 +7,9 @@ import { StoryEditor } from '../components/stories/StoryEditor.tsx';
 import { Avatar } from '../components/ui/Avatar.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { Modal } from '../components/ui/Modal.tsx';
-import { Plus, Edit2, Trash2, BookOpen, ToggleLeft, ToggleRight, UserCircle, Lock, Eye, Users, X, Search, FileText, Filter, ScrollText, RefreshCw, ChevronDown, ChevronUp } from 'lucide-react';
-import type { Story, User, StoryScriptChapter } from '@rpgspeak/shared';
+import { Plus, Edit2, Trash2, BookOpen, ToggleLeft, ToggleRight, UserCircle, Lock, Eye, Users, X, Search, FileText, Filter } from 'lucide-react';
+import type { Story, User } from '@rpgspeak/shared';
 import { useAuthStore } from '../stores/auth.store.ts';
-import { storyScriptApi } from '../api/story-script.ts';
 
 function useDebounce<T>(value: T, delay = 350): T {
   const [debounced, setDebounced] = useState(value);
@@ -292,9 +291,6 @@ export function StoriesPage() {
                     )}
                   </div>
 
-                  {/* Guión de campaña */}
-                  <StoryScriptPanel story={story} />
-
                   <div className="flex items-center gap-1 mt-3 pt-3 border-t border-border">
                     {canEdit ? (
                       <>
@@ -397,91 +393,3 @@ export function StoriesPage() {
   );
 }
 
-// ─── Story Script Panel ───────────────────────────────────────────────────────
-
-export function StoryScriptPanel({ story }: { story: Story }) {
-  const qc = useQueryClient();
-  const [expanded, setExpanded] = useState(false);
-  const { user, isAdmin } = useAuthStore();
-  const canEdit = isAdmin || (user?.id != null && user.id === story.userId);
-
-  const { data: chapters = [], isLoading } = useQuery({
-    queryKey: ['story-script', story.id],
-    queryFn:  () => storyScriptApi.get(story.id),
-    staleTime: 30_000,
-    enabled:  expanded,
-  });
-
-  const generateMut = useMutation({
-    mutationFn: (regenerate: boolean) => storyScriptApi.generate(story.id, regenerate),
-    onSuccess:  () => qc.invalidateQueries({ queryKey: ['story-script', story.id] }),
-  });
-
-  // Pre-check si existe guión (sin cargar todo)
-  const { data: hasScript } = useQuery({
-    queryKey: ['story-script-exists', story.id],
-    queryFn:  async () => {
-      const result = await storyScriptApi.get(story.id);
-      return result.length > 0;
-    },
-    staleTime: 60_000,
-  });
-
-  return (
-    <div className="border-t border-border pt-2 mt-1">
-      <button
-        onClick={() => setExpanded(v => !v)}
-        className="w-full flex items-center justify-between text-[11px] text-text-muted hover:text-text-primary transition-colors py-0.5"
-      >
-        <span className="flex items-center gap-1.5">
-          <ScrollText size={11} className={hasScript ? 'text-accent' : 'text-text-muted'} />
-          {hasScript ? `Guión (${chapters.length > 0 ? chapters.length : '…'} caps.)` : 'Sin guión'}
-        </span>
-        {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-      </button>
-
-      {expanded && (
-        <div className="mt-2 space-y-1.5">
-          {isLoading && (
-            <p className="text-[10px] text-text-muted italic">Cargando…</p>
-          )}
-
-          {!isLoading && chapters.length === 0 && (
-            <p className="text-[10px] text-text-muted italic">Esta historia no tiene guión todavía.</p>
-          )}
-
-          {chapters.map(ch => (
-            <div key={ch.id} className="flex gap-1.5">
-              <span className="text-[9px] text-text-muted tabular-nums flex-shrink-0 mt-0.5 w-4 text-right">{ch.chapterNumber}.</span>
-              <p className="text-[10px] text-text-secondary leading-snug">{ch.title}</p>
-            </div>
-          ))}
-
-          {canEdit && (
-            <div className="flex gap-1.5 pt-1">
-              {chapters.length === 0 ? (
-                <button
-                  onClick={() => generateMut.mutate(false)}
-                  disabled={generateMut.isPending}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] border border-accent/50 text-accent hover:bg-accent/10 transition-colors disabled:opacity-50"
-                >
-                  {generateMut.isPending ? 'Generando…' : '+ Generar guión'}
-                </button>
-              ) : (
-                <button
-                  onClick={() => generateMut.mutate(true)}
-                  disabled={generateMut.isPending}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] border border-border text-text-muted hover:text-text-primary hover:border-accent/40 transition-colors disabled:opacity-50"
-                  title="Regenerar guión (sustituye el actual)"
-                >
-                  <RefreshCw size={9} className={generateMut.isPending ? 'animate-spin' : ''} />
-                  {generateMut.isPending ? 'Regenerando…' : 'Regenerar'}
-                </button>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}

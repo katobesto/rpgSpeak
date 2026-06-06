@@ -182,17 +182,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             };
           });
         },
-        onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, chapterCompleted }) => {
-          // Si el capítulo fue completado, invalidar la query de capítulos para que el sidebar se actualice
-          if (chapterCompleted && activeConversationId) {
-            // Importación dinámica para evitar dependencia circular
-            import('@tanstack/react-query').then(({ QueryClient }) => {
-              // Disparar un evento custom que el sidebar puede escuchar
-              window.dispatchEvent(new CustomEvent('rpgspeak:chapterCompleted', {
-                detail: { conversationId: activeConversationId },
-              }));
-            }).catch(() => {});
-          }
+        onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content }) => {
           set((s) => ({
             isStreaming: false,
             streamingContent: '',

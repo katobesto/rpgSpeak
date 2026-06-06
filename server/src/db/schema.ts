@@ -56,6 +56,7 @@ export const stories = sqliteTable('stories', {
   narrativeRules: text('narrative_rules').notNull().default(''),
   worldLore: text('world_lore').notNull().default(''),
   persistentEvents: text('persistent_events').notNull().default('[]'), // JSON
+  locations: text('locations').notNull().default('[]'),                  // JSON
   stateVariables: text('state_variables').notNull().default('{}'),      // JSON
   timeline: text('timeline').notNull().default('[]'),                    // JSON
   behaviorRestrictions: text('behavior_restrictions').notNull().default('[]'), // JSON
@@ -227,30 +228,6 @@ export const contextItems = sqliteTable('context_items', {
 
 // ─── Type exports for Drizzle inference ───────────────────────────────────────
 
-// ─── Story Script Chapters (plantilla por historia) ──────────────────────────
-
-export const storyScriptChapters = sqliteTable('story_script_chapters', {
-  id:            text('id').primaryKey(),
-  storyId:       text('story_id').notNull().references(() => stories.id, { onDelete: 'cascade' }),
-  chapterNumber: integer('chapter_number').notNull(),
-  title:         text('title').notNull(),
-  description:   text('description').notNull().default(''),
-  createdAt:     text('created_at').notNull(),
-});
-
-// ─── Story Chapters (progreso por conversación) ───────────────────────────────
-
-export const storyChapters = sqliteTable('story_chapters', {
-  id:             text('id').primaryKey(),
-  conversationId: text('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
-  chapterNumber:  integer('chapter_number').notNull(),
-  title:          text('title').notNull(),
-  description:    text('description').notNull(),
-  isCompleted:    integer('is_completed', { mode: 'boolean' }).notNull().default(false),
-  completedAt:    text('completed_at'),
-  createdAt:      text('created_at').notNull(),
-});
-
 // ─── Conversation Summaries (historial acumulativo) ──────────────────────────
 
 export const conversationSummaries = sqliteTable('conversation_summaries', {
@@ -271,6 +248,4 @@ export type DbConversation = typeof conversations.$inferSelect;
 export type DbMessage = typeof messages.$inferSelect;
 export type DbMemoryEntry = typeof memoryEntries.$inferSelect;
 export type DbProvider = typeof providers.$inferSelect;
-export type DbStoryScriptChapter = typeof storyScriptChapters.$inferSelect;
-export type DbStoryChapter = typeof storyChapters.$inferSelect;
 export type DbSetting = typeof settings.$inferSelect;

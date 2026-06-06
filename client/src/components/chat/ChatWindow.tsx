@@ -14,8 +14,6 @@ import { messagesApi, conversationsApi } from '../../api/conversations.ts';
 import { charactersApi } from '../../api/characters.ts';
 import { storiesApi } from '../../api/stories.ts';
 import { api } from '../../api/client.ts';
-import { chaptersApi }     from '../../api/chapters.ts';
-import { storyScriptApi }  from '../../api/story-script.ts';
 import {
   MessageSquarePlus,
   Users,
@@ -173,13 +171,6 @@ export function ChatWindow() {
     onSuccess: (conv) => {
       setActiveConversation(conv);
       qc.invalidateQueries({ queryKey: ['conversations'] });
-      // Si la conversación tiene historias, copiar el guión maestro de la historia (si existe)
-      if (conv.stories.length > 0) {
-        const primaryStoryId = conv.stories[0].storyId;
-        storyScriptApi.copyToConversation(primaryStoryId, conv.id)
-          .then(() => qc.invalidateQueries({ queryKey: ['chapters', conv.id] }))
-          .catch((err) => console.warn('[chapters] Copy failed:', err));
-      }
     },
   });
 

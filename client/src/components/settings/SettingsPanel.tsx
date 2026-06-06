@@ -19,7 +19,7 @@ import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
 
 type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats' | 'backup';
 
-const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'charImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'chapterGuidePrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength'];
+const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'charImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret', 'bzComfyUrl', 'bzComfyApiToken', 'bzComfyWorkflow'];
 
@@ -373,29 +373,21 @@ export function SettingsPanel() {
                     />
                   </Section>
 
-                  <Section title="Guión de campaña — prompt de guía de capítulo">
+                  <Section title="Generación de ubicaciones de historia">
                     <p className="text-xs text-text-muted mb-3 leading-relaxed">
-                      Se inyecta como mensaje de sistema justo antes del turno del usuario cuando hay un capítulo activo.
-                      Guía al LLM hacia los eventos del capítulo y le indica cuándo marcar el capítulo como finalizado.
-                    </p>
-                    <p className="text-xs text-text-muted mb-3 leading-relaxed">
-                      Variables disponibles:{' '}
-                      {[
-                        '{{CAPITULO_NUMERO}}',
-                        '{{CAPITULO_TITULO}}',
-                        '{{CAPITULO_DESCRIPCION}}',
-                      ].map(v => (
-                        <code key={v} className="bg-white/8 px-1 mx-0.5 rounded text-accent/80 font-mono text-[10px]">{v}</code>
-                      ))}
-                    </p>
-                    <p className="text-xs text-amber-400/80 mb-3 leading-relaxed">
-                      ⚠ El marcador de fin de capítulo es <code className="font-mono text-[10px]">[Capitulo Finalizado]</code> — inclúyelo en el prompt para que el LLM sepa qué enviar.
+                      Prompt usado al generar ubicaciones con IA en el editor de historias (pestaña Ubicaciones).
+                      Usa{' '}
+                      <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{NUM_UBICACIONES}}'}</code>{' '}
+                      para el número de ubicaciones y{' '}
+                      <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{CONTEXTO_HISTORIA}}'}</code>{' '}
+                      donde se insertará el contexto de la historia. El formato de salida esperado es{' '}
+                      <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'[UBICACION:nombre|descripción|contenido|salidas|atmósfera]'}</code>.
                     </p>
                     <RestorablePrompt
-                      settingsKey="chapterGuidePrompt"
-                      value={draft.chapterGuidePrompt ?? ''}
-                      onChange={(v) => update('chapterGuidePrompt', v)}
-                      rows={12}
+                      settingsKey="storyLocationGenerationPrompt"
+                      value={(draft as any).storyLocationGenerationPrompt ?? ''}
+                      onChange={(v) => update('storyLocationGenerationPrompt' as any, v)}
+                      rows={10}
                       mono
                     />
                   </Section>

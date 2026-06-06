@@ -37,10 +37,6 @@ export interface BuildContextOptions {
   embeddingModel?:      string | null;
   // Estilo de narración del usuario: prompt inyectado justo antes del último mensaje
   narrationStylePrompt?: string;
-  // Capítulo activo del guión de campaña
-  currentChapter?: import('@rpgspeak/shared').StoryChapter | null;
-  // Prompt configurable para guiar al LLM hacia los eventos del capítulo
-  chapterGuidePrompt?: string;
 }
 
 // ── Aviso de aventura para modo personaje individual (sin narrador) ─────────
@@ -88,8 +84,6 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
     embeddingProviderId,
     embeddingModel,
     narrationStylePrompt,
-    currentChapter,
-    chapterGuidePrompt,
   } = opts;
 
   const systemParts: string[] = [];
@@ -327,8 +321,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
   //   3. Affinity block     — current relationship state + consent rules
   //   4. Spatial coherence  — (single-char mode only) prevents location drift
   //   5. Narration style    — user preference for verbosity
-  //   6. Chapter guide      — most authoritative, closest to generation point
-  //   7. [Last user msg]    ← generation starts here
+  //   6. [Last user msg]    ← generation starts here
   //
   // Keeping these OUT of the first SYSTEM message means the large static prefix
   // (character prompt + stories) can be fully reused by the KV cache across turns,
@@ -339,7 +332,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
   const spatialCoherenceBlock = !narratorMode ? SPATIAL_COHERENCE_NOTICE : null;
 
   const shouldInjectMemories = allMemories.length > 0 && memoryInjectionPrompt?.trim();
-  const needsSplit = shouldInjectMemories || Boolean(contextIndexBlock) || Boolean(affinityBlock) || Boolean(narrationStylePrompt?.trim()) || Boolean(currentChapter) || Boolean(spatialCoherenceBlock);
+  const needsSplit = shouldInjectMemories || Boolean(contextIndexBlock) || Boolean(affinityBlock) || Boolean(narrationStylePrompt?.trim()) || Boolean(spatialCoherenceBlock);
   const historyBody = needsSplit ? trimmedMessages.slice(0, -1) : trimmedMessages;
   const lastMessage = needsSplit ? trimmedMessages[trimmedMessages.length - 1] : null;
 
@@ -376,25 +369,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
     history.push({ role: 'system', content: narrationStylePrompt.trim() });
   }
 
-  // 6. Capítulo activo del guión de campaña (más cercano al punto de generación)
-  if (currentChapter && needsSplit) {
-    // Usar el prompt configurable; sustituir variables {{...}}
-    const template = chapterGuidePrompt?.trim() || `## Capítulo activo: {{CAPITULO_NUMERO}} — "{{CAPITULO_TITULO}}"
-
-**Descripción:**
-{{CAPITULO_DESCRIPCION}}
-
-**Directiva narrativa:** Tu prioridad es avanzar la historia hacia los eventos de este capítulo. Cuando esté concluido, añade al final (línea separada): [Capitulo Finalizado]`;
-
-    const chapterBlock = template
-      .replace(/\{\{CAPITULO_NUMERO\}\}/g,      String(currentChapter.chapterNumber))
-      .replace(/\{\{CAPITULO_TITULO\}\}/g,       currentChapter.title)
-      .replace(/\{\{CAPITULO_DESCRIPCION\}\}/g,  currentChapter.description);
-
-    history.push({ role: 'system', content: chapterBlock });
-  }
-
-  // 5. Last user message (generation point)
+  // 6. Last user message (generation point)
   if (needsSplit && lastMessage) {
     history.push({ role: lastMessage.role, content: lastMessage.content });
   }
@@ -487,6 +462,18 @@ function buildStoryBlock(story: Story): string {
       .map((e) => `- [${e.title}]: ${e.description}`)
       .join('\n');
     parts.push(`## Key Events\n${events}`);
+  }
+
+  if (story.locations && story.locations.length > 0) {
+    const locationBlocks = story.locations.map((loc) => {
+      const locParts = [`### ${loc.name}`];
+      if (loc.description.trim()) locParts.push(loc.description.trim());
+      if (loc.contents.trim())    locParts.push(`**Contenido:** ${loc.contents.trim()}`);
+      if (loc.exits.trim())       locParts.push(`**Salidas:** ${loc.exits.trim()}`);
+      if (loc.atmosphere.trim())  locParts.push(`**Atmósfera:** ${loc.atmosphere.trim()}`);
+      return locParts.join('\n');
+    }).join('\n\n');
+    parts.push(`## Ubicaciones conocidas — REGLA IMPORTANTE\nLas siguientes ubicaciones son las que existen en esta historia. El narrador NO debe inventar lugares, objetos, puertas ni salidas que no estén descritos aquí.\n\n${locationBlocks}`);
   }
 
   if (Object.keys(story.stateVariables).length > 0) {

@@ -29,6 +29,7 @@ function dbToStory(row: DbStory, chars: StoryCharacterLink[] = []): Story {
     narrativeRules: row.narrativeRules,
     worldLore: row.worldLore,
     persistentEvents: JSON.parse(row.persistentEvents),
+    locations: JSON.parse((row as unknown as { locations?: string }).locations ?? '[]'),
     stateVariables: JSON.parse(row.stateVariables),
     timeline: JSON.parse(row.timeline),
     behaviorRestrictions: JSON.parse(row.behaviorRestrictions),
@@ -117,12 +118,13 @@ export class StoryRepository {
     this.db.run(sql`
       INSERT INTO stories (
         id, name, description, global_context, narrative_rules, world_lore,
-        persistent_events, state_variables, timeline, behavior_restrictions,
+        persistent_events, locations, state_variables, timeline, behavior_restrictions,
         is_active, adventure_mode, user_id, created_at, updated_at
       ) VALUES (
         ${id}, ${data.name}, ${data.description}, ${data.globalContext},
         ${data.narrativeRules}, ${data.worldLore},
-        ${JSON.stringify(data.persistentEvents)}, ${JSON.stringify(data.stateVariables)},
+        ${JSON.stringify(data.persistentEvents)}, ${JSON.stringify(data.locations ?? [])},
+        ${JSON.stringify(data.stateVariables)},
         ${JSON.stringify(data.timeline)}, ${JSON.stringify(data.behaviorRestrictions)},
         ${data.isActive ? 1 : 0}, ${data.adventureMode ? 1 : 0}, ${userId ?? null}, ${ts}, ${ts}
       )
@@ -152,6 +154,7 @@ export class StoryRepository {
         narrative_rules      = ${merged.narrativeRules},
         world_lore           = ${merged.worldLore},
         persistent_events    = ${JSON.stringify(merged.persistentEvents)},
+        locations            = ${JSON.stringify(merged.locations ?? [])},
         state_variables      = ${JSON.stringify(merged.stateVariables)},
         timeline             = ${JSON.stringify(merged.timeline)},
         behavior_restrictions= ${JSON.stringify(merged.behaviorRestrictions)},

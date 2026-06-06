@@ -201,31 +201,8 @@ export function runMigrations(db: Db): void {
   // ─── Users — narration style preference ──────────────────────────────────
   try { db.run(sql`ALTER TABLE users ADD COLUMN narration_style TEXT NOT NULL DEFAULT 'normal'`); } catch { /* already exists */ }
 
-  // ─── Story Script Chapters (plantilla por historia — compartida entre chats) ─
-  db.run(sql`
-    CREATE TABLE IF NOT EXISTS story_script_chapters (
-      id              TEXT    PRIMARY KEY,
-      story_id        TEXT    NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
-      chapter_number  INTEGER NOT NULL,
-      title           TEXT    NOT NULL,
-      description     TEXT    NOT NULL DEFAULT '',
-      created_at      TEXT    NOT NULL
-    )
-  `);
-
-  // ─── Story Chapters (progreso por conversación) ───────────────────────────
-  db.run(sql`
-    CREATE TABLE IF NOT EXISTS story_chapters (
-      id              TEXT    PRIMARY KEY,
-      conversation_id TEXT    NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
-      chapter_number  INTEGER NOT NULL,
-      title           TEXT    NOT NULL,
-      description     TEXT    NOT NULL DEFAULT '',
-      is_completed    INTEGER NOT NULL DEFAULT 0,
-      completed_at    TEXT,
-      created_at      TEXT    NOT NULL
-    )
-  `);
+  // ─── Stories — locations column ──────────────────────────────────────────
+  try { db.run(sql`ALTER TABLE stories ADD COLUMN locations TEXT NOT NULL DEFAULT '[]'`); } catch { /* already exists */ }
 
   // ─── Conversation Summaries (historial acumulativo con rangos de mensajes) ──
   db.run(sql`
