@@ -52,7 +52,7 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         } catch { /* skip */ }
         workflows.push({ id, label, hasImageInput, imageInputLabel });
       }
-      return reply.send(workflows);
+      return reply.send({ data: workflows });
     } catch (err) {
       return reply.status(500).send({ error: err instanceof Error ? err.message : 'Error leyendo workflows' });
     }
@@ -69,7 +69,8 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
         signal: AbortSignal.timeout(10_000),
       });
       if (!res.ok) return reply.status(res.status).send({ error: `bzComfy respondió con ${res.status}` });
-      return reply.send(await res.json());
+      const workflows = await res.json();
+      return reply.send({ data: workflows });
     } catch (err) {
       return reply.status(503).send({ error: err instanceof Error ? err.message : 'No se pudo conectar a bzComfy' });
     }
