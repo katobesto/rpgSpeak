@@ -35,10 +35,19 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
   const [editContent, setEditContent] = useState(message.content);
   const [showPrompt, setShowPrompt] = useState(false);
 
-  // Scene image — derived from message.metadata so it survives conversation switches
-  const sceneImageUrl     = (message.metadata?.sceneImageUrl   as string | undefined) ?? null;
-  const sceneImagePending = (message.metadata?.sceneImagePending as boolean | undefined) ?? false;
-  const sceneDesc         = (message.metadata?.sceneDescription as string | undefined) ?? null;
+  // Scene images — array stored in metadata; backward compat with legacy sceneImageUrl
+  const sceneImages: Array<{ url: string; pending?: boolean; token?: string; description?: string }> =
+    React.useMemo(() => {
+      const meta = message.metadata ?? {};
+      if (Array.isArray((meta as any).sceneImages)) return (meta as any).sceneImages;
+      const legacyUrl = (meta as any).sceneImageUrl as string | undefined;
+      if (legacyUrl) return [{ url: legacyUrl, pending: (meta as any).sceneImagePending ?? false, description: (meta as any).sceneDescription }];
+      return [];
+    }, [message.metadata]);
+
+  const hasPending   = sceneImages.some(i => i.pending);
+  const lastDesc     = sceneImages.length > 0 ? (sceneImages[sceneImages.length - 1].description ?? '') : '';
+
   const [showScenePanel,  setShowScenePanel]  = useState(false);
   const [showSceneDebug,  setShowSceneDebug]  = useState(false);
   const [editablePrompt,  setEditablePrompt]  = useState('');
@@ -47,31 +56,32 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
   const [sceneError,      setSceneError]      = useState<string | null>(null);
   const uploadInputRef = React.useRef<HTMLInputElement>(null);
 
-  // Keep editable prompt in sync when sceneDesc changes (e.g. after first generation)
+  // Keep editable prompt in sync with most recent generation description
   React.useEffect(() => {
-    if (sceneDesc) setEditablePrompt(sceneDesc);
-  }, [sceneDesc]);
+    if (lastDesc) setEditablePrompt(lastDesc);
+  }, [lastDesc]);
 
   const activeConversation = useChatStore((s) => s.activeConversation);
   const removeMessage = useChatStore((s) => s.removeMessage);
   const updateMessage = useChatStore((s) => s.updateMessage);
 
-  // Poll for the 4K final image while the preview is pending
+  // Poll while any image in the array is pending (waiting for 4K final)
   React.useEffect(() => {
-    if (!sceneImagePending || !message.id) return;
+    if (!hasPending || !message.id) return;
     const interval = setInterval(async () => {
       try {
         const updated = await messagesApi.get(message.id);
-        const pending = updated.metadata?.sceneImagePending as boolean | undefined;
-        const url     = updated.metadata?.sceneImageUrl as string | undefined;
-        if (!pending && url) {
+        const imgs: any[] = Array.isArray((updated.metadata as any)?.sceneImages)
+          ? (updated.metadata as any).sceneImages
+          : [];
+        if (!imgs.some((i: any) => i.pending)) {
           updateMessage(message.id, { metadata: updated.metadata });
           clearInterval(interval);
         }
       } catch { /* ignore transient errors */ }
     }, 4_000);
     return () => clearInterval(interval);
-  }, [sceneImagePending, message.id, updateMessage]);
+  }, [hasPending, message.id, updateMessage]);
 
   // TTS — settings leídos de cache (sin petición extra)
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: settingsApi.get });
@@ -188,12 +198,11 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
         opts?.workflowName, customPrompt,
         opts?.useFaceReference, opts?.referenceCharId,
       );
+      const newEntry = { url: result.imageUrl, pending: result.pending ?? false, description: result.sceneDescription };
       updateMessage(message.id, {
         metadata: {
           ...(message.metadata ?? {}),
-          sceneImageUrl:     result.imageUrl,
-          sceneImagePending: result.pending ?? false,
-          sceneDescription:  result.sceneDescription,
+          sceneImages: [...sceneImages, newEntry],
         },
       });
       setEditablePrompt(result.sceneDescription);
@@ -205,19 +214,15 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
     }
   }
 
-  async function handleDeleteSceneImage() {
+  async function handleDeleteSceneImage(imageUrl: string) {
     if (!activeConversation?.id) return;
     try {
-      await generateApi.deleteSceneImage(activeConversation.id, message.id);
+      await generateApi.deleteSceneImage(activeConversation.id, message.id, imageUrl);
+      const remaining = sceneImages.filter(i => i.url !== imageUrl);
       updateMessage(message.id, {
-        metadata: {
-          ...(message.metadata ?? {}),
-          sceneImageUrl:     undefined,
-          sceneDescription:  undefined,
-          sceneImagePending: false,
-        },
+        metadata: { ...(message.metadata ?? {}), sceneImages: remaining },
       });
-      setShowScenePanel(false);
+      if (remaining.length === 0) setShowScenePanel(false);
     } catch (err) {
       setSceneError(err instanceof Error ? err.message : 'Error al eliminar');
     }
@@ -432,28 +437,48 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
           </div>
         )}
 
-        {/* Scene image + panel */}
+        {/* Scene images gallery + prompt panel */}
         {sceneError && (
           <p className="text-[11px] text-red-400 mt-1">{sceneError}</p>
         )}
-        {sceneImageUrl && (
-          <div className="mt-2 max-w-sm space-y-1">
-            {/* Image */}
-            <div className="relative rounded-xl overflow-hidden border border-border">
-              <img
-                src={sceneImageUrl}
-                alt="Imagen de escena generada"
-                className="w-full h-auto block"
-                onClick={() => openLightbox(sceneImageUrl, 'Imagen de escena')}
-                style={{ cursor: 'zoom-in' }}
-              />
-              {sceneImagePending && (
-                <div className="absolute bottom-2 left-2 flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium text-white"
-                  style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)' }}>
-                  <Loader size={9} className="animate-spin flex-shrink-0" />
-                  Mejorando a 4K…
+        {sceneImages.length > 0 && (
+          <div className="mt-2 space-y-1.5" style={{ maxWidth: '480px' }}>
+            {/* Thumbnail strip */}
+            <div className="flex flex-wrap gap-2">
+              {sceneImages.map((img, idx) => (
+                <div
+                  key={img.url}
+                  className="relative rounded-lg overflow-hidden border border-border flex-shrink-0"
+                  style={{ width: sceneImages.length === 1 ? '100%' : '120px', aspectRatio: sceneImages.length === 1 ? 'auto' : '1' }}
+                >
+                  <img
+                    src={img.url}
+                    alt={`Imagen de escena ${idx + 1}`}
+                    className="w-full h-full object-cover block"
+                    style={{ cursor: img.pending ? 'default' : 'zoom-in' }}
+                    onClick={() => !img.pending && openLightbox(img.url, `Imagen de escena ${idx + 1}`)}
+                  />
+                  {img.pending && (
+                    <div className="absolute inset-0 flex items-center justify-center"
+                      style={{ background: 'rgba(0,0,0,0.45)' }}>
+                      <div className="flex flex-col items-center gap-1">
+                        <Loader size={16} className="animate-spin text-white" />
+                        <span className="text-[9px] text-white font-medium">4K…</span>
+                      </div>
+                    </div>
+                  )}
+                  {!img.pending && (
+                    <button
+                      onClick={() => handleDeleteSceneImage(img.url)}
+                      className="absolute top-1 right-1 rounded-full p-0.5 text-white opacity-0 hover:opacity-100 transition-opacity"
+                      style={{ background: 'rgba(0,0,0,0.6)' }}
+                      title="Eliminar imagen"
+                    >
+                      <X size={11} />
+                    </button>
+                  )}
                 </div>
-              )}
+              ))}
             </div>
 
             {/* Toggle prompt panel */}
@@ -462,7 +487,7 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
               className="flex items-center gap-1 text-[10px] text-text-muted hover:text-text-primary transition-colors px-1"
             >
               <Wand2 size={9} />
-              {showScenePanel ? 'Ocultar prompt' : 'Ver / editar prompt'}
+              {showScenePanel ? 'Ocultar prompt' : 'Generar otra imagen'}
             </button>
 
             {showScenePanel && (
@@ -475,7 +500,7 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
                   onChange={(e) => setEditablePrompt(e.target.value)}
                   rows={5}
                   className="w-full text-xs bg-transparent border border-border rounded-lg px-2 py-1.5 text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent resize-none font-mono leading-relaxed"
-                  placeholder="Edita el prompt y regenera la imagen..."
+                  placeholder="Describe la nueva imagen..."
                 />
                 <div className="flex items-center gap-2">
                   <button
@@ -486,15 +511,7 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
                     {generatingScene
                       ? <Loader size={11} className="animate-spin" />
                       : <Wand2 size={11} />}
-                    {generatingScene ? 'Generando...' : 'Regenerar imagen'}
-                  </button>
-                  <button
-                    onClick={handleDeleteSceneImage}
-                    disabled={generatingScene}
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs text-red-400 hover:bg-red-500/10 border border-red-500/30 disabled:opacity-50 transition-colors"
-                  >
-                    <Trash2 size={11} />
-                    Eliminar imagen
+                    {generatingScene ? 'Generando...' : 'Generar imagen'}
                   </button>
                 </div>
               </div>
@@ -517,16 +534,15 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
             conversationId={activeConversation.id}
             messageId={message.id}
             onDone={(imageUrl, sceneDescription, pending) => {
+              const newEntry = { url: imageUrl, pending: pending ?? false, description: sceneDescription };
               updateMessage(message.id, {
                 metadata: {
                   ...(message.metadata ?? {}),
-                  sceneImageUrl:     imageUrl,
-                  sceneImagePending: pending ?? false,
-                  sceneDescription,
+                  sceneImages: [...sceneImages, newEntry],
                 },
               });
               setEditablePrompt(sceneDescription);
-              setShowScenePanel(true);
+              setShowScenePanel(false);
               if (!pending) setShowSceneDebug(false);
             }}
             onClose={() => setShowSceneDebug(false)}

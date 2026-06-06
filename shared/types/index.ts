@@ -268,6 +268,16 @@ export interface ProviderModel {
   description?: string;
 }
 
+// ─── Scene Image ─────────────────────────────────────────────────────────────
+
+export interface SceneImage {
+  url: string;
+  pending?: boolean;
+  /** Internal token to identify the generation task and detect superseded results */
+  token?: string;
+  description?: string;
+}
+
 // ─── TTS Types ────────────────────────────────────────────────────────────────
 
 export interface TtsTextReplacement {

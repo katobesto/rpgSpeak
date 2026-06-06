@@ -18,6 +18,17 @@ import { MemoryRepository } from '../../core/memory/memory.repository.js';
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../');
 
+// ── Scene image helpers ───────────────────────────────────────────────────────
+
+interface SceneImage { url: string; pending?: boolean; token?: string; description?: string }
+
+/** Read sceneImages from metadata, falling back to the legacy sceneImageUrl field. */
+function getSceneImages(meta: Record<string, unknown>): SceneImage[] {
+  if (Array.isArray(meta.sceneImages)) return meta.sceneImages as SceneImage[];
+  if (meta.sceneImageUrl) return [{ url: meta.sceneImageUrl as string, description: meta.sceneDescription as string | undefined }];
+  return [];
+}
+
 const generateSchema = z.object({
   conversationId: z.string(),
   message: z.string().min(1).max(32768),
@@ -354,44 +365,36 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
         fs.writeFileSync(path.join(scenesDir, previewFilename), previewResult.buffer);
         const previewUrl = `/images/scenes/${conversationId}/${previewFilename}`;
 
-        // Persist preview URL + pending flag — respond immediately.
-        // genToken lets the background task detect if the image was deleted or superseded.
         const genToken = Date.now().toString(36) + Math.random().toString(36).slice(2);
-        msgRepo.update(messageId, {
-          metadata: {
-            ...existingMeta,
-            sceneImageUrl:     previewUrl,
-            sceneImagePending: true,
-            sceneImageToken:   genToken,
-            sceneDescription:  sceneDescription,
-          },
-        });
+        const previewEntry: SceneImage = { url: previewUrl, pending: true, token: genToken, description: sceneDescription };
+        const imagesAfterPreview = [...getSceneImages(existingMeta), previewEntry];
+        msgRepo.update(messageId, { metadata: { ...existingMeta, sceneImages: imagesAfterPreview } });
 
-        // Background: wait for the final upscaled image, then update metadata
+        // Background: replace the preview entry with the final 4K image
         waitForFinal().then((finalResult) => {
           const latestMsg = msgRepo.findById(messageId);
           const latestMeta = (latestMsg?.metadata ?? {}) as Record<string, unknown>;
-          // If the token changed the image was deleted or a new generation started — abort.
-          if (latestMeta.sceneImageToken !== genToken) {
-            console.log('[scene-image] Generación supersedida, descartando 4K final');
-            return;
-          }
+          const imgs = getSceneImages(latestMeta);
+          const idx = imgs.findIndex(i => i.token === genToken);
+          if (idx === -1) { console.log('[scene-image] Entrada eliminada, descartando 4K final'); return; }
           const finalExt = path.extname(finalResult.filename) || '.png';
-          const finalFilename = `scene_${messageId.slice(0, 8)}_final${finalExt}`;
+          const finalFilename = `scene_${messageId.slice(0, 8)}_${genToken}_final${finalExt}`;
           fs.writeFileSync(path.join(scenesDir, finalFilename), finalResult.buffer);
           const finalUrl = `/images/scenes/${conversationId}/${finalFilename}`;
-          msgRepo.update(messageId, {
-            metadata: { ...latestMeta, sceneImageUrl: finalUrl, sceneImagePending: false },
-          });
+          const updated = [...imgs];
+          updated[idx] = { url: finalUrl, description: sceneDescription };
+          msgRepo.update(messageId, { metadata: { ...latestMeta, sceneImages: updated } });
           console.log(`[scene-image] 4K final guardado: ${finalUrl}`);
         }).catch((err) => {
           console.error('[scene-image] Error en upscale final:', err);
           const latestMsg = msgRepo.findById(messageId);
           const latestMeta = (latestMsg?.metadata ?? {}) as Record<string, unknown>;
-          if (latestMeta.sceneImageToken !== genToken) return;
-          msgRepo.update(messageId, {
-            metadata: { ...latestMeta, sceneImagePending: false },
-          });
+          const imgs = getSceneImages(latestMeta);
+          const idx = imgs.findIndex(i => i.token === genToken);
+          if (idx === -1) return;
+          const updated = [...imgs];
+          updated[idx] = { ...updated[idx], pending: false };
+          msgRepo.update(messageId, { metadata: { ...latestMeta, sceneImages: updated } });
         });
 
         return reply.send({
@@ -416,14 +419,11 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
 
     const imageUrl = `/images/scenes/${conversationId}/${savedFilename}`;
 
-    // ── Persist URL + description in message metadata ─────────────────────
-    const existingMeta = (message.metadata ?? {}) as Record<string, unknown>;
+    // ── Append to sceneImages array ───────────────────────────────────────
+    const existingMeta2 = (message.metadata ?? {}) as Record<string, unknown>;
+    const newEntry: SceneImage = { url: imageUrl, description: sceneDescription };
     msgRepo.update(messageId, {
-      metadata: {
-        ...existingMeta,
-        sceneImageUrl:    imageUrl,
-        sceneDescription: sceneDescription,
-      },
+      metadata: { ...existingMeta2, sceneImages: [...getSceneImages(existingMeta2), newEntry] },
     });
 
     return reply.send({
@@ -629,36 +629,40 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
   });
 
   // ── DELETE /generate/scene-image ─────────────────────────────────────────
-  // Removes the scene image from message metadata and deletes the file from disk
+  // Removes a specific scene image (by URL) from the message's sceneImages array
   app.delete('/scene-image', async (req, reply) => {
     const body = z.object({
       conversationId: z.string(),
       messageId:      z.string(),
+      imageUrl:       z.string(),
     }).parse(req.body);
 
-    const { conversationId, messageId } = body;
+    const { conversationId, messageId, imageUrl } = body;
 
     const msgRepo = new MessageRepository();
     const message = msgRepo.findById(messageId);
     if (!message) throw new NotFoundError('Message', messageId);
 
-    // Delete image file if it exists
-    const existing = (message.metadata?.sceneImageUrl as string | undefined);
-    if (existing) {
-      const relPath  = existing.replace(/^\/images\//, '');
-      const filePath = path.join(PROJECT_ROOT, 'data', 'images', relPath);
-      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
-    }
+    // Delete the file from disk
+    const relPath  = imageUrl.replace(/^\/images\//, '');
+    const filePath = path.join(PROJECT_ROOT, 'data', 'images', relPath);
+    if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 
-    // Clear metadata fields (including pending/token so any in-flight background task is ignored)
-    const cleaned = { ...(message.metadata as Record<string, unknown>) };
-    delete cleaned.sceneImageUrl;
-    delete cleaned.sceneDescription;
-    delete cleaned.sceneImagePending;
-    delete cleaned.sceneImageToken;
+    // Remove from sceneImages array (token removal ensures in-flight background tasks are aborted)
+    const meta = (message.metadata as Record<string, unknown>) ?? {};
+    const remaining = getSceneImages(meta).filter(i => i.url !== imageUrl);
+    const cleaned = { ...meta };
+    // Drop legacy fields if they match the deleted URL
+    if (cleaned.sceneImageUrl === imageUrl) {
+      delete cleaned.sceneImageUrl;
+      delete cleaned.sceneDescription;
+      delete cleaned.sceneImagePending;
+      delete cleaned.sceneImageToken;
+    }
+    cleaned.sceneImages = remaining;
     msgRepo.update(messageId, { metadata: cleaned });
 
-    void conversationId; // used for future per-conversation cleanup
+    void conversationId;
     return reply.send({ success: true });
   });
 
@@ -698,10 +702,11 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
 
     const imageUrl = `/images/scenes/${conversationId}/${savedFilename}`;
 
-    // Actualizar metadata del mensaje (mismo campo que las generadas)
+    // Append to sceneImages array
     const existingMeta = (message.metadata ?? {}) as Record<string, unknown>;
+    const uploadEntry: SceneImage = { url: imageUrl };
     msgRepo.update(messageId, {
-      metadata: { ...existingMeta, sceneImageUrl: imageUrl },
+      metadata: { ...existingMeta, sceneImages: [...getSceneImages(existingMeta), uploadEntry] },
     });
 
     return reply.send({ success: true, data: { imageUrl } });
@@ -870,27 +875,33 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
         fs.writeFileSync(path.join(scenesDir, previewFilename), previewResult.buffer);
         const previewUrl = `/images/scenes/${conversationId}/${previewFilename}`;
         const sseGenToken = Date.now().toString(36) + Math.random().toString(36).slice(2);
-        msgRepo.update(messageId, { metadata: { ...existingMeta, sceneImageUrl: previewUrl, sceneImagePending: true, sceneImageToken: sseGenToken, sceneDescription } });
+        const ssePreviewEntry: SceneImage = { url: previewUrl, pending: true, token: sseGenToken, description: sceneDescription };
+        msgRepo.update(messageId, { metadata: { ...existingMeta, sceneImages: [...getSceneImages(existingMeta), ssePreviewEntry] } });
         send({ type: 'preview', imageUrl: previewUrl, sceneDescription });
 
         // Final (background — don't await before ending SSE)
         waitForFinal().then((finalResult) => {
           const latestMeta = (msgRepo.findById(messageId)?.metadata ?? {}) as Record<string, unknown>;
-          if (latestMeta.sceneImageToken !== sseGenToken) {
-            console.log('[scene-image] SSE generación supersedida, descartando 4K final');
-            return;
-          }
+          const imgs = getSceneImages(latestMeta);
+          const idx = imgs.findIndex(i => i.token === sseGenToken);
+          if (idx === -1) { console.log('[scene-image] SSE entrada eliminada, descartando 4K final'); return; }
           const finalExt = path.extname(finalResult.filename) || '.png';
-          const finalFilename = `scene_${messageId.slice(0, 8)}_final${finalExt}`;
+          const finalFilename = `scene_${messageId.slice(0, 8)}_${sseGenToken}_final${finalExt}`;
           fs.writeFileSync(path.join(scenesDir, finalFilename), finalResult.buffer);
           const finalUrl = `/images/scenes/${conversationId}/${finalFilename}`;
-          msgRepo.update(messageId, { metadata: { ...latestMeta, sceneImageUrl: finalUrl, sceneImagePending: false } });
+          const updatedImgs = [...imgs];
+          updatedImgs[idx] = { url: finalUrl, description: sceneDescription };
+          msgRepo.update(messageId, { metadata: { ...latestMeta, sceneImages: updatedImgs } });
           send({ type: 'done', imageUrl: finalUrl, sceneDescription });
           reply.raw.end();
         }).catch((err) => {
           const latestMeta = (msgRepo.findById(messageId)?.metadata ?? {}) as Record<string, unknown>;
-          if (latestMeta.sceneImageToken !== sseGenToken) return;
-          msgRepo.update(messageId, { metadata: { ...latestMeta, sceneImagePending: false } });
+          const imgs = getSceneImages(latestMeta);
+          const idx = imgs.findIndex(i => i.token === sseGenToken);
+          if (idx === -1) return;
+          const updatedImgs = [...imgs];
+          updatedImgs[idx] = { ...updatedImgs[idx], pending: false };
+          msgRepo.update(messageId, { metadata: { ...latestMeta, sceneImages: updatedImgs } });
           send({ type: 'error', message: `Error en upscale: ${err instanceof Error ? err.message : err}` });
           reply.raw.end();
         });

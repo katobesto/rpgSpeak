@@ -87,8 +87,8 @@ export const generateApi = {
       referenceCharId,
     }),
 
-  deleteSceneImage: (conversationId: string, messageId: string) =>
-    api.deleteWithBody<{ success: true }>('/generate/scene-image', { conversationId, messageId }),
+  deleteSceneImage: (conversationId: string, messageId: string, imageUrl: string) =>
+    api.deleteWithBody<{ success: true }>('/generate/scene-image', { conversationId, messageId, imageUrl }),
 
   /** Sube una imagen externa y la asocia al mensaje (mismo campo sceneImageUrl). */
   uploadSceneImage: async (conversationId: string, messageId: string, file: File): Promise<{ imageUrl: string }> => {
