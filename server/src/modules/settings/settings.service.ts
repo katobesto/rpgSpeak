@@ -462,6 +462,29 @@ Responde de forma breve y directa: máximo 2 párrafos cortos. Ve al punto esenc
   // Cloudflare Access — para ComfyUI remoto tras túnel
   comfyUiCfClientId: null,
   comfyUiCfClientSecret: null,
+  // Prompt de generación de descripción visual de personaje (para imagen)
+  charImagePrompt: `Eres un experto en generar prompts para generadores de imágenes IA (Stable Diffusion, Midjourney, DALL-E).
+
+Basándote en la siguiente descripción de un personaje, genera un prompt detallado en inglés para un generador de imágenes que capture su apariencia física de forma consistente.
+
+El prompt debe incluir:
+- Rasgos faciales específicos (forma de cara, ojos, nariz, boca, expresión habitual)
+- Color y estilo de cabello
+- Complexión física y altura aproximada
+- Atuendo característico (ropa, colores, materiales, accesorios)
+- Rasgos distintivos (cicatrices, tatuajes, marcas especiales)
+- Estilo artístico sugerido (fantasy art, anime, realistic, dark fantasy, etc.)
+- Iluminación y atmósfera que corresponda a su personalidad
+
+Formato de salida: Un único párrafo en inglés de 100-150 palabras, listo para usar directamente en un generador de imágenes.
+
+DATOS DEL PERSONAJE:
+Nombre: {{nombre}}
+Descripción: {{descripcion}}
+Personalidad: {{personalidad}}
+Lore: {{lore}}
+
+Responde SOLO con el prompt de imagen, sin explicaciones adicionales.`,
 };
 
 export class SettingsService {

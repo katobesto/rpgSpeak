@@ -105,28 +105,12 @@ export class CharacterService {
       throw new ValidationError('No hay un modelo configurado. Ve a Settings y selecciona un modelo.');
     }
 
-    const prompt = `Eres un experto en generar prompts para generadores de imágenes IA (Stable Diffusion, Midjourney, DALL-E).
-
-Basándote en la siguiente descripción de un personaje, genera un prompt detallado en inglés para un generador de imágenes que capture su apariencia física de forma consistente.
-
-El prompt debe incluir:
-- Rasgos faciales específicos (forma de cara, ojos, nariz, boca, expresión habitual)
-- Color y estilo de cabello
-- Complexión física y altura aproximada
-- Atuendo característico (ropa, colores, materiales, accesorios)
-- Rasgos distintivos (cicatrices, tatuajes, marcas especiales)
-- Estilo artístico sugerido (fantasy art, anime, realistic, dark fantasy, etc.)
-- Iluminación y atmósfera que corresponda a su personalidad
-
-Formato de salida: Un único párrafo en inglés de 100-150 palabras, listo para usar directamente en un generador de imágenes.
-
-DATOS DEL PERSONAJE:
-Nombre: ${character.name}
-Descripción: ${character.description}
-Personalidad: ${character.personality}
-Lore: ${character.lore}
-
-Responde SOLO con el prompt de imagen, sin explicaciones adicionales.`;
+    const promptTemplate = settings.charImagePrompt;
+    const prompt = promptTemplate
+      .replace('{{nombre}}',      character.name        ?? '')
+      .replace('{{descripcion}}', character.description ?? '')
+      .replace('{{personalidad}}', character.personality ?? '')
+      .replace('{{lore}}',        character.lore        ?? '');
 
     const llm = createProvider(provider);
     const request: GenerateRequest = {

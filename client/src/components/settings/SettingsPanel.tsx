@@ -19,13 +19,13 @@ import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
 
 type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats' | 'backup';
 
-const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'chapterGuidePrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength'];
+const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'charImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'chapterGuidePrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret', 'bzComfyUrl', 'bzComfyApiToken', 'bzComfyWorkflow'];
 
 export function SettingsPanel() {
   const [tab, setTab] = useState<STab>('profile');
-  const [genTab, setGenTab] = useState<'llm' | 'fast-llm' | 'embeddings'>('llm');
+  const [genTab, setGenTab] = useState<'llm' | 'fast-llm' | 'embeddings' | 'images'>('llm');
   const qc = useQueryClient();
   const { appearance, setAppearancePref } = useUiStore();
   const { user: currentUser, isAdmin, clearAuth } = useAuthStore();
@@ -177,9 +177,10 @@ export function SettingsPanel() {
               {/* ── Sub-tab bar ─────────────────────────────────────────────────── */}
               <div className="flex gap-1 border-b border-border pb-3 -mt-2 mb-5">
                 {([
-                  { id: 'llm', label: 'LLM Principal' },
-                  { id: 'fast-llm', label: 'LLM Rápido' },
+                  { id: 'llm',        label: 'LLM Principal' },
+                  { id: 'fast-llm',   label: 'LLM Rápido' },
                   { id: 'embeddings', label: 'Embeddings' },
+                  { id: 'images',     label: 'Generación de imágenes' },
                 ] as const).map((t) => (
                   <button key={t.id} onClick={() => setGenTab(t.id)}
                     className={`px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
@@ -301,11 +302,6 @@ export function SettingsPanel() {
                       mono
                     />
                   </Section>
-
-                  <ScenePromptSection
-                    value={draft.sceneImagePrompt ?? ''}
-                    onChange={(v) => update('sceneImagePrompt', v)}
-                  />
 
                   <Section title="Prompt de inyección de memoria">
                     <p className="text-xs text-text-muted mb-1 leading-relaxed">
@@ -679,6 +675,15 @@ export function SettingsPanel() {
                     )}
                   </Section>
                 </>
+              )}
+
+              {/* ══ Generación de imágenes ══════════════════════════════════════ */}
+              {genTab === 'images' && draft && (
+                <ImageGenTab
+                  draft={draft}
+                  update={update}
+                  providers={providers}
+                />
               )}
 
               {/* ── Common save bar ───────────────────────────────────────────── */}
@@ -1514,6 +1519,128 @@ function RestorablePrompt({
         className={mono ? 'font-mono text-xs' : undefined}
         hint={hint}
       />
+    </div>
+  );
+}
+
+// ─── Image generation tab ────────────────────────────────────────────────────
+
+function ImageGenTab({
+  draft,
+  update,
+  providers,
+}: {
+  draft: Partial<AppSettings>;
+  update: (k: keyof AppSettings, v: unknown) => void;
+  providers: Provider[];
+}) {
+  const [testCharId,   setTestCharId]   = React.useState('');
+  const [testResult,   setTestResult]   = React.useState('');
+  const [testLoading,  setTestLoading]  = React.useState(false);
+  const [testError,    setTestError]    = React.useState<string | null>(null);
+  const [testProvider, setTestProvider] = React.useState('');
+  const [testModel,    setTestModel]    = React.useState('');
+  const qc = useQueryClient();
+
+  const allChars: { id: string; name: string }[] = qc.getQueryData(['characters']) ?? [];
+
+  async function runCharTest() {
+    if (!testCharId) return;
+    setTestLoading(true);
+    setTestResult('');
+    setTestError(null);
+    try {
+      const res = await charactersApi.generateImageDescription(
+        testCharId,
+        testProvider ? { providerId: testProvider, modelId: testModel || undefined } : undefined,
+      );
+      setTestResult(res.description);
+    } catch (err) {
+      setTestError(err instanceof Error ? err.message : 'Error al generar');
+    } finally {
+      setTestLoading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-text-muted leading-relaxed -mt-2 mb-5 pb-3 border-b border-border/50">
+        Prompts que el LLM usa para <strong className="text-text-secondary">convertir datos en prompts de imagen</strong>.
+        Los cambios aquí afectan a la generación de escenas del chat y a las descripciones visuales de personajes.
+      </p>
+
+      {/* ── Scene image prompt ───────────────────────────────────────────── */}
+      <ScenePromptSection
+        value={draft.sceneImagePrompt ?? ''}
+        onChange={(v) => update('sceneImagePrompt', v)}
+      />
+
+      {/* ── Character image prompt ──────────────────────────────────────── */}
+      <Section title="Prompt de descripción visual de personaje">
+        <p className="text-xs text-text-muted mb-1 leading-relaxed">
+          Plantilla que convierte los datos del personaje en un prompt de imagen.
+          Usa{' '}
+          {(['{{nombre}}', '{{descripcion}}', '{{personalidad}}', '{{lore}}'] as const).map((v, i, arr) => (
+            <React.Fragment key={v}>
+              <code className="bg-surface-3 px-1 rounded text-accent font-mono text-[10px]">{v}</code>
+              {i < arr.length - 1 ? ', ' : ''}
+            </React.Fragment>
+          ))}
+          {' '}como variables.
+        </p>
+        <RestorablePrompt
+          settingsKey="charImagePrompt"
+          value={draft.charImagePrompt ?? ''}
+          onChange={(v) => update('charImagePrompt', v)}
+          rows={14}
+          mono
+        />
+
+        {/* ── Test widget ─────────────────────────────────────────────── */}
+        <div className="mt-4 rounded-xl border border-border/60 bg-surface-1/40 p-4 space-y-3">
+          <p className="text-[11px] font-semibold text-text-secondary">Probar prompt con un personaje</p>
+          <div className="flex flex-wrap gap-2 items-end">
+            <div className="flex-1 min-w-[140px] space-y-1">
+              <label className="text-xs text-text-muted">Personaje</label>
+              <select
+                value={testCharId}
+                onChange={(e) => setTestCharId(e.target.value)}
+                className="w-full bg-surface-2 border border-border rounded-lg px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+              >
+                <option value="">— Selecciona —</option>
+                {allChars.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div className="flex-1 min-w-[140px] space-y-1">
+              <label className="text-xs text-text-muted">Provider (opcional)</label>
+              <select
+                value={testProvider}
+                onChange={(e) => { setTestProvider(e.target.value); setTestModel(''); }}
+                className="w-full bg-surface-2 border border-border rounded-lg px-3 py-1.5 text-sm text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+              >
+                <option value="">— Por defecto —</option>
+                {providers.filter((p) => p.isEnabled).map((p) => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+            <button
+              onClick={runCharTest}
+              disabled={!testCharId || testLoading}
+              className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-medium bg-accent text-white hover:bg-accent/80 disabled:opacity-50 transition-colors"
+            >
+              {testLoading ? <><Loader size={11} className="animate-spin" /> Generando…</> : <><Wand2 size={11} /> Probar</>}
+            </button>
+          </div>
+          {testError && <p className="text-xs text-red-400">{testError}</p>}
+          {testResult && (
+            <div className="mt-2">
+              <p className="text-[10px] font-semibold text-text-secondary mb-1">Resultado:</p>
+              <div className="bg-surface-2 rounded-lg p-3 text-xs font-mono text-text-primary leading-relaxed whitespace-pre-wrap border border-border/50">{testResult}</div>
+            </div>
+          )}
+        </div>
+      </Section>
     </div>
   );
 }

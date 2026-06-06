@@ -349,6 +349,7 @@ export interface AppSettings {
   ttsSettings: TtsSettings;
   comfyUiUrl: string;
   sceneImagePrompt: string;
+  charImagePrompt: string;
   // Image generation provider
   imageProvider: 'comfyui' | 'pollinations' | 'gemini' | 'fal' | 'bzcomfy';
   imageProviderApiKey: string | null;        // API key for Gemini / Fal
