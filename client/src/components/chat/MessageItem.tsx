@@ -14,6 +14,7 @@ import { useAuthStore } from '../../stores/auth.store.ts';
 import { SceneDebugModal } from './SceneDebugModal.tsx';
 
 import { useTtsStore } from '../../stores/tts.store.ts';
+import { useLightboxStore } from '../../stores/lightbox.store.ts';
 
 // Configure marked for safe rendering (marked v12 requires .use() — setOptions is a no-op)
 marked.use({ breaks: true, gfm: true });
@@ -77,6 +78,7 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
   const showTokenCount = useUiStore((s) => s.appearance.showTokenCount);
   const isAdmin = useAuthStore((s) => s.isAdmin);
   const { speak, playingId, loadingId } = useTtsStore();
+  const openLightbox = useLightboxStore((s) => s.open);
   const isTtsPlaying = playingId === message.id;
   const isTtsLoading = loadingId === message.id;
 
@@ -441,7 +443,7 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
                 src={sceneImageUrl}
                 alt="Imagen de escena generada"
                 className="w-full h-auto block"
-                onClick={() => window.open(sceneImageUrl, '_blank')}
+                onClick={() => openLightbox(sceneImageUrl, 'Imagen de escena')}
                 style={{ cursor: 'zoom-in' }}
               />
               {sceneImagePending && (
