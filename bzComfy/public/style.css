@@ -418,7 +418,7 @@ textarea { resize: vertical; line-height: 1.55; }
   border: 1.5px dashed var(--border2); border-radius: 7px; pointer-events: none;
 }
 
-#result-img { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 6px; display: block; transform-origin: 50% 50%; will-change: transform; }
+#result-img { width: auto; height: auto; max-width: none; max-height: none; border-radius: 6px; display: block; transform-origin: 50% 50%; will-change: transform; }
 
 .image-info {
   display: flex; align-items: center; justify-content: center; gap: 10px;

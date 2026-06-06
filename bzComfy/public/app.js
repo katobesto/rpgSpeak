@@ -148,27 +148,33 @@ function initImageInteraction() {
   let zoom = 1, panX = 0, panY = 0
   let dragging = false, lastMouse = { x: 0, y: 0 }
 
+  // Returns the scale that fits the image inside the container at native resolution.
+  // The image has no CSS size constraints, so this replaces max-width/max-height.
+  function computeFitZoom() {
+    if (!img.naturalWidth || !img.naturalHeight) return 1
+    return Math.min(wrap.clientWidth / img.naturalWidth, wrap.clientHeight / img.naturalHeight)
+  }
+
   function apply() {
-    img.style.transform = zoom === 1 && panX === 0 && panY === 0
-      ? ''
-      : `translate(${panX}px, ${panY}px) scale(${zoom})`
+    img.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`
   }
 
   function updateCursor() {
-    if (dragging)    { wrap.style.cursor = 'grabbing'; return }
-    if (zoom > 1.01) { wrap.style.cursor = 'grab';     return }
-    wrap.style.cursor = ''
+    if (dragging)                        { wrap.style.cursor = ‘grabbing’; return }
+    if (zoom > computeFitZoom() * 1.01)  { wrap.style.cursor = ‘grab’;     return }
+    wrap.style.cursor = ‘’
   }
 
   // Zoom toward the cursor position.
   // Formula derivation: for centered img, containerCenter = transformOrigin.
   //   rendered point: screen = origin + P*zoom + pan
-  //   keep P under cursor fixed â†’ newPan = m*(1-ratio) + pan*ratio
+  //   keep P under cursor fixed → newPan = m*(1-ratio) + pan*ratio
   function zoomAt(clientX, clientY, factor) {
-    const rect  = wrap.getBoundingClientRect()
-    const mx    = clientX - (rect.left + rect.width  / 2)
-    const my    = clientY - (rect.top  + rect.height / 2)
-    const newZoom = Math.min(Math.max(zoom * factor, 0.2), 12)
+    const rect    = wrap.getBoundingClientRect()
+    const mx      = clientX - (rect.left + rect.width  / 2)
+    const my      = clientY - (rect.top  + rect.height / 2)
+    const minZoom = computeFitZoom() * 0.8  // allow slight zoom-out below fit
+    const newZoom = Math.min(Math.max(zoom * factor, minZoom), 12)
     const ratio   = newZoom / zoom
     panX  = mx * (1 - ratio) + panX * ratio
     panY  = my * (1 - ratio) + panY * ratio
@@ -177,11 +183,11 @@ function initImageInteraction() {
     updateCursor()
   }
 
-  // Expose reset for use in resetViewer()
+  // Expose reset for use in showImage() and resetViewer()
   resetImageView = () => {
-    zoom = 1; panX = 0; panY = 0
+    zoom = computeFitZoom(); panX = 0; panY = 0
     apply()
-    wrap.style.cursor = ''
+    wrap.style.cursor = ‘’
   }
 
   // â”€â”€ Wheel: zoom at cursor â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -245,7 +251,7 @@ function initImageInteraction() {
       dragging = false
     } else if (e.touches.length === 1) {
       lastMouse = { x: e.touches[0].clientX, y: e.touches[0].clientY }
-      dragging = zoom > 1.01
+      dragging = zoom > computeFitZoom() * 1.01
     }
   }, { passive: false })
 
@@ -765,6 +771,7 @@ function showImage(src, isPreview, filename) {
     img.classList.remove('hidden')
     img.classList.add('fade-in')
     el('placeholder').classList.add('hidden')
+    resetImageView()  // fit native-resolution image in container via CSS transform
     if (!isPreview && filename) {
       el('image-filename').textContent = filename
       el('image-dimensions').textContent = `${img.naturalWidth} × ${img.naturalHeight} px`
