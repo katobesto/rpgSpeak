@@ -414,7 +414,8 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
     fs.mkdirSync(scenesDir, { recursive: true });
 
     const ext = path.extname(filename) || '.png';
-    const savedFilename = `scene_${messageId.slice(0, 8)}${ext}`;
+    const fileToken = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const savedFilename = `scene_${messageId.slice(0, 8)}_${fileToken}${ext}`;
     fs.writeFileSync(path.join(scenesDir, savedFilename), buffer);
 
     const imageUrl = `/images/scenes/${conversationId}/${savedFilename}`;
@@ -920,10 +921,13 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
             )
           : await comfyProvider.generate({ prompt: sceneDescription, workflowName });
         const ext = path.extname(result.filename) || '.png';
-        const savedFilename = `scene_${messageId.slice(0, 8)}${ext}`;
+        const sseFileToken = Date.now().toString(36) + Math.random().toString(36).slice(2);
+        const savedFilename = `scene_${messageId.slice(0, 8)}_${sseFileToken}${ext}`;
         fs.writeFileSync(path.join(scenesDir, savedFilename), result.buffer);
         const imageUrl = `/images/scenes/${conversationId}/${savedFilename}`;
-        msgRepo.update(messageId, { metadata: { ...existingMeta, sceneImageUrl: imageUrl, sceneDescription } });
+        const sseMeta = (msgRepo.findById(messageId)?.metadata ?? {}) as Record<string, unknown>;
+        const sseEntry: SceneImage = { url: imageUrl, description: sceneDescription };
+        msgRepo.update(messageId, { metadata: { ...sseMeta, sceneImages: [...getSceneImages(sseMeta), sseEntry] } });
         send({ type: 'done', imageUrl, sceneDescription });
         reply.raw.end();
       }
