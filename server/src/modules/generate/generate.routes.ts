@@ -354,34 +354,41 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
         fs.writeFileSync(path.join(scenesDir, previewFilename), previewResult.buffer);
         const previewUrl = `/images/scenes/${conversationId}/${previewFilename}`;
 
-        // Persist preview URL + pending flag — respond immediately
+        // Persist preview URL + pending flag — respond immediately.
+        // genToken lets the background task detect if the image was deleted or superseded.
+        const genToken = Date.now().toString(36) + Math.random().toString(36).slice(2);
         msgRepo.update(messageId, {
           metadata: {
             ...existingMeta,
             sceneImageUrl:     previewUrl,
             sceneImagePending: true,
+            sceneImageToken:   genToken,
             sceneDescription:  sceneDescription,
           },
         });
 
         // Background: wait for the final upscaled image, then update metadata
         waitForFinal().then((finalResult) => {
+          const latestMsg = msgRepo.findById(messageId);
+          const latestMeta = (latestMsg?.metadata ?? {}) as Record<string, unknown>;
+          // If the token changed the image was deleted or a new generation started — abort.
+          if (latestMeta.sceneImageToken !== genToken) {
+            console.log('[scene-image] Generación supersedida, descartando 4K final');
+            return;
+          }
           const finalExt = path.extname(finalResult.filename) || '.png';
           const finalFilename = `scene_${messageId.slice(0, 8)}_final${finalExt}`;
           fs.writeFileSync(path.join(scenesDir, finalFilename), finalResult.buffer);
           const finalUrl = `/images/scenes/${conversationId}/${finalFilename}`;
-          // Refresh metadata (may have changed since preview was saved)
-          const latestMsg = msgRepo.findById(messageId);
-          const latestMeta = (latestMsg?.metadata ?? {}) as Record<string, unknown>;
           msgRepo.update(messageId, {
             metadata: { ...latestMeta, sceneImageUrl: finalUrl, sceneImagePending: false },
           });
           console.log(`[scene-image] 4K final guardado: ${finalUrl}`);
         }).catch((err) => {
           console.error('[scene-image] Error en upscale final:', err);
-          // Clear pending flag so the UI doesn't spin forever
           const latestMsg = msgRepo.findById(messageId);
           const latestMeta = (latestMsg?.metadata ?? {}) as Record<string, unknown>;
+          if (latestMeta.sceneImageToken !== genToken) return;
           msgRepo.update(messageId, {
             metadata: { ...latestMeta, sceneImagePending: false },
           });
@@ -643,10 +650,12 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     }
 
-    // Clear metadata fields
+    // Clear metadata fields (including pending/token so any in-flight background task is ignored)
     const cleaned = { ...(message.metadata as Record<string, unknown>) };
     delete cleaned.sceneImageUrl;
     delete cleaned.sceneDescription;
+    delete cleaned.sceneImagePending;
+    delete cleaned.sceneImageToken;
     msgRepo.update(messageId, { metadata: cleaned });
 
     void conversationId; // used for future per-conversation cleanup
@@ -860,21 +869,27 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
         const previewFilename = `scene_${messageId.slice(0, 8)}_preview${previewExt}`;
         fs.writeFileSync(path.join(scenesDir, previewFilename), previewResult.buffer);
         const previewUrl = `/images/scenes/${conversationId}/${previewFilename}`;
-        msgRepo.update(messageId, { metadata: { ...existingMeta, sceneImageUrl: previewUrl, sceneImagePending: true, sceneDescription } });
+        const sseGenToken = Date.now().toString(36) + Math.random().toString(36).slice(2);
+        msgRepo.update(messageId, { metadata: { ...existingMeta, sceneImageUrl: previewUrl, sceneImagePending: true, sceneImageToken: sseGenToken, sceneDescription } });
         send({ type: 'preview', imageUrl: previewUrl, sceneDescription });
 
         // Final (background — don't await before ending SSE)
         waitForFinal().then((finalResult) => {
+          const latestMeta = (msgRepo.findById(messageId)?.metadata ?? {}) as Record<string, unknown>;
+          if (latestMeta.sceneImageToken !== sseGenToken) {
+            console.log('[scene-image] SSE generación supersedida, descartando 4K final');
+            return;
+          }
           const finalExt = path.extname(finalResult.filename) || '.png';
           const finalFilename = `scene_${messageId.slice(0, 8)}_final${finalExt}`;
           fs.writeFileSync(path.join(scenesDir, finalFilename), finalResult.buffer);
           const finalUrl = `/images/scenes/${conversationId}/${finalFilename}`;
-          const latestMeta = (msgRepo.findById(messageId)?.metadata ?? {}) as Record<string, unknown>;
           msgRepo.update(messageId, { metadata: { ...latestMeta, sceneImageUrl: finalUrl, sceneImagePending: false } });
           send({ type: 'done', imageUrl: finalUrl, sceneDescription });
           reply.raw.end();
         }).catch((err) => {
           const latestMeta = (msgRepo.findById(messageId)?.metadata ?? {}) as Record<string, unknown>;
+          if (latestMeta.sceneImageToken !== sseGenToken) return;
           msgRepo.update(messageId, { metadata: { ...latestMeta, sceneImagePending: false } });
           send({ type: 'error', message: `Error en upscale: ${err instanceof Error ? err.message : err}` });
           reply.raw.end();

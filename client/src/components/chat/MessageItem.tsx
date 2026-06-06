@@ -212,8 +212,9 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
       updateMessage(message.id, {
         metadata: {
           ...(message.metadata ?? {}),
-          sceneImageUrl:    undefined,
-          sceneDescription: undefined,
+          sceneImageUrl:     undefined,
+          sceneDescription:  undefined,
+          sceneImagePending: false,
         },
       });
       setShowScenePanel(false);
