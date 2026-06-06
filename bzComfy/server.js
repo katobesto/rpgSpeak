@@ -608,8 +608,11 @@ app.post('/api/generate', async (req, res) => {
                 if (histRes.ok) {
                   const hist = await histRes.json()
                   const outputs = hist[prompt_id]?.outputs ?? {}
-                  // Sort node IDs numerically to find the last save node.
-                  // Prefer nodes whose title contains "final".
+                  // Sort node IDs numerically to find the correct final save node.
+                  // A node is considered "final" if:
+                  //   • its display title (_meta.title) contains "final", OR
+                  //   • any of its output filenames start with "final" (filename_prefix in SaveImage)
+                  // If no "final" node is found, fall back to the last node with images.
                   const nodeIds = Object.keys(outputs).sort((a, b) => Number(a) - Number(b))
                   let finalImages = null
                   let finalFromTitle = false
@@ -617,11 +620,13 @@ app.post('/api/generate', async (req, res) => {
                     const imgs = outputs[nodeId]?.images
                     if (!imgs?.length) continue
                     const title = (session.nodeMap[nodeId] || '').toLowerCase()
-                    if (title.includes('final')) {
+                    const filenameHasFinal = imgs.some(img =>
+                      img.filename?.toLowerCase().startsWith('final')
+                    )
+                    if (title.includes('final') || filenameHasFinal) {
                       finalImages = imgs
                       finalFromTitle = true
                     } else if (!finalFromTitle) {
-                      // Keep the last node with images as fallback
                       finalImages = imgs
                     }
                   }
