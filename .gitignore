@@ -31,6 +31,10 @@ logs/
 # ── TTS service Python venv ───────────────────────────────────────────────────
 tts-service/venv/
 
+# ── Backup / temp restore ─────────────────────────────────────────────────────
+.restore-tmp/
+data/comfy-workflows/*.json2
+
 # ── Claude Code local files ───────────────────────────────────────────────────
 # /memory/ (barra inicial) solo ignora el directorio memory/ en la raíz del
 # proyecto, sin afectar a server/src/core/memory/ ni a ningún subdirectorio.
