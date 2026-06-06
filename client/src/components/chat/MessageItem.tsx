@@ -40,7 +40,6 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
   const sceneDesc         = (message.metadata?.sceneDescription as string | undefined) ?? null;
   const [showScenePanel,  setShowScenePanel]  = useState(false);
   const [showSceneDebug,  setShowSceneDebug]  = useState(false);
-  const [sceneInitWorkflow, setSceneInitWorkflow] = useState<string | undefined>(undefined);
   const [editablePrompt,  setEditablePrompt]  = useState('');
   const [generatingScene, setGeneratingScene] = useState(false);
   const [uploadingScene,  setUploadingScene]  = useState(false);
@@ -394,18 +393,10 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
             )}
             {!isUser && !isError && (
               <>
-                {/* Generar imagen de escena — estándar */}
                 <ActionButton
                   icon={generatingScene ? Loader : ImageIcon}
-                  onClick={() => { setSceneInitWorkflow(undefined); setShowSceneDebug(true); }}
+                  onClick={() => setShowSceneDebug(true)}
                   title="Generar imagen de escena"
-                  spin={generatingScene}
-                />
-                {/* Generar imagen 4K */}
-                <ActionButton
-                  icon={generatingScene ? Loader : Zap}
-                  onClick={() => { setSceneInitWorkflow('generador4k'); setShowSceneDebug(true); }}
-                  title="Generar imagen 4K (alta calidad)"
                   spin={generatingScene}
                 />
                 {/* Subir imagen externa */}
@@ -522,7 +513,6 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
           <SceneDebugModal
             conversationId={activeConversation.id}
             messageId={message.id}
-            initialWorkflow={sceneInitWorkflow}
             onDone={(imageUrl, sceneDescription, pending) => {
               updateMessage(message.id, {
                 metadata: {
