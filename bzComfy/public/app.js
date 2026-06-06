@@ -667,7 +667,7 @@ function handleEvent({ type, data }) {
           `&type=${encodeURIComponent(img.type || 'output')}`
         apiFetch(url)
           .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob() })
-          .then(blob => showImage(URL.createObjectURL(blob), false))
+          .then(blob => showImage(URL.createObjectURL(blob), false, img.filename))
           .catch(err => showStatus(`Error cargando imagen: ${err.message}`, 'error'))
       }
       break
@@ -683,7 +683,7 @@ function handleEvent({ type, data }) {
           `&type=${encodeURIComponent(img.type || 'output')}`
         apiFetch(url)
           .then(r => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.blob() })
-          .then(blob => showImage(URL.createObjectURL(blob), false))
+          .then(blob => showImage(URL.createObjectURL(blob), false, img.filename))
           .catch(err => showStatus(`Error cargando imagen final: ${err.message}`, 'error'))
       }
       finishGeneration()
@@ -758,15 +758,22 @@ function resetViewer() {
   resetImageView()
 }
 
-function showImage(src, isPreview) {
+function showImage(src, isPreview, filename) {
   const img = el('result-img')
+  const info = el('image-info')
   img.onload = () => {
     img.classList.remove('hidden')
     img.classList.add('fade-in')
     el('placeholder').classList.add('hidden')
+    if (!isPreview && filename) {
+      el('image-filename').textContent = filename
+      el('image-dimensions').textContent = `${img.naturalWidth} × ${img.naturalHeight} px`
+      info.classList.remove('hidden')
+    }
   }
   img.src = src
   el('preview-badge').classList.toggle('hidden', !isPreview)
+  if (isPreview) info.classList.add('hidden')
 }
 
 function showProgressPanel(visible) {
