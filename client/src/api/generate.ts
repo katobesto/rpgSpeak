@@ -1,12 +1,13 @@
 import { api, getAuthHeader } from './client.ts';
 
 export type SceneImageSseEvent =
-  | { type: 'status';   message: string }
-  | { type: 'node';     nodeId: string; nodeName: string }
-  | { type: 'progress'; value: number; max: number }
-  | { type: 'preview';  imageUrl: string; sceneDescription: string }
-  | { type: 'done';     imageUrl: string; sceneDescription: string }
-  | { type: 'error';    message: string };
+  | { type: 'status';        message: string }
+  | { type: 'node';          nodeId: string; nodeName: string }
+  | { type: 'progress';      value: number; max: number }
+  | { type: 'latentPreview'; dataUrl: string }
+  | { type: 'preview';       imageUrl: string; sceneDescription: string }
+  | { type: 'done';          imageUrl: string; sceneDescription: string }
+  | { type: 'error';         message: string };
 
 /** Opens an SSE stream for scene-image generation. Returns a cleanup function. */
 export function streamSceneImage(

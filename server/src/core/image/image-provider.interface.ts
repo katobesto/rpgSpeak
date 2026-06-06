@@ -14,7 +14,8 @@ export interface ImageGenResult {
 
 export type ImageProgressEvent =
   | { type: 'progress'; value: number; max: number }
-  | { type: 'node'; nodeId: string; nodeName: string };
+  | { type: 'node'; nodeId: string; nodeName: string }
+  | { type: 'preview'; dataUrl: string };
 
 export interface ImageProvider {
   /** Whether this provider supports FaceID / reference-image generation. */

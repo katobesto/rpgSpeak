@@ -886,9 +886,10 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
         const result = anyProvider.generateWithProgress
           ? await anyProvider.generateWithProgress(
               { prompt: sceneDescription, workflowName },
-              (evt: { type: string; value?: number; max?: number; nodeId?: string; nodeName?: string }) => {
+              (evt: { type: string; value?: number; max?: number; nodeId?: string; nodeName?: string; dataUrl?: string }) => {
                 if (evt.type === 'progress') send({ type: 'progress', value: evt.value, max: evt.max });
                 else if (evt.type === 'node') send({ type: 'node', nodeId: evt.nodeId, nodeName: evt.nodeName });
+                else if (evt.type === 'preview') send({ type: 'latentPreview', dataUrl: evt.dataUrl });
               },
             )
           : await comfyProvider.generate({ prompt: sceneDescription, workflowName });

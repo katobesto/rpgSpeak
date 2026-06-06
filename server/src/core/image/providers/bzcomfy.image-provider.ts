@@ -124,6 +124,9 @@ export class BzComfyImageProvider implements ImageProvider {
           } else if (evt.type === 'executing') {
             const d = evt.data as { node?: string; title?: string };
             if (d.node) onProgress({ type: 'node', nodeId: d.node, nodeName: d.title || d.node });
+          } else if (evt.type === 'preview') {
+            const d = evt.data as { image?: string };
+            if (d.image) onProgress({ type: 'preview', dataUrl: d.image });
           } else if (evt.type === 'images') {
             const d = evt.data as { images?: BzImageInfo[] };
             if (d.images && d.images.length > 0) imageInfo = d.images[0];
