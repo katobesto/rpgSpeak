@@ -135,6 +135,9 @@ const state = {
   currentWorkflow: null,
   uploadedImageName: null,
   uploadPending: false,
+  // Current displayed image (for download)
+  currentImageSrc: null,
+  currentImageFilename: null,
 }
 
 // â”€â”€ Image zoom / pan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -303,6 +306,8 @@ async function init() {
 
   el('generate-btn').addEventListener('click', generate)
   el('stop-btn').addEventListener('click', stopGeneration)
+  el('download-btn').addEventListener('click', downloadImage)
+  el('seed-random-btn').addEventListener('click', () => { el('seed-input').value = '' })
   el('prompt').addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') generate()
   })
@@ -648,7 +653,10 @@ async function generate() {
   setStep(0, 0)
 
   try {
+    const seedVal = el('seed-input').value.trim()
+    const parsedSeed = seedVal !== '' ? parseInt(seedVal, 10) : null
     const body = { workflow, prompt, negativePrompt }
+    if (parsedSeed !== null && !isNaN(parsedSeed)) body.seed = parsedSeed
     if (state.uploadedImageName) body.referenceImageName = state.uploadedImageName
     if (state.currentWorkflow?.hasLora) {
       const loraName = el('lora-select').value
@@ -680,6 +688,7 @@ async function generate() {
       return showStatus(data.error || 'Error desconocido', 'error')
     }
 
+    if (data.seed != null) el('seed-input').value = data.seed
     connectSSE(data.promptId)
   } catch (err) {
     setGenerating(false)
@@ -845,7 +854,19 @@ function resetViewer() {
   img.src = ''
   el('placeholder').classList.remove('hidden')
   el('preview-badge').classList.add('hidden')
+  state.currentImageSrc = null
+  state.currentImageFilename = null
   resetImageView()
+}
+
+function downloadImage() {
+  if (!state.currentImageSrc || !state.currentImageFilename) return
+  const a = document.createElement('a')
+  a.href = state.currentImageSrc
+  a.download = state.currentImageFilename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
 }
 
 function showImage(src, isPreview, filename) {
@@ -860,6 +881,8 @@ function showImage(src, isPreview, filename) {
       el('image-filename').textContent = filename
       el('image-dimensions').textContent = `${img.naturalWidth} × ${img.naturalHeight} px`
       info.classList.remove('hidden')
+      state.currentImageSrc = src
+      state.currentImageFilename = filename
     }
   }
   img.src = src

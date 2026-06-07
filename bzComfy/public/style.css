@@ -213,7 +213,7 @@ label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transf
   pointer-events: none;
 }
 
-select, textarea, input[type="text"] {
+select, textarea, input[type="text"], input[type="number"] {
   width: 100%;
   background: var(--surface2);
   border: 1px solid var(--border);
@@ -225,7 +225,10 @@ select, textarea, input[type="text"] {
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
-select:focus, textarea:focus, input[type="text"]:focus {
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { opacity: 1; }
+input[type="number"] { -moz-appearance: textfield; }
+select:focus, textarea:focus, input[type="text"]:focus, input[type="number"]:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px var(--accent-muted);
 }
@@ -428,6 +431,21 @@ textarea { resize: vertical; line-height: 1.55; }
   font-family: 'SF Mono', 'Fira Code', monospace;
   color: var(--text-muted);
 }
+.btn-download {
+  background: none;
+  border: 1px solid var(--border2);
+  border-radius: 6px;
+  color: var(--text-muted);
+  padding: 3px 9px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 500;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.btn-download:hover { background: var(--surface2); color: var(--text); border-color: var(--accent); }
 .image-dimensions {
   color: var(--text-dim);
   font-variant-numeric: tabular-nums;

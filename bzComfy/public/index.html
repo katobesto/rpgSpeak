@@ -154,6 +154,14 @@
           placeholder="Lo que quieres evitar…"></textarea>
       </div>
 
+      <div class="field">
+        <label for="seed-input">
+          Seed <span class="optional">(vacío = aleatorio)</span>
+          <button id="seed-random-btn" class="btn-detect" title="Limpiar — usar seed aleatorio">🎲</button>
+        </label>
+        <input id="seed-input" type="number" min="0" max="4294967295" step="1" placeholder="Aleatorio" />
+      </div>
+
       <div class="generate-row">
         <button id="generate-btn">
           <span id="btn-label">Generar</span>
@@ -195,6 +203,14 @@
       <div id="image-info" class="image-info hidden">
         <span id="image-filename" class="image-filename"></span>
         <span id="image-dimensions" class="image-dimensions"></span>
+        <button id="download-btn" class="btn-download" title="Descargar imagen">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Descargar
+        </button>
       </div>
 
       <div id="progress-panel" class="progress-panel hidden">
@@ -214,7 +230,7 @@
     </main>
   </div>
 
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=7"></script>
 
   <!-- ── Modal gestión de usuarios ──────────────────────────────────────── -->
   <div id="users-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;display:none;align-items:center;justify-content:center">

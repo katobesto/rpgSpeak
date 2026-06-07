@@ -540,7 +540,7 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
 
 // Start a generation
 app.post('/api/generate', async (req, res) => {
-  const { workflow: workflowName, prompt, negativePrompt = '', referenceImageName, loraName, loraStrength, powerLoraUpdates } = req.body
+  const { workflow: workflowName, prompt, negativePrompt = '', referenceImageName, loraName, loraStrength, powerLoraUpdates, seed } = req.body
   if (!workflowName || !prompt?.trim()) {
     return res.status(400).json({ error: 'workflow and prompt are required' })
   }
@@ -601,10 +601,12 @@ app.post('/api/generate', async (req, res) => {
       }
     }
 
-    // Randomize seed on every run
+    const usedSeed = (typeof seed === 'number' && Number.isInteger(seed) && seed >= 0)
+      ? seed
+      : Math.floor(Math.random() * 2 ** 32)
     for (const node of Object.values(workflow)) {
       if (['KSampler', 'KSamplerAdvanced'].includes(node.class_type) && node.inputs?.seed != null) {
-        node.inputs.seed = Math.floor(Math.random() * 2 ** 32)
+        node.inputs.seed = usedSeed
       }
     }
 
@@ -698,7 +700,7 @@ app.post('/api/generate', async (req, res) => {
 
     ws.on('error', err => push('error', { message: err.message }))
 
-    res.json({ promptId: prompt_id })
+    res.json({ promptId: prompt_id, seed: usedSeed })
   } catch (err) {
     const message = err.code === 'ECONNREFUSED'
       ? `Cannot connect to ComfyUI at ${config.comfyUrl}`
