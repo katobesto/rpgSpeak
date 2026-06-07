@@ -544,11 +544,21 @@ app.post('/api/generate', async (req, res) => {
     if (meta?.loraNodeId && workflow[meta.loraNodeId]) {
       const strength = typeof loraStrength === 'number' ? loraStrength : 1.0
       if (loraName && loraName.trim()) {
-        workflow[meta.loraNodeId].inputs.lora_name    = loraName.trim()
+        workflow[meta.loraNodeId].inputs.lora_name      = loraName.trim()
         workflow[meta.loraNodeId].inputs.strength_model = strength
         workflow[meta.loraNodeId].inputs.strength_clip  = strength
       } else {
-        // No LoRA selected — bypass by setting strength to 0
+        // No LoRA selected — bypass with strength 0.
+        // ComfyUI still validates lora_name so we must supply a real file.
+        // Fetch the list and use the first available LoRA with strength 0.
+        try {
+          const lr = await fetch(`${config.comfyUrl}/object_info/LoraLoader`)
+          if (lr.ok) {
+            const linfo = await lr.json()
+            const firstLora = linfo?.LoraLoader?.input?.required?.lora_name?.[0]?.[0]
+            if (firstLora) workflow[meta.loraNodeId].inputs.lora_name = firstLora
+          }
+        } catch { /* keep whatever is in the JSON */ }
         workflow[meta.loraNodeId].inputs.strength_model = 0
         workflow[meta.loraNodeId].inputs.strength_clip  = 0
       }

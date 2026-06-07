@@ -28,7 +28,7 @@
     "inputs": {
       "model": ["28", 0],
       "clip": ["30", 0],
-      "lora_name": "example.safetensors",
+      "lora_name": "EpicF4nta5yXL.safetensors",
       "strength_model": 1.0,
       "strength_clip": 1.0
     },
