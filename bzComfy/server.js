@@ -448,7 +448,7 @@ app.post('/api/launch', async (req, res) => {
   )
 })
 
-// List available workflows, including whether they need a reference image
+// List available workflows, including whether they need a reference image or support LoRA
 app.get('/api/workflows', async (_req, res) => {
   try {
     const files = await readdir(WORKFLOWS_DIR)
@@ -468,12 +468,26 @@ app.get('/api/workflows', async (_req, res) => {
             label,
             hasImageInput: !!imgNode,
             imageInputLabel: imgNode?.label ?? null,
+            hasLora: !!(meta?.loraNodeId),
           }
         })
     )
     res.json(workflows)
   } catch (err) {
     res.status(500).json({ error: err.message })
+  }
+})
+
+// List available LoRA models from ComfyUI
+app.get('/api/loras', async (_req, res) => {
+  try {
+    const r = await fetch(`${config.comfyUrl}/object_info/LoraLoader`)
+    if (!r.ok) throw new Error(`ComfyUI ${r.status}`)
+    const info = await r.json()
+    const loraList = info?.LoraLoader?.input?.required?.lora_name?.[0] ?? []
+    res.json(loraList)
+  } catch (err) {
+    res.status(503).json({ error: `No se pudo obtener LoRAs de ComfyUI: ${err.message}` })
   }
 })
 
@@ -504,7 +518,7 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
 
 // Start a generation
 app.post('/api/generate', async (req, res) => {
-  const { workflow: workflowName, prompt, negativePrompt = '', referenceImageName } = req.body
+  const { workflow: workflowName, prompt, negativePrompt = '', referenceImageName, loraName, loraStrength } = req.body
   if (!workflowName || !prompt?.trim()) {
     return res.status(400).json({ error: 'workflow and prompt are required' })
   }
@@ -524,6 +538,20 @@ app.post('/api/generate', async (req, res) => {
     if (referenceImageName) {
       const imgNode = detectImageInputNode(workflow, meta)
       if (imgNode) workflow[imgNode.nodeId].inputs.image = referenceImageName
+    }
+
+    // Inject LoRA name and strength if the workflow has a LoRA node
+    if (meta?.loraNodeId && workflow[meta.loraNodeId]) {
+      const strength = typeof loraStrength === 'number' ? loraStrength : 1.0
+      if (loraName && loraName.trim()) {
+        workflow[meta.loraNodeId].inputs.lora_name    = loraName.trim()
+        workflow[meta.loraNodeId].inputs.strength_model = strength
+        workflow[meta.loraNodeId].inputs.strength_clip  = strength
+      } else {
+        // No LoRA selected — bypass by setting strength to 0
+        workflow[meta.loraNodeId].inputs.strength_model = 0
+        workflow[meta.loraNodeId].inputs.strength_clip  = 0
+      }
     }
 
     // Randomize seed on every run

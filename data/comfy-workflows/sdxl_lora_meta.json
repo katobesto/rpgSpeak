@@ -1,0 +1,5 @@
+{
+  "label": "SDXL con LoRA",
+  "promptNodeId": "27",
+  "loraNodeId": "40"
+}

@@ -323,6 +323,11 @@ async function init() {
 
   // Reference image
   el('workflow-select').addEventListener('change', onWorkflowChange)
+
+  // LoRA strength slider — live label update
+  el('lora-strength').addEventListener('input', () => {
+    el('lora-strength-value').textContent = parseFloat(el('lora-strength').value).toFixed(2)
+  })
   el('drop-zone').addEventListener('click', () => el('ref-image-input').click())
   el('ref-image-input').addEventListener('change', onFileSelected)
   el('ref-clear-btn').addEventListener('click', e => { e.stopPropagation(); clearRefImage() })
@@ -476,6 +481,33 @@ function onWorkflowChange() {
   } else {
     refField.classList.add('hidden')
   }
+
+  const loraField = el('lora-field')
+  if (state.currentWorkflow?.hasLora) {
+    loraField.classList.remove('hidden')
+    loadLoras()
+  } else {
+    loraField.classList.add('hidden')
+  }
+}
+
+async function loadLoras() {
+  const select = el('lora-select')
+  select.innerHTML = '<option value="">Cargando…</option>'
+  try {
+    const res = await apiFetch('/api/loras')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const loras = await res.json()
+    if (!Array.isArray(loras) || loras.length === 0) {
+      select.innerHTML = '<option value="">No hay LoRAs disponibles</option>'
+      return
+    }
+    select.innerHTML =
+      '<option value="">Sin LoRA</option>' +
+      loras.map(name => `<option value="${name}">${name}</option>`).join('')
+  } catch (err) {
+    select.innerHTML = `<option value="">Error: ${err.message}</option>`
+  }
 }
 
 // â”€â”€ Reference image upload â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -582,6 +614,11 @@ async function generate() {
   try {
     const body = { workflow, prompt, negativePrompt }
     if (state.uploadedImageName) body.referenceImageName = state.uploadedImageName
+    if (state.currentWorkflow?.hasLora) {
+      const loraName = el('lora-select').value
+      const loraStrength = parseFloat(el('lora-strength').value) || 1.0
+      if (loraName) { body.loraName = loraName; body.loraStrength = loraStrength }
+    }
 
     const res = await apiFetch('/api/generate', {
       method: 'POST',

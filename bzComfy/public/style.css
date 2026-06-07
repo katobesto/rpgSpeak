@@ -503,6 +503,57 @@ textarea { resize: vertical; line-height: 1.55; }
 /* ── Utilities ──────────────────────────────────────── */
 .hidden { display: none !important; }
 
+/* ── LoRA strength row ──────────────────────────────── */
+.lora-strength-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.lora-strength-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 70px;
+}
+.lora-strength-num {
+  font-family: monospace;
+  color: var(--accent);
+  font-size: 12px;
+  min-width: 30px;
+}
+#lora-strength {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface3);
+  outline: none;
+  cursor: pointer;
+}
+#lora-strength::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: none;
+}
+#lora-strength::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: none;
+}
+
 /* ── Mobile ─────────────────────────────────────────── */
 @media (max-width: 640px) {
 
@@ -532,6 +583,8 @@ textarea { resize: vertical; line-height: 1.55; }
   #negative-prompt { height: 60px;  min-height: 44px; resize: vertical; }
   .field.grow      { flex: none; }
   .field.grow textarea { flex: none; }
+
+  .lora-strength-row { flex-direction: column; align-items: flex-start; gap: 4px; }
 
   /* Taller drop zone on mobile for easier tap */
   .drop-placeholder { padding: 22px 14px; }
