@@ -9,7 +9,7 @@ import { charactersApi } from '../../api/characters.ts';
 import { storiesApi } from '../../api/stories.ts';
 import { Button } from '../ui/Button.tsx';
 import { Input, Textarea } from '../ui/Input.tsx';
-import { Plus, Trash2, RefreshCw, Check, X, Volume2, Wifi, WifiOff, Download, CheckCircle2, Play, Square, Loader, LogOut, Users, Shield, UserCircle, RotateCcw, AlertCircle, BarChart2, Zap, Camera, Sparkles, Wand2, FlaskConical, Upload, Link2, BookOpen, Pencil, DatabaseBackup, HardDriveDownload, HardDriveUpload, TriangleAlert } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, Check, X, Volume2, Wifi, Download, CheckCircle2, Play, Square, Loader, LogOut, Users, Shield, UserCircle, RotateCcw, AlertCircle, BarChart2, Zap, Camera, Sparkles, Wand2, FlaskConical, Upload, Link2, BookOpen, Pencil, DatabaseBackup, HardDriveDownload, HardDriveUpload, TriangleAlert } from 'lucide-react';
 import { backupApi } from '../../api/backup.ts';
 import type { Provider, CreateProviderDto, AppSettings, TtsSettings, TtsVoice, BzWorkflow } from '@rpgspeak/shared';
 import { useUiStore } from '../../stores/ui.store.ts';
@@ -813,17 +813,6 @@ function VoiceSection({
   const tts = settings.ttsSettings;
   function setTts(partial: Partial<TtsSettings>) { onUpdate({ ...tts, ...partial }); }
 
-  // Service status
-  const [status, setStatus] = React.useState<{ online: boolean } | null>(null);
-  const [statusLoading, setStatusLoading] = React.useState(false);
-
-  async function checkStatus() {
-    setStatusLoading(true);
-    try { setStatus(await ttsApi.status()); }
-    catch { setStatus({ online: false }); }
-    finally { setStatusLoading(false); }
-  }
-  useEffect(() => { checkStatus(); }, []);
 
   // Voices
   const qc = useQueryClient();
@@ -932,51 +921,10 @@ function VoiceSection({
             checked={tts.enabled}
             onChange={(v) => setTts({ enabled: v })}
           />
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-text-secondary">URL del servicio Python</label>
-            <div className="flex gap-2">
-              <input
-                value={tts.serviceUrl}
-                onChange={(e) => setTts({ serviceUrl: e.target.value })}
-                className="flex-1 rounded-lg px-3 py-2 text-sm border border-border bg-transparent text-text-primary focus:outline-none focus:ring-1 focus:ring-accent font-mono"
-                placeholder="http://localhost:8020"
-              />
-              <button onClick={checkStatus} disabled={statusLoading}
-                className="px-3 py-2 rounded-lg border border-border text-xs text-text-muted hover:text-text-primary hover:border-accent/50 transition-colors disabled:opacity-50">
-                <RefreshCw size={13} className={statusLoading ? 'animate-spin' : ''} />
-              </button>
-            </div>
+          <div className="flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-lg border border-green-500/30 bg-green-500/8 text-green-400">
+            <Wifi size={11} />
+            Microsoft Edge TTS — voces neurales en la nube, sin configuración adicional
           </div>
-          <div className="space-y-1.5">
-            <label className="text-xs font-medium text-text-secondary">Token de autenticación <span className="text-text-muted font-normal">(solo servicios en la nube)</span></label>
-            <input
-              type="password"
-              value={tts.authToken ?? ''}
-              onChange={(e) => setTts({ authToken: e.target.value || undefined })}
-              className="w-full rounded-lg px-3 py-2 text-sm border border-border bg-transparent text-text-primary focus:outline-none focus:ring-1 focus:ring-accent font-mono"
-              placeholder="Bearer token — deja vacío para servicio local"
-              autoComplete="off"
-            />
-            {status && (
-              <div className={`flex items-center gap-2 text-xs px-2.5 py-1.5 rounded-lg border ${
-                status.online ? 'border-green-500/30 bg-green-500/8 text-green-400' : 'border-red-500/30 bg-red-500/8 text-red-400'
-              }`}>
-                {status.online ? <Wifi size={11} /> : <WifiOff size={11} />}
-                {status.online ? '✓ Servicio Piper activo' : 'Servicio no disponible — ejecuta ./dev.sh'}
-              </div>
-            )}
-          </div>
-          <details className="group">
-            <summary className="cursor-pointer text-xs text-text-muted hover:text-text-primary select-none">
-              ▸ Cómo arrancar el servicio TTS
-            </summary>
-            <div className="mt-2 p-3 rounded-lg border border-border text-xs font-mono text-text-secondary space-y-1" style={{ background: 'var(--surface-2)' }}>
-              <p className="text-text-muted font-sans mb-1">Arrancar todo con un solo comando:</p>
-              <p>./dev.sh</p>
-              <p className="text-text-muted font-sans mt-2">O solo el servicio TTS:</p>
-              <p>cd tts-service && ./start.sh</p>
-            </div>
-          </details>
         </div>
       </Section>
 

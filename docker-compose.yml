@@ -2,16 +2,11 @@ version: '3.9'
 
 # ─── rpgSpeak — stack completo para Coolify / producción Docker ──────────────
 #
-# Servicios:
+# Servicio único:
 #   server  — Node.js API + cliente estático (puerto interno 3000)
-#   tts     — Python FastAPI TTS service    (puerto interno 8020)
 #
+# TTS integrado en el backend Node.js (Microsoft Edge TTS, cloud, sin proceso extra).
 # Coolify gestiona el routing HTTPS hacia "server" via Traefik labels.
-# El servicio "tts" es interno: solo "server" lo llama en la red Docker.
-# No se exponen puertos al host — evita conflictos con el setup PM2 existente.
-#
-# Tras el primer despliegue, configurar en Ajustes → Voz / TTS:
-#   URL del servicio TTS: http://tts:8020
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
@@ -27,11 +22,8 @@ services:
       HOST: 0.0.0.0
       DB_PATH: /app/data/rpgspeak.db
       LOG_LEVEL: info
-      # Coolify puede sobreescribir esto via variables de entorno del proyecto
       CORS_ORIGIN: ${CORS_ORIGIN:-https://drpgspeak.javierbenzo.com}
       MAX_CONTEXT_TOKENS: 8192
-    depends_on:
-      - tts
     restart: unless-stopped
     healthcheck:
       test: ['CMD', 'wget', '-qO-', 'http://localhost:3000/health']
@@ -39,21 +31,5 @@ services:
       timeout: 10s
       retries: 3
 
-  tts:
-    build:
-      context: ./tts-service
-      dockerfile: Dockerfile
-    volumes:
-      - rpgspeak-data:/app/data
-    # Sin ports: — solo accesible desde "server" vía red Docker interna
-    restart: unless-stopped
-    healthcheck:
-      test: ['CMD', 'wget', '-qO-', 'http://localhost:8020/health']
-      interval: 30s
-      timeout: 15s
-      retries: 3
-      start_period: 90s   # Tiempo para descargar binario Piper en ARM64
-
 volumes:
   rpgspeak-data:
-    # Volumen separado del /data del setup PM2 — el usuario migrará cuando proceda

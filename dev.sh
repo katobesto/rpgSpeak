@@ -1,12 +1,11 @@
 #!/usr/bin/env bash
 # ─── rpgSpeak dev launcher ────────────────────────────────────────────────────
-# Arranca server + client + TTS como un solo bloque.
+# Arranca server + client como un solo bloque.
 # Al salir (Ctrl+C, SIGTERM, o muerte de cualquier hijo) se para todo.
 # Uso: ./dev.sh [stop]
 
 SERVER_PORT=3000
 CLIENT_PORT=5173
-TTS_PORT=8020
 
 # ── PIDs de los hijos (se rellenan al arrancar cada servicio) ─────────────────
 _PIDS=()
@@ -20,12 +19,10 @@ cleanup() {
   echo ""
   echo "🛑  Deteniendo todos los servicios..."
 
-  # 1. Enviar SIGTERM a los hijos registrados
   for pid in "${_PIDS[@]}"; do
     kill "$pid" 2>/dev/null
   done
 
-  # 2. Dar 3 s para que terminen limpiamente
   local deadline=$(( $(date +%s) + 3 ))
   for pid in "${_PIDS[@]}"; do
     local remaining=$(( deadline - $(date +%s) ))
@@ -33,9 +30,8 @@ cleanup() {
   done
   sleep 1
 
-  # 3. Matar a la fuerza lo que quede en esos puertos (safety net)
   local stale
-  stale=$(lsof -ti :$SERVER_PORT -ti :$CLIENT_PORT -ti :$TTS_PORT 2>/dev/null | sort -u)
+  stale=$(lsof -ti :$SERVER_PORT -ti :$CLIENT_PORT 2>/dev/null | sort -u)
   if [ -n "$stale" ]; then
     echo "$stale" | xargs kill -9 2>/dev/null
   fi
@@ -43,15 +39,14 @@ cleanup() {
   echo "✅  Todo detenido."
 }
 
-# Registrar cleanup para cualquier forma de salida
 trap 'cleanup; exit 0' INT TERM
 trap 'cleanup'          EXIT
 
-# ── Subcomando "stop" — solo mata puertos y sale ──────────────────────────────
+# ── Subcomando "stop" ─────────────────────────────────────────────────────────
 if [ "${1}" = "stop" ]; then
-  stale=$(lsof -ti :$SERVER_PORT -ti :$CLIENT_PORT -ti :$TTS_PORT 2>/dev/null | sort -u)
+  stale=$(lsof -ti :$SERVER_PORT -ti :$CLIENT_PORT 2>/dev/null | sort -u)
   if [ -n "$stale" ]; then
-    echo "⛔  Cerrando procesos en puertos $SERVER_PORT, $CLIENT_PORT y $TTS_PORT..."
+    echo "⛔  Cerrando procesos en puertos $SERVER_PORT y $CLIENT_PORT..."
     echo "$stale" | xargs kill -9 2>/dev/null
     sleep 1
   else
@@ -61,7 +56,7 @@ if [ "${1}" = "stop" ]; then
 fi
 
 # ── Matar restos de ejecuciones anteriores ────────────────────────────────────
-stale=$(lsof -ti :$SERVER_PORT -ti :$CLIENT_PORT -ti :$TTS_PORT 2>/dev/null | sort -u)
+stale=$(lsof -ti :$SERVER_PORT -ti :$CLIENT_PORT 2>/dev/null | sort -u)
 if [ -n "$stale" ]; then
   echo "⛔  Liberando puertos de sesión anterior..."
   echo "$stale" | xargs kill -9 2>/dev/null
@@ -72,7 +67,7 @@ cd "$(dirname "$0")"
 
 # ── Verificar binarios nativos ────────────────────────────────────────────────
 NATIVE_BIN="node_modules/better-sqlite3/build/Release/better_sqlite3.node"
-ARCH="$(uname -m)"   # arm64 en M1-M5, x86_64 en Intel
+ARCH="$(uname -m)"
 
 if [ ! -d "node_modules" ]; then
   echo "❌  node_modules no encontrado. Ejecuta ./install.sh primero."
@@ -84,19 +79,15 @@ if [ -f "$NATIVE_BIN" ]; then
   BIN_INFO=$(file "$NATIVE_BIN" 2>/dev/null || echo "unknown")
 
   if ! echo "$BIN_INFO" | grep -q "Mach-O"; then
-    # Binario de Windows (PE/MZ) o Linux (ELF) en un Mac
     echo "⚠️   Binario de otra plataforma detectado (Windows/Linux). Recompilando para Mac ${ARCH}..."
     NEEDS_REBUILD=1
   elif [ "$ARCH" = "arm64" ] && ! echo "$BIN_INFO" | grep -q "arm64"; then
-    # Binario x86_64 en un Mac Apple Silicon
     echo "⚠️   Binario x86_64 en Mac Apple Silicon (${ARCH}). Recompilando..."
     NEEDS_REBUILD=1
   elif [ "$ARCH" = "x86_64" ] && echo "$BIN_INFO" | grep -q "arm64" && ! echo "$BIN_INFO" | grep -q "x86_64"; then
-    # Binario arm64 puro en un Mac Intel
     echo "⚠️   Binario arm64 en Mac Intel. Recompilando..."
     NEEDS_REBUILD=1
   elif ! node -e "require('better-sqlite3')" 2>/dev/null; then
-    # El binario existe y es Mach-O del arco correcto, pero no carga (ABI de Node distinto)
     echo "⚠️   Módulo nativo incompatible con esta versión de Node $(node -v). Recompilando..."
     NEEDS_REBUILD=1
   fi
@@ -106,11 +97,8 @@ else
 fi
 
 if [ $NEEDS_REBUILD -eq 1 ]; then
-  # npm_config_build_from_source=true hace que prebuild-install salte la descarga
-  # y deje que node-gyp compile en build/Release/ donde bindings.js lo busca.
   npm_config_build_from_source=true npm rebuild better-sqlite3
   if [ $? -ne 0 ] || [ ! -f "$NATIVE_BIN" ]; then
-    # Fallback: node-gyp directo
     (cd node_modules/better-sqlite3 && node "$(node -e 'process.stdout.write(require.resolve("node-gyp/bin/node-gyp"))')" rebuild --release 2>&1)
   fi
   if [ $? -ne 0 ] || [ ! -f "$NATIVE_BIN" ]; then
@@ -126,33 +114,9 @@ echo ""
 echo "🚀  Arrancando rpgSpeak..."
 echo "    Server → http://localhost:$SERVER_PORT"
 echo "    Client → http://localhost:$CLIENT_PORT"
-echo "    TTS    → http://localhost:$TTS_PORT"
 echo ""
 echo "    Ctrl+C para detener todo."
 echo ""
-
-# ── TTS service ───────────────────────────────────────────────────────────────
-if [ -f "tts-service/tts_server.py" ]; then
-  TTS_VENV="tts-service/venv"
-
-  if [ ! -d "$TTS_VENV" ]; then
-    echo "📦  Instalando dependencias TTS (primera vez, puede tardar)..."
-    python3 -m venv "$TTS_VENV"
-    "$TTS_VENV/bin/pip" install -q -r tts-service/requirements.txt
-  fi
-
-  echo "🔊  Arrancando servicio TTS..."
-  "$TTS_VENV/bin/python" tts-service/tts_server.py \
-    --port $TTS_PORT \
-    --data-dir data \
-    >> tts-service/tts.log 2>&1 &
-  TTS_PID=$!
-  _PIDS+=($TTS_PID)
-  echo "    TTS PID: $TTS_PID"
-else
-  TTS_PID=""
-  echo "ℹ️   tts-service/ no encontrado — TTS desactivado."
-fi
 
 # ── Node server ───────────────────────────────────────────────────────────────
 npx tsx server/src/index.ts &
@@ -160,7 +124,6 @@ SERVER_PID=$!
 _PIDS+=($SERVER_PID)
 echo "    Server PID: $SERVER_PID"
 
-# Pequeña pausa para que el server inicialice la BD antes de que el cliente empiece
 sleep 2
 
 # ── Vite client ───────────────────────────────────────────────────────────────
@@ -171,7 +134,6 @@ echo "    Client PID: $CLIENT_PID"
 echo ""
 
 # ── Esperar a que CUALQUIER hijo muera, luego parar todo ─────────────────────
-# "wait -n" sale en cuanto el primer hijo termina (bash 4.3+)
 wait_any() {
   while true; do
     for pid in "${_PIDS[@]}"; do
@@ -186,4 +148,3 @@ wait_any() {
 }
 
 wait_any
-# El EXIT trap llamará a cleanup automáticamente al salir

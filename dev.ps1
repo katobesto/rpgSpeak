@@ -7,7 +7,6 @@ param([string]$Command = "", [switch]$Local)
 
 $SERVER_PORT = 3000
 $CLIENT_PORT = 5173
-$TTS_PORT    = 8020
 
 # Acepta tanto -Local (switch PowerShell) como --local (convencion bash)
 $LocalOnly = $Local.IsPresent
@@ -23,7 +22,7 @@ if ($LocalOnly) {
 }
 
 function Stop-Ports {
-    $ports = @($SERVER_PORT, $CLIENT_PORT, $TTS_PORT)
+    $ports = @($SERVER_PORT, $CLIENT_PORT)
     $killed = $false
     foreach ($port in $ports) {
         $pids = (netstat -ano | Select-String ":$port\s" | ForEach-Object {
@@ -102,33 +101,11 @@ if ($LocalOnly) {
     Write-Host "    Server -> http://localhost:$SERVER_PORT  /  http://${localIP}:$SERVER_PORT"
     Write-Host "    Client -> http://localhost:$CLIENT_PORT  /  http://${localIP}:$CLIENT_PORT"
 }
-Write-Host "    TTS    -> http://localhost:$TTS_PORT"
 Write-Host ""
 Write-Host "    Cierra esta ventana o pulsa Ctrl+C para detener todo."
 Write-Host ""
 
 $jobs = @()
-
-# ── TTS service (siempre en localhost — el servidor Node lo proxifica) ────────
-$ttsScript = Join-Path $root "tts-service\tts_server.py"
-$ttsVenv   = Join-Path $root "tts-service\venv"
-if (Test-Path $ttsScript) {
-    if (-not (Test-Path (Join-Path $ttsVenv "Scripts\python.exe"))) {
-        Write-Host "Instalando dependencias TTS (primera vez, puede tardar)..."
-        python -m venv $ttsVenv
-        & "$ttsVenv\Scripts\pip" install -q -r (Join-Path $root "tts-service\requirements.txt")
-    }
-    Write-Host "Arrancando servicio TTS..."
-    $jobs += Start-Job -Name "tts" -ScriptBlock {
-        param($root, $port)
-        $python  = Join-Path $root "tts-service\venv\Scripts\python.exe"
-        $script  = Join-Path $root "tts-service\tts_server.py"
-        $dataDir = Join-Path $root "data"
-        & $python $script --port $port --data-dir $dataDir 2>&1
-    } -ArgumentList $root, $TTS_PORT
-} else {
-    Write-Host "tts-service/ no encontrado - TTS desactivado."
-}
 
 # ── Node server ───────────────────────────────────────────────────────────────
 Write-Host "Arrancando servidor..."

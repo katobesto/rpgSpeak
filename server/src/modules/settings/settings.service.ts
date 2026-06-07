@@ -5,8 +5,7 @@ import type { AppSettings, TtsSettings } from '@rpgspeak/shared';
 
 const TTS_DEFAULTS: TtsSettings = {
   enabled:        false,
-  serviceUrl:     'http://localhost:8020',
-  defaultVoiceId: 'es_daniela',
+  defaultVoiceId: 'edge_elvira',
   speed:          1.0,
   temperature:    0.667,
   autoPlay:       false,

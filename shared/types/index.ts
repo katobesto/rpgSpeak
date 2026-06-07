@@ -290,9 +290,7 @@ export interface TtsTextReplacement {
 export interface TtsSettings {
   /** Enable the TTS feature across the app */
   enabled: boolean;
-  /** URL of the running Python TTS service */
-  serviceUrl: string;
-  /** ID of the default voice from the catalog (e.g. "es_maria") */
+  /** ID of the default voice from the catalog (e.g. "edge_elvira") */
   defaultVoiceId: string | null;
   /** Playback speed multiplier — 0.5 (slow) to 2.0 (fast) */
   speed: number;
@@ -300,8 +298,6 @@ export interface TtsSettings {
   temperature: number;
   /** Automatically play TTS for new AI messages */
   autoPlay: boolean;
-  /** Optional Bearer token for cloud/remote TTS services that require auth */
-  authToken?: string;
   /** Lista de sustituciones de texto para mejorar la pronunciación */
   replacements: TtsTextReplacement[];
 }
