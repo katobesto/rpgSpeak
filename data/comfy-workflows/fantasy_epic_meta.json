@@ -1,0 +1,6 @@
+{
+  "label": "Fantasy Épico (Juggernaut + LoRA)",
+  "promptNodeId": "6",
+  "negativeNodeId": "7",
+  "loraNodeId": "11"
+}
