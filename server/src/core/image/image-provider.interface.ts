@@ -5,6 +5,10 @@ export interface ImageGenRequest {
   height?: number;
   /** ComfyUI-specific: workflow name without the _api.json suffix. Ignored by other providers. */
   workflowName?: string;
+  /** bzComfy-specific: LoRA name to use (overrides the workflow default). */
+  loraName?: string;
+  /** bzComfy-specific: LoRA strength 0–2. Default 1.0. */
+  loraStrength?: number;
 }
 
 export interface ImageGenResult {

@@ -75,4 +75,22 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
       return reply.status(503).send({ error: err instanceof Error ? err.message : 'No se pudo conectar a bzComfy' });
     }
   });
+
+  // GET /api/settings/bzcomfy-loras — proxy to the remote bzComfy /api/loras endpoint
+  app.get('/bzcomfy-loras', async (_req, reply) => {
+    const bzUrl   = service.get('bzComfyUrl')      as string | null;
+    const bzToken = service.get('bzComfyApiToken') as string | null;
+    if (!bzUrl) return reply.status(400).send({ error: 'bzComfyUrl no configurada' });
+    try {
+      const res = await fetch(`${bzUrl}/api/loras`, {
+        headers: bzToken ? { Authorization: `Bearer ${bzToken}` } : {},
+        signal: AbortSignal.timeout(10_000),
+      });
+      if (!res.ok) return reply.status(res.status).send({ error: `bzComfy respondió con ${res.status}` });
+      const loras = await res.json();
+      return reply.send({ data: loras });
+    } catch (err) {
+      return reply.status(503).send({ error: err instanceof Error ? err.message : 'No se pudo conectar a bzComfy' });
+    }
+  });
 };

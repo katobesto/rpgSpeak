@@ -785,6 +785,8 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       customPrompt:     z.string().optional(),
       useFaceReference: z.boolean().optional(),
       referenceCharId:  z.string().optional(),
+      loraName:         z.string().optional(),
+      loraStrength:     z.number().min(0).max(2).optional(),
     }).parse(req.body);
 
     const {
@@ -792,6 +794,8 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       workflowName = 'image_z_image_turbo',
       customPrompt,
       useFaceReference = false,
+      loraName,
+      loraStrength,
     } = body;
 
     reply.raw.writeHead(200, {
@@ -910,16 +914,17 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       } else {
         // Non-progressive workflow — use generateWithProgress if available (e.g. bzComfy)
         const anyProvider = comfyProvider as { generateWithProgress?: Function };
+        const imageReq = { prompt: sceneDescription, workflowName, loraName, loraStrength };
         const result = anyProvider.generateWithProgress
           ? await anyProvider.generateWithProgress(
-              { prompt: sceneDescription, workflowName },
+              imageReq,
               (evt: { type: string; value?: number; max?: number; nodeId?: string; nodeName?: string; dataUrl?: string }) => {
                 if (evt.type === 'progress') send({ type: 'progress', value: evt.value, max: evt.max });
                 else if (evt.type === 'node') send({ type: 'node', nodeId: evt.nodeId, nodeName: evt.nodeName });
                 else if (evt.type === 'preview') send({ type: 'latentPreview', dataUrl: evt.dataUrl });
               },
             )
-          : await comfyProvider.generate({ prompt: sceneDescription, workflowName });
+          : await comfyProvider.generate(imageReq);
         const ext = path.extname(result.filename) || '.png';
         const sseFileToken = Date.now().toString(36) + Math.random().toString(36).slice(2);
         const savedFilename = `scene_${messageId.slice(0, 8)}_${sseFileToken}${ext}`;

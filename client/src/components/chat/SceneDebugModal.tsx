@@ -102,6 +102,8 @@ export function SceneDebugModal({
   const [latentPreviewUrl, setLatentPreviewUrl] = useState<string | null>(null);
   const [useFaceRef,      setUseFaceRef]      = useState(false);
   const [refCharId,       setRefCharId]       = useState<string>('');
+  const [selectedLora,    setSelectedLora]    = useState<string>('');
+  const [loraStrength,    setLoraStrength]    = useState(1.0);
   const sseCleanupRef = useRef<(() => void) | null>(null);
 
   // ── Settings + workflows ──────────────────────────────────────────────────
@@ -117,6 +119,16 @@ export function SceneDebugModal({
   const [selectedWorkflow, setSelectedWorkflow] = useState(
     initialWorkflow ?? settings?.bzComfyWorkflow ?? '',
   );
+
+  const selectedWorkflowObj = workflows.find((w) => w.id === selectedWorkflow) ?? null;
+  const workflowHasLora = isBzComfy && !!selectedWorkflowObj?.hasLora;
+
+  const { data: availableLoras = [] } = useQuery<string[]>({
+    queryKey: ['bzcomfy-loras'],
+    queryFn: settingsApi.bzComfyLoras,
+    enabled: workflowHasLora,
+    staleTime: 60_000,
+  });
 
   useEffect(() => {
     if (workflows.length === 0) return;
@@ -219,6 +231,8 @@ export function SceneDebugModal({
         customPrompt: imagePrompt.trim(),
         useFaceReference: useFaceRef || undefined,
         referenceCharId: refCharId || undefined,
+        loraName: workflowHasLora ? (selectedLora || undefined) : undefined,
+        loraStrength: workflowHasLora ? loraStrength : undefined,
       },
       (evt) => {
         if (evt.type === 'status') {
@@ -496,6 +510,37 @@ export function SceneDebugModal({
                   </select>
                 )}
               </section>
+
+              {/* LoRA selector (only when workflow supports it) */}
+              {workflowHasLora && (
+                <section className="space-y-2">
+                  <p className="text-xs font-semibold text-text-secondary">LoRA de estilo</p>
+                  <select
+                    value={selectedLora}
+                    onChange={(e) => setSelectedLora(e.target.value)}
+                    className="w-full border border-border rounded-lg px-3 py-1.5 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+                    style={{ background: 'var(--surface-2)' }}
+                  >
+                    <option value="">Sin LoRA (predeterminado del workflow)</option>
+                    {availableLoras.map((l) => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                  {selectedLora && (
+                    <div className="flex items-center gap-3">
+                      <span className="text-[11px] text-text-muted w-12 flex-shrink-0">Fuerza</span>
+                      <input
+                        type="range"
+                        min={0} max={2} step={0.05}
+                        value={loraStrength}
+                        onChange={(e) => setLoraStrength(parseFloat(e.target.value))}
+                        className="flex-1 accent-accent"
+                      />
+                      <span className="text-[11px] text-text-primary tabular-nums w-8 text-right">
+                        {loraStrength.toFixed(2)}
+                      </span>
+                    </div>
+                  )}
+                </section>
+              )}
 
               {/* BETA FaceID */}
               <section>

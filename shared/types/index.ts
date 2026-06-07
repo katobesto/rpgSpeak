@@ -549,4 +549,5 @@ export interface BzWorkflow {
   label: string;
   hasImageInput: boolean;
   imageInputLabel: string | null;
+  hasLora?: boolean;
 }

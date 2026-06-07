@@ -9,4 +9,5 @@ export const settingsApi = {
     api.get<{ key: K; value: AppSettings[K] }>(`/settings/defaults/${key}`),
   bzComfyWorkflows: () => api.get<BzWorkflow[]>('/settings/bzcomfy-workflows'),
   comfyUiWorkflows: () => api.get<BzWorkflow[]>('/settings/comfyui-workflows'),
+  bzComfyLoras: () => api.get<string[]>('/settings/bzcomfy-loras'),
 };

@@ -31,7 +31,7 @@ export class BzComfyImageProvider implements ImageProvider {
         'bzComfy: no hay workflow configurado. Configura bzComfyWorkflow en Ajustes → Integraciones.',
       );
     }
-    const promptId = await this.startGeneration(workflow, req.prompt, req.negativePrompt);
+    const promptId = await this.startGeneration(workflow, req.prompt, req.negativePrompt, undefined, req.loraName, req.loraStrength);
     const info = await this.waitForImage(promptId, onProgress);
     const buffer = await this.downloadImage(info);
     return { buffer, filename: info.filename };
@@ -61,10 +61,14 @@ export class BzComfyImageProvider implements ImageProvider {
     prompt: string,
     negativePrompt?: string,
     referenceImageName?: string,
+    loraName?: string,
+    loraStrength?: number,
   ): Promise<string> {
     const body: Record<string, unknown> = { workflow, prompt };
     if (negativePrompt) body.negativePrompt = negativePrompt;
     if (referenceImageName) body.referenceImageName = referenceImageName;
+    if (loraName !== undefined) body.loraName = loraName;
+    if (loraStrength !== undefined) body.loraStrength = loraStrength;
 
     const res = await fetch(`${this.baseUrl}/api/generate`, {
       method: 'POST',

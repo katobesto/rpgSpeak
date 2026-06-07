@@ -18,6 +18,8 @@ export function streamSceneImage(
     customPrompt?: string;
     useFaceReference?: boolean;
     referenceCharId?: string;
+    loraName?: string;
+    loraStrength?: number;
   },
   onEvent: (evt: SceneImageSseEvent) => void,
 ): () => void {
