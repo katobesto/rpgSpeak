@@ -469,9 +469,9 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
                   )}
                   {!img.pending && (
                     <button
-                      onClick={() => handleDeleteSceneImage(img.url)}
-                      className="absolute top-1 right-1 rounded-full p-0.5 text-white opacity-0 hover:opacity-100 transition-opacity"
-                      style={{ background: 'rgba(0,0,0,0.6)' }}
+                      onClick={(e) => { e.stopPropagation(); handleDeleteSceneImage(img.url); }}
+                      className="absolute top-1 right-1 rounded-full p-1 text-white hover:bg-red-500 transition-colors"
+                      style={{ background: 'rgba(0,0,0,0.55)' }}
                       title="Eliminar imagen"
                     >
                       <X size={11} />

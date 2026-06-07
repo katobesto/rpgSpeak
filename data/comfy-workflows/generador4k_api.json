@@ -12,7 +12,7 @@
         0
       ],
       "positive": [
-        "175",
+        "105",
         0
       ],
       "negative": [
@@ -43,29 +43,6 @@
     "class_type": "VAEDecode",
     "_meta": {
       "title": "🧬  VAE Decode"
-    }
-  },
-  "9": {
-    "inputs": {
-      "filename_prefix": "Z-Image",
-      "images": [
-        "8",
-        0
-      ]
-    },
-    "class_type": "SaveImage",
-    "_meta": {
-      "title": "💾  Save RAW  Image"
-    }
-  },
-  "16": {
-    "inputs": {
-      "unet_name": "z_image_turbo_bf16.safetensors",
-      "weight_dtype": "default"
-    },
-    "class_type": "UNETLoader",
-    "_meta": {
-      "title": "🗂️  Load Diffusion Model"
     }
   },
   "17": {
@@ -148,17 +125,17 @@
         "type": "PowerLoraLoaderHeaderWidget"
       },
       "lora_1": {
-        "on": false,
+        "on": true,
         "lora": "Z-Image\\(ZIT)_CinematicShot.safetensors",
         "strength": 0.55
       },
       "lora_2": {
-        "on": false,
+        "on": true,
         "lora": "Z-Image\\(ZIT)_Asian2Caucasian_Slider.safetensors",
         "strength": 1
       },
       "lora_3": {
-        "on": false,
+        "on": true,
         "lora": "Z-Image\\(ZIT)_AfterDark_v2.safetensors",
         "strength": 0.7
       },
@@ -175,36 +152,6 @@
     "class_type": "Power Lora Loader (rgthree)",
     "_meta": {
       "title": "🧩  Z-Image Lora Loader"
-    }
-  },
-  "51": {
-    "inputs": {
-      "rgthree_comparer": {
-        "images": [
-          {
-            "name": "A",
-            "selected": true,
-            "url": "/api/view?filename=rgthree.compare._temp_liggz_00001_.png&type=temp&subfolder=&rand=0.45319735837838326"
-          },
-          {
-            "name": "B",
-            "selected": true,
-            "url": "/api/view?filename=rgthree.compare._temp_liggz_00002_.png&type=temp&subfolder=&rand=0.17764527112256268"
-          }
-        ]
-      },
-      "image_a": [
-        "52",
-        0
-      ],
-      "image_b": [
-        "8",
-        0
-      ]
-    },
-    "class_type": "Image Comparer (rgthree)",
-    "_meta": {
-      "title": "🆚  Compare (Color Graded Image vs. RAW Image)"
     }
   },
   "52": {
@@ -237,36 +184,6 @@
       "title": "↕️  Calculated Resolution"
     }
   },
-  "68": {
-    "inputs": {
-      "rgthree_comparer": {
-        "images": [
-          {
-            "name": "A",
-            "selected": true,
-            "url": "/api/view?filename=rgthree.compare._temp_rqjsk_00001_.png&type=temp&subfolder=&rand=0.8636281730623673"
-          },
-          {
-            "name": "B",
-            "selected": true,
-            "url": "/api/view?filename=rgthree.compare._temp_rqjsk_00002_.png&type=temp&subfolder=&rand=0.872065729634015"
-          }
-        ]
-      },
-      "image_a": [
-        "243:241",
-        0
-      ],
-      "image_b": [
-        "52",
-        0
-      ]
-    },
-    "class_type": "Image Comparer (rgthree)",
-    "_meta": {
-      "title": "🆚  Compare (Detailer Image vs. Pre-Defined Image)"
-    }
-  },
   "84": {
     "inputs": {
       "model_name": "sam_vit_b_01ec64.pth",
@@ -280,7 +197,7 @@
   "91": {
     "inputs": {
       "upscale_method": "lanczos",
-      "scale_by": 0.5,
+      "scale_by": 0.6,
       "image": [
         "99",
         0
@@ -327,7 +244,7 @@
   },
   "94": {
     "inputs": {
-      "seed": 763828063,
+      "seed": 2135717241,
       "resolution": 2560,
       "max_resolution": 4096,
       "batch_size": 1,
@@ -412,7 +329,7 @@
   },
   "100": {
     "inputs": {
-      "filename_prefix": "Z-Image",
+      "filename_prefix": "final",
       "images": [
         "97",
         0
@@ -421,36 +338,6 @@
     "class_type": "SaveImage",
     "_meta": {
       "title": "💾  Save Final Image"
-    }
-  },
-  "101": {
-    "inputs": {
-      "rgthree_comparer": {
-        "images": [
-          {
-            "name": "A",
-            "selected": true,
-            "url": "/api/view?filename=rgthree.compare._temp_geepm_00017_.png&type=temp&subfolder=&rand=0.17818308137857197"
-          },
-          {
-            "name": "B",
-            "selected": true,
-            "url": "/api/view?filename=rgthree.compare._temp_geepm_00018_.png&type=temp&subfolder=&rand=0.078146904572443"
-          }
-        ]
-      },
-      "image_a": [
-        "97",
-        0
-      ],
-      "image_b": [
-        "8",
-        0
-      ]
-    },
-    "class_type": "Image Comparer (rgthree)",
-    "_meta": {
-      "title": "🆚  Compare (SeedVR2 Upscale vs. RAW Image)"
     }
   },
   "104": {
@@ -466,9 +353,29 @@
       "title": "➖  Negative Prompt (not used!)"
     }
   },
+  "105": {
+    "inputs": {
+      "randomize_percent": 35,
+      "strength": 20,
+      "noise_insert": "noise on beginning steps",
+      "steps_switchover_percent": 20,
+      "seed": 313940183571246,
+      "mask_starts_at": "beginning",
+      "mask_percent": 0,
+      "log_to_console": false,
+      "conditioning": [
+        "175",
+        0
+      ]
+    },
+    "class_type": "SeedVarianceEnhancer",
+    "_meta": {
+      "title": "🌱  Seed Variance Enhancer"
+    }
+  },
   "109": {
     "inputs": {
-      "Enable 🌱  Seed Variance Enhancer": false
+      "Enable 🌱  Seed Variance Enhancer": true
     },
     "class_type": "FastNodeBypasser",
     "_meta": {
@@ -477,7 +384,7 @@
   },
   "175": {
     "inputs": {
-      "text": "Retrato cyberpunk ultrarrealista de una impresionante mujer pelirroja, piel pálida con sutiles pecas, intensos ojos color esmeralda, labios brillantes, expresión confiada y seductora, cabeza ligeramente inclinada, postura sensual. Atuendo futurista muy ajustado con tejido de alta tecnología, cuero y detalles cromados, perfectamente ceñido, acentuando las curvas. Ciudad cyberpunk iluminada con neón de noche, carteles holográficos, reflejos de lluvia, luces vibrantes magenta y cian, contraste cinematográfico. Iluminación dramática de contorno, luz principal suave en el rostro, profundidad de campo reducida, enfoque extremadamente nítido, fotorrealismo 8K, alto rango dinámico, textura de piel hiper detallada, hebras de cabello realistas, editorial de moda cyberpunk, imagen impactante, audaz e icónica.",
+      "text": "a in the center, Elara, a hauntingly beautiful vampire princess with ethereal pale complexion, high cheekbones, sharp aristocratic jawline, captivating violet eyes, full crimson lips with a hint of fangs, long flowing black hair interwoven with silver threads, tall and slender, wearing semi transparent nightgown, her vagina can be seen with some hair on it, high collar, a silver tiara on her brow, standing and extending her hand forward with a vulnerable yet regal expression, a faint, genuine smile, her other hand resting at her side, fingers slightly curled, warm candlelight casting dramatic chiaroscuro across her face and gown, ancient stone walls and a heavy wooden table in the background, dancing shadows from flickering candles, faint mist swirling at her feet, opulent yet melancholic atmosphere, cinematic composition, shallow depth of field, soft golden light illuminating her extended hand and eyes, dark corners receding into black, epic photographic realism. ",
       "clip": [
         "43",
         1
@@ -492,7 +399,7 @@
     "inputs": {
       "shift": 3,
       "model": [
-        "16",
+        "245",
         0
       ]
     },
@@ -521,6 +428,16 @@
       "title": "🪜  Detailers Steps"
     }
   },
+  "245": {
+    "inputs": {
+      "unet_name": "z_image_turbo_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "🗂️  Load Diffusion Model"
+    }
+  },
   "240:238": {
     "inputs": {
       "model_name": "bbox/face_yolov8m.pt"
@@ -535,7 +452,7 @@
       "guide_size": 512,
       "guide_size_for": false,
       "max_size": 1024,
-      "seed": 333350196358097,
+      "seed": 473513377779931,
       "steps": [
         "244",
         0
@@ -568,7 +485,7 @@
         0
       ],
       "model": [
-        "16",
+        "245",
         0
       ],
       "clip": [
@@ -615,7 +532,7 @@
       "guide_size": 512,
       "guide_size_for": false,
       "max_size": 1024,
-      "seed": 1046551866712028,
+      "seed": 242391031090704,
       "steps": [
         "244",
         0
@@ -648,7 +565,7 @@
         0
       ],
       "model": [
-        "16",
+        "245",
         0
       ],
       "clip": [
@@ -686,7 +603,7 @@
       "guide_size": 512,
       "guide_size_for": false,
       "max_size": 1024,
-      "seed": 162307267487215,
+      "seed": 667418962489239,
       "steps": [
         "244",
         0
@@ -719,7 +636,7 @@
         0
       ],
       "model": [
-        "16",
+        "245",
         0
       ],
       "clip": [
