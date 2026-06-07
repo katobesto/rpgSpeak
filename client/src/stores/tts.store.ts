@@ -41,7 +41,7 @@ interface TtsConfig {
 }
 
 const DEFAULT_CONFIG: TtsConfig = {
-  voiceId:      'es_daniela',
+  voiceId:      'edge_elvira',
   speed:        1.0,
   temperature:  0.667,
   replacements: [],

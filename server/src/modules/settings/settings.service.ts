@@ -486,7 +486,13 @@ export class SettingsService {
         map[row.key] = row.value;
       }
     }
-    return { ...DEFAULTS, ...map } as AppSettings;
+    const result = { ...DEFAULTS, ...map } as AppSettings;
+    // Migrate old Piper voice IDs (es_*) to the default Edge TTS voice
+    const tts = result.ttsSettings as TtsSettings;
+    if (tts?.defaultVoiceId && !tts.defaultVoiceId.startsWith('edge_')) {
+      tts.defaultVoiceId = TTS_DEFAULTS.defaultVoiceId!;
+    }
+    return result;
   }
 
   get<K extends keyof AppSettings>(key: K): AppSettings[K] {

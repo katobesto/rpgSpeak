@@ -767,24 +767,23 @@ export function SettingsPanel() {
 
 // ─── Voice / TTS section ─────────────────────────────────────────────────────
 
-// Static catalog — Piper TTS voices, mirrors Python VOICE_CATALOG
+// Static catalog — Edge TTS fallback when API is unavailable
 const STATIC_CATALOG: Omit<TtsVoice, 'available'>[] = [
-  // ── Local (Piper) ───────────────────────────────────────────────────────────
-  { id: 'es_daniela',  name: 'Daniela',  gender: 'female', type: 'local',  description: 'Voz femenina expresiva, acento argentino (Piper)' },
-  { id: 'es_catala',   name: 'Catala',   gender: 'female', type: 'local',  description: 'Voz femenina, acento argentino (Piper)' },
-  { id: 'es_sofia',    name: 'Sofía',    gender: 'female', type: 'local',  description: 'Voz femenina clara, acento español (Piper)' },
-  { id: 'es_carlos',   name: 'Carlos',   gender: 'male',   type: 'local',  description: 'Voz masculina narrativa, acento español (Piper)' },
-  { id: 'es_david',    name: 'David',    gender: 'male',   type: 'local',  description: 'Voz masculina expresiva, acento español (Piper)' },
-  { id: 'es_antonio',  name: 'Antonio',  gender: 'male',   type: 'local',  description: 'Voz masculina neutra, acento mexicano (Piper)' },
-  { id: 'es_claude_mx',name: 'Claude MX',gender: 'male',   type: 'local',  description: 'Voz masculina, acento mexicano alta calidad (Piper)' },
-  // ── Cloud (Microsoft Edge TTS) ─────────────────────────────────────────────
   { id: 'edge_elvira',   name: 'Elvira',   gender: 'female', type: 'cloud', description: 'Voz neural femenina, acento español (Microsoft)' },
   { id: 'edge_irene',    name: 'Irene',    gender: 'female', type: 'cloud', description: 'Voz neural femenina cálida, acento español (Microsoft)' },
   { id: 'edge_triana',   name: 'Triana',   gender: 'female', type: 'cloud', description: 'Voz neural femenina expresiva, acento español (Microsoft)' },
+  { id: 'edge_abril',    name: 'Abril',    gender: 'female', type: 'cloud', description: 'Voz neural femenina amigable, acento español (Microsoft)' },
+  { id: 'edge_estrella', name: 'Estrella', gender: 'female', type: 'cloud', description: 'Voz neural femenina positiva, acento español (Microsoft)' },
+  { id: 'edge_laia',     name: 'Laia',     gender: 'female', type: 'cloud', description: 'Voz neural femenina cálida, acento español (Microsoft)' },
+  { id: 'edge_vera',     name: 'Vera',     gender: 'female', type: 'cloud', description: 'Voz neural femenina clara, acento español (Microsoft)' },
+  { id: 'edge_ximena',   name: 'Ximena',   gender: 'female', type: 'cloud', description: 'Voz neural femenina multilingüe, acento español (Microsoft)' },
+  { id: 'edge_arabella', name: 'Arabella', gender: 'female', type: 'cloud', description: 'Voz neural femenina multilingüe expresiva, acento español (Microsoft)' },
+  { id: 'edge_isidora',  name: 'Isidora',  gender: 'female', type: 'cloud', description: 'Voz neural femenina multilingüe serena, acento español (Microsoft)' },
   { id: 'edge_dalia',    name: 'Dalia',    gender: 'female', type: 'cloud', description: 'Voz neural femenina, acento mexicano (Microsoft)' },
   { id: 'edge_candela',  name: 'Candela',  gender: 'female', type: 'cloud', description: 'Voz neural femenina expresiva, acento mexicano (Microsoft)' },
   { id: 'edge_elena_ar', name: 'Elena AR', gender: 'female', type: 'cloud', description: 'Voz neural femenina, acento argentino (Microsoft)' },
   { id: 'edge_salome',   name: 'Salomé',   gender: 'female', type: 'cloud', description: 'Voz neural femenina, acento colombiano (Microsoft)' },
+  { id: 'edge_paloma',   name: 'Paloma',   gender: 'female', type: 'cloud', description: 'Voz neural femenina neutra, español americano (Microsoft)' },
   { id: 'edge_alvaro',   name: 'Álvaro',   gender: 'male',   type: 'cloud', description: 'Voz neural masculina, acento español (Microsoft)' },
   { id: 'edge_saul',     name: 'Saúl',     gender: 'male',   type: 'cloud', description: 'Voz neural masculina natural, acento español (Microsoft)' },
   { id: 'edge_jorge_mx', name: 'Jorge',    gender: 'male',   type: 'cloud', description: 'Voz neural masculina, acento mexicano (Microsoft)' },

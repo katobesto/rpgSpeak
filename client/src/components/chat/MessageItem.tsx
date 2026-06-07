@@ -671,7 +671,7 @@ function TtsPlayerBar({ messageId, text, voiceId, speed, temperature, replacemen
   const isLoading = loadingId === messageId;
   const isActive  = isPlaying || isPaused;
 
-  const effectiveVoiceId = voiceId ?? 'es_daniela';
+  const effectiveVoiceId = voiceId ?? 'edge_elvira';
   const effectiveSpeed   = speed   ?? 1.0;
   const cKey   = `${messageId}:${effectiveVoiceId}:${effectiveSpeed.toFixed(1)}`;
   const cached = cachedKeys.has(cKey);

@@ -18,8 +18,8 @@ RUN npm run build
 FROM node:20-alpine AS production
 WORKDIR /app
 
-# Node build deps + Python + pip for TTS service
-RUN apk add --no-cache python3 py3-pip make g++
+# Native module build deps (better-sqlite3)
+RUN apk add --no-cache python3 make g++
 
 # Node server deps
 COPY package.json package-lock.json* ./
@@ -32,17 +32,8 @@ COPY --from=builder /app/server/dist ./server/dist
 COPY --from=builder /app/client/dist ./client/dist
 COPY --from=builder /app/shared ./shared
 
-# Python TTS service
-COPY tts-service/requirements.txt ./tts-service/
-RUN pip3 install --no-cache-dir --break-system-packages -r tts-service/requirements.txt
-COPY tts-service/tts_server.py ./tts-service/
-
-# Startup script
-COPY start.sh ./start.sh
-RUN chmod +x ./start.sh
-
 RUN mkdir -p /app/data
 
 EXPOSE 3000
 
-CMD ["sh", "/app/start.sh"]
+CMD ["node", "/app/server/dist/index.js"]
