@@ -103,7 +103,7 @@ export const ttsRoutes: FastifyPluginAsync = async (app) => {
       name: v.name,
       gender: v.gender,
       description: v.description,
-      type: 'builtin' as const,
+      type: 'cloud' as const,
       available: true,
     }));
     return reply.send({ success: true, data: voices });

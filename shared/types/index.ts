@@ -307,11 +307,7 @@ export interface TtsVoice {
   name: string;
   gender: 'male' | 'female';
   description: string;
-  type: 'builtin' | 'downloadable';
-  /** Present only for builtin voices */
-  speakerName?: string;
-  /** Present only for downloadable voices */
-  downloadUrl?: string;
+  type: 'cloud' | 'local';
   /** Populated by API — whether the voice is ready to use */
   available?: boolean;
 }
