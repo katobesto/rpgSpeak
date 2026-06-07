@@ -256,6 +256,25 @@ function detectPromptNodes(workflow, meta) {
   return { positiveNodeId: null, negativeNodeId: null }
 }
 
+function detectPowerLoraNode(workflow) {
+  for (const [id, node] of Object.entries(workflow)) {
+    if (node.class_type !== 'Power Lora Loader (rgthree)') continue
+    const loras = []
+    for (const [key, val] of Object.entries(node.inputs || {})) {
+      if (!/^lora_\d+$/.test(key)) continue
+      if (typeof val !== 'object' || val === null) continue
+      loras.push({
+        key,
+        name: val.lora || '',
+        on: !!val.on,
+        strength: typeof val.strength === 'number' ? val.strength : 1.0,
+      })
+    }
+    if (loras.length > 0) return { nodeId: id, loras }
+  }
+  return null
+}
+
 function detectImageInputNode(workflow, meta) {
   if (meta?.imageNodeId) {
     const node = workflow[meta.imageNodeId]
@@ -463,12 +482,15 @@ app.get('/api/workflows', async (_req, res) => {
             await readFile(path.join(WORKFLOWS_DIR, f), 'utf-8')
           )
           const imgNode = detectImageInputNode(workflowData, meta)
+          const powerLora = detectPowerLoraNode(workflowData)
           return {
             id,
             label,
             hasImageInput: !!imgNode,
             imageInputLabel: imgNode?.label ?? null,
             hasLora: !!(meta?.loraNodeId),
+            hasPowerLora: !!powerLora,
+            powerLoras: powerLora?.loras ?? [],
           }
         })
     )
@@ -518,7 +540,7 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
 
 // Start a generation
 app.post('/api/generate', async (req, res) => {
-  const { workflow: workflowName, prompt, negativePrompt = '', referenceImageName, loraName, loraStrength } = req.body
+  const { workflow: workflowName, prompt, negativePrompt = '', referenceImageName, loraName, loraStrength, powerLoraUpdates } = req.body
   if (!workflowName || !prompt?.trim()) {
     return res.status(400).json({ error: 'workflow and prompt are required' })
   }
@@ -561,6 +583,21 @@ app.post('/api/generate', async (req, res) => {
         } catch { /* keep whatever is in the JSON */ }
         workflow[meta.loraNodeId].inputs.strength_model = 0
         workflow[meta.loraNodeId].inputs.strength_clip  = 0
+      }
+    }
+
+    // Apply Power LoRA updates (toggle on/off + strength per LoRA)
+    if (Array.isArray(powerLoraUpdates) && powerLoraUpdates.length > 0) {
+      for (const node of Object.values(workflow)) {
+        if (node.class_type !== 'Power Lora Loader (rgthree)') continue
+        for (const update of powerLoraUpdates) {
+          if (node.inputs?.[update.key] && typeof node.inputs[update.key] === 'object') {
+            node.inputs[update.key].on = !!update.on
+            if (typeof update.strength === 'number') {
+              node.inputs[update.key].strength = update.strength
+            }
+          }
+        }
       }
     }
 

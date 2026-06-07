@@ -136,6 +136,12 @@
         </div>
       </div>
 
+      <!-- Power LoRA controls — only shown for Power Lora Loader (rgthree) workflows -->
+      <div id="power-lora-field" class="field hidden">
+        <label>LoRAs activos</label>
+        <div id="power-lora-list" class="power-lora-list"></div>
+      </div>
+
       <div class="field grow">
         <label for="prompt">Prompt</label>
         <textarea id="prompt" rows="10"
@@ -208,7 +214,7 @@
     </main>
   </div>
 
-  <script src="app.js?v=5"></script>
+  <script src="app.js?v=6"></script>
 
   <!-- ── Modal gestión de usuarios ──────────────────────────────────────── -->
   <div id="users-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:200;display:none;align-items:center;justify-content:center">

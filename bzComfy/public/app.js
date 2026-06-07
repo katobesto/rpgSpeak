@@ -489,6 +489,42 @@ function onWorkflowChange() {
   } else {
     loraField.classList.add('hidden')
   }
+
+  const powerLoraField = el('power-lora-field')
+  if (state.currentWorkflow?.hasPowerLora && state.currentWorkflow?.powerLoras?.length) {
+    powerLoraField.classList.remove('hidden')
+    renderPowerLoras(state.currentWorkflow.powerLoras)
+  } else {
+    powerLoraField.classList.add('hidden')
+  }
+}
+
+function renderPowerLoras(loras) {
+  const list = el('power-lora-list')
+  list.innerHTML = loras.map(lora => {
+    const shortName = lora.name.replace(/\.safetensors$/i, '')
+    return `
+      <div class="power-lora-item" data-key="${lora.key}">
+        <label class="power-lora-toggle">
+          <input type="checkbox" class="power-lora-on"${lora.on ? ' checked' : ''} />
+          <span class="power-lora-name" title="${lora.name}">${shortName}</span>
+        </label>
+        <div class="power-lora-strength-row">
+          <input type="range" class="power-lora-strength" min="0" max="2" step="0.05"
+            value="${lora.strength}" />
+          <span class="power-lora-strength-num">${lora.strength.toFixed(2)}</span>
+        </div>
+      </div>
+    `
+  }).join('')
+
+  list.querySelectorAll('.power-lora-item').forEach(item => {
+    const slider = item.querySelector('.power-lora-strength')
+    const num    = item.querySelector('.power-lora-strength-num')
+    slider.addEventListener('input', () => {
+      num.textContent = parseFloat(slider.value).toFixed(2)
+    })
+  })
 }
 
 async function loadLoras() {
@@ -618,6 +654,17 @@ async function generate() {
       const loraName = el('lora-select').value
       const loraStrength = parseFloat(el('lora-strength').value) || 1.0
       if (loraName) { body.loraName = loraName; body.loraStrength = loraStrength }
+    }
+
+    if (state.currentWorkflow?.hasPowerLora) {
+      const items = el('power-lora-list').querySelectorAll('.power-lora-item')
+      if (items.length > 0) {
+        body.powerLoraUpdates = Array.from(items).map(item => ({
+          key:      item.dataset.key,
+          on:       item.querySelector('.power-lora-on').checked,
+          strength: parseFloat(item.querySelector('.power-lora-strength').value),
+        }))
+      }
     }
 
     const res = await apiFetch('/api/generate', {
