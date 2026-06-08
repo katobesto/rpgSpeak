@@ -41,6 +41,7 @@ export interface GenerateOptions {
 export interface AffinityUpdate {
   characterId: string;
   newAffinity: number;
+  previousAffinity?: number;
 }
 
 export interface StreamOptions extends GenerateOptions {
