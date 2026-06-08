@@ -515,11 +515,9 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       .map((c) => charRepo.findById(c.characterId))
       .filter((c): c is Character => c !== null);
 
-    // In narrator mode, all chars are "group chars" for context building
-    // In single mode, group chars are the others (excluding active char)
-    const contextGroupChars = narratorMode
-      ? groupCharacters
-      : groupCharacters.filter((c) => c.id !== character?.id);
+    // buildContext does [character, ...groupCharacters] internally, so always
+    // exclude the primary character from groupChars to avoid duplication.
+    const contextGroupChars = groupCharacters.filter((c) => c.id !== character?.id);
 
     // Save user message
     const userMsg = msgRepo.create({
