@@ -738,9 +738,9 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     let cleanContent: string;
 
     if (useFastLlm && !aborted) {
-      // Fast LLM handles BOTH memories AND affinity — main LLM has no affinity tags
       console.log(`[fast-llm] Analyzing exchange for conversation ${conversationId} (provider: ${settings.fastLlmProviderId}, model: ${settings.fastLlmModelId})`);
-      cleanContent = accumulated.trimEnd();
+      // Strip any [AFINIDAD:...] tags the main LLM may have emitted — fast LLM handles affinity separately
+      cleanContent = accumulated.replace(/\[AFINIDAD:[^\]]+\]/g, '').trimEnd();
       const result = await analyzeExchangeAsync(
         conversationId,
         userMessage,
