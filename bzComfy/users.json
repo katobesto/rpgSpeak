@@ -14,5 +14,13 @@
     "role": "admin",
     "mustChangePassword": false,
     "createdAt": "2026-06-03T20:17:45.185Z"
+  },
+  {
+    "id": "1780923570557",
+    "username": "jaime",
+    "passwordHash": "753047fb79f994258d382ffdc274af79:3e680be078232e56527ec2fbe414f6c7dd7c255b29aec83c9e287610b090638068734309650d6ab294ff39e10015cb38919073421477b42027e16fdda2273322",
+    "role": "user",
+    "mustChangePassword": false,
+    "createdAt": "2026-06-08T12:59:30.582Z"
   }
 ]

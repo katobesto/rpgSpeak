@@ -342,9 +342,10 @@ Based on the character descriptions and the recent conversation below, write ONE
 STRICT RULES:
 - Output ONLY the image prompt — no preamble, no explanation, no quotes, no labels.
 - Use comma-separated keywords and short phrases, cinematic photography style.
-- 80–150 words maximum.
+- 380–1150 words maximum.
 
 MULTI-CHARACTER RULES (critical for correct generation):
+- Character identity must be keept. Pay special attention to character descriptions. 
 - List EACH character separately with an explicit screen position: "on the left", "in the center", "on the right", "in the foreground", "in the background".
 - Describe each character's appearance, clothing, pose and expression right after their position tag.
 - Use the pattern: "[position], [name or role], [appearance], [clothing], [pose/expression]" — repeat for every character present.
@@ -384,7 +385,7 @@ Reglas estrictas:
 - PERSONAJE: omite personajes ya conocidos salvo que el fragmento revele datos nuevos y relevantes
 - CONQUISTA: solo para misiones completadas/activas, objetos con peso narrativo, o revelaciones que cambian la historia
 - No inventes ni extrapoles — solo lo que está explícito en el fragmento`,
-  contextIndexContextSize: 8192,
+  contextIndexContextSize: 18192,
   // Auto-extracción del Índice de Contexto
   contextAutoExtractEnabled:    false,
   contextAutoExtractInterval:   8,
