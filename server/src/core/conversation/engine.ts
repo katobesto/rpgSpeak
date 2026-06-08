@@ -757,7 +757,8 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
         : undefined;
     } else {
       // Legacy behavior: parse [AFINIDAD:...] tags emitted by the main LLM
-      const AFFINITY_RE = /\[AFINIDAD:([^\]:\n]+):([+-]?\d+)\]/g;
+      // Permissive regex — allows optional whitespace around name and sign
+      const AFFINITY_RE = /\[AFINIDAD:\s*([^\]:\n]+?)\s*:\s*([+-]?\d+)\s*\]/g;
       for (const match of [...accumulated.matchAll(AFFINITY_RE)]) {
         const name  = match[1].trim();
         const delta = parseInt(match[2], 10);
@@ -895,7 +896,7 @@ async function analyzeExchangeAsync(
       /\b(foll\w*|viola\w*|violaci[oó]n|abus[ao]\w*|acoso\w*|coger\w*|penetr\w*|chup\w*\s+mi|mamar\w*|masturb\w*|correrse|culo\w*|polla\w*|pene\w*|verga\w*|tetas?|desnud\w*|sexo\s+forz\w*|me\s+voy\s+a\s+(coger|follar|violar)|voy\s+a\s+\w*(follar|violar|coger)\w*|te\s+voy\s+a\s+\w*(follar|violar|poseer)\w*)\b/i;
     const playerHasSexualOrAbusiveIntent = SEXUAL_VEXATIOUS_RE.test(userMessage);
 
-    const AFFINITY_RE = /\[AFINIDAD:([^\]:\n]+):([+-]?\d+)\]/g;
+    const AFFINITY_RE = /\[AFINIDAD:\s*([^\]:\n]+?)\s*:\s*([+-]?\d+)\s*\]/g;
     const affinityUpdates: AffinityUpdate[] = [];
     for (const match of [...responseText.matchAll(AFFINITY_RE)]) {
       const name  = match[1].trim();

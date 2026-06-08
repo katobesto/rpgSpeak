@@ -188,11 +188,22 @@ export class ConversationRepository {
     if (data.messageCount !== undefined) this.db.run(sql`UPDATE conversations SET message_count = ${data.messageCount}, updated_at = ${ts} WHERE id = ${id}`);
 
     if (data.characterIds !== undefined) {
-      this.db.run(sql`DELETE FROM conversation_characters WHERE conversation_id = ${id}`);
+      // Remove only characters no longer in the list (preserves affinity for kept/re-added chars)
+      if (data.characterIds.length > 0) {
+        const inList = data.characterIds.map((c) => `'${c.replace(/'/g, "''")}'`).join(',');
+        this.db.run(sql.raw(`DELETE FROM conversation_characters WHERE conversation_id = '${id}' AND character_id NOT IN (${inList})`));
+      } else {
+        this.db.run(sql`DELETE FROM conversation_characters WHERE conversation_id = ${id}`);
+      }
       for (const [i, cid] of data.characterIds.entries()) {
+        // INSERT OR IGNORE preserves existing affinity; then update order separately
         this.db.run(sql`
-          INSERT INTO conversation_characters (conversation_id, character_id, "order")
+          INSERT OR IGNORE INTO conversation_characters (conversation_id, character_id, "order")
           VALUES (${id}, ${cid}, ${i})
+        `);
+        this.db.run(sql`
+          UPDATE conversation_characters SET "order" = ${i}
+          WHERE conversation_id = ${id} AND character_id = ${cid}
         `);
       }
     }
