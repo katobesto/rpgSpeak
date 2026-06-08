@@ -787,6 +787,8 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       referenceCharId:  z.string().optional(),
       loraName:         z.string().optional(),
       loraStrength:     z.number().min(0).max(2).optional(),
+      megapixel:        z.string().optional(),
+      aspectRatio:      z.string().optional(),
     }).parse(req.body);
 
     const {
@@ -796,6 +798,8 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       useFaceReference = false,
       loraName,
       loraStrength,
+      megapixel,
+      aspectRatio,
     } = body;
 
     reply.raw.writeHead(200, {
@@ -868,6 +872,7 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
               send({ type: 'node', nodeId: evt.nodeId, nodeName: evt.nodeName });
             }
           },
+          { megapixel, aspectRatio },
         );
 
         // Close WS if client disconnects
@@ -914,7 +919,7 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       } else {
         // Non-progressive workflow — use generateWithProgress if available (e.g. bzComfy)
         const anyProvider = comfyProvider as { generateWithProgress?: Function };
-        const imageReq = { prompt: sceneDescription, workflowName, loraName, loraStrength };
+        const imageReq = { prompt: sceneDescription, workflowName, loraName, loraStrength, megapixel, aspectRatio };
         const result = anyProvider.generateWithProgress
           ? await anyProvider.generateWithProgress(
               imageReq,

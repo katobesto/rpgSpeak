@@ -294,6 +294,22 @@ export class ComfyUiService {
     return data.name;
   }
 
+  // ── Inject FluxResolutionNode overrides (megapixel + aspect_ratio) ─────────
+  // Finds the first FluxResolutionNode and patches its inputs.
+  // Values must match the node's combo-box enums exactly (e.g. "2.0", "5:7 (Balanced Portrait)").
+  injectResolution(workflow: Workflow, megapixel?: string, aspectRatio?: string): Workflow {
+    if (!megapixel && !aspectRatio) return workflow;
+    const patched: Workflow = JSON.parse(JSON.stringify(workflow));
+    for (const node of Object.values(patched)) {
+      if (node.class_type === 'FluxResolutionNode') {
+        if (megapixel)   node.inputs.megapixel    = megapixel;
+        if (aspectRatio) node.inputs.aspect_ratio = aspectRatio;
+        break;
+      }
+    }
+    return patched;
+  }
+
   // ── Inject a reference image filename into the LoadImage node ─────────────
   injectReferenceImage(workflow: Workflow, comfyFilename: string): Workflow {
     const patched: Workflow = JSON.parse(JSON.stringify(workflow));
@@ -310,9 +326,13 @@ export class ComfyUiService {
   async generateImage(
     workflowName: string,
     positivePrompt: string,
+    overrides?: { megapixel?: string; aspectRatio?: string },
   ): Promise<{ buffer: Buffer; filename: string }> {
     const workflow = this.loadWorkflow(workflowName);
-    const patched = this.injectPositivePrompt(workflow, positivePrompt);
+    let patched = this.injectPositivePrompt(workflow, positivePrompt);
+    if (overrides?.megapixel || overrides?.aspectRatio) {
+      patched = this.injectResolution(patched, overrides.megapixel, overrides.aspectRatio);
+    }
     return this.runWorkflow(patched);
   }
 
@@ -407,12 +427,16 @@ export class ComfyUiService {
     positivePrompt: string,
     previewNodeId: string,
     finalNodeId: string,
+    overrides?: { megapixel?: string; aspectRatio?: string },
   ): {
     waitForPreview: () => Promise<{ buffer: Buffer; filename: string }>;
     waitForFinal:   () => Promise<{ buffer: Buffer; filename: string }>;
   } {
     const workflow = this.loadWorkflow(workflowName);
-    const patched  = this.injectPositivePrompt(workflow, positivePrompt);
+    let patched    = this.injectPositivePrompt(workflow, positivePrompt);
+    if (overrides?.megapixel || overrides?.aspectRatio) {
+      patched = this.injectResolution(patched, overrides.megapixel, overrides.aspectRatio);
+    }
     const promptIdPromise = this.queuePrompt(patched);
     return {
       waitForPreview: async () => {
@@ -435,6 +459,7 @@ export class ComfyUiService {
     previewNodeId: string,
     finalNodeId: string,
     onProgress: (event: ComfyProgressEvent) => void,
+    overrides?: { megapixel?: string; aspectRatio?: string },
   ): Promise<{
     waitForPreview: () => Promise<{ buffer: Buffer; filename: string }>;
     waitForFinal:   () => Promise<{ buffer: Buffer; filename: string }>;
@@ -442,7 +467,10 @@ export class ComfyUiService {
   }> {
     const clientId = `rpgspeak-${Date.now()}`;
     const workflow = this.loadWorkflow(workflowName);
-    const patched  = this.injectPositivePrompt(workflow, positivePrompt);
+    let patched    = this.injectPositivePrompt(workflow, positivePrompt);
+    if (overrides?.megapixel || overrides?.aspectRatio) {
+      patched = this.injectResolution(patched, overrides.megapixel, overrides.aspectRatio);
+    }
 
     // Build nodeId → human-readable label map from this workflow
     const nodeNameMap = new Map<string, string>(

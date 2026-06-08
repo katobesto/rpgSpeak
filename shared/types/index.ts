@@ -543,4 +543,10 @@ export interface BzWorkflow {
   hasImageInput: boolean;
   imageInputLabel: string | null;
   hasLora?: boolean;
+  /** True when the workflow contains a FluxResolutionNode (megapixel + aspect_ratio controls). */
+  hasResolutionControl?: boolean;
+  /** Default megapixel value read from the workflow's FluxResolutionNode. */
+  defaultMegapixel?: string;
+  /** Default aspect_ratio value read from the workflow's FluxResolutionNode. */
+  defaultAspectRatio?: string;
 }

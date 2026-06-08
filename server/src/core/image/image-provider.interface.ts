@@ -9,6 +9,10 @@ export interface ImageGenRequest {
   loraName?: string;
   /** bzComfy-specific: LoRA strength 0–2. Default 1.0. */
   loraStrength?: number;
+  /** ComfyUI FluxResolutionNode: megapixel value e.g. "2.0". Overrides the workflow default. */
+  megapixel?: string;
+  /** ComfyUI FluxResolutionNode: aspect_ratio value e.g. "5:7 (Balanced Portrait)". Must match node enum exactly. */
+  aspectRatio?: string;
 }
 
 export interface ImageGenResult {

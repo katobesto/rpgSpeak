@@ -16,7 +16,10 @@ export class ComfyUiImageProvider implements ImageProvider {
 
   async generate(req: ImageGenRequest): Promise<ImageGenResult> {
     const workflow = req.workflowName ?? 'image_z_image_turbo';
-    return this.service.generateImage(workflow, req.prompt);
+    return this.service.generateImage(workflow, req.prompt, {
+      megapixel: req.megapixel,
+      aspectRatio: req.aspectRatio,
+    });
   }
 
   async generateWithReference(
@@ -37,8 +40,9 @@ export class ComfyUiImageProvider implements ImageProvider {
     prompt: string,
     previewNodeId: string,
     finalNodeId: string,
+    overrides?: { megapixel?: string; aspectRatio?: string },
   ) {
-    return this.service.startProgressiveGeneration(workflowName, prompt, previewNodeId, finalNodeId);
+    return this.service.startProgressiveGeneration(workflowName, prompt, previewNodeId, finalNodeId, overrides);
   }
 
   startProgressiveWithProgress(
@@ -47,8 +51,9 @@ export class ComfyUiImageProvider implements ImageProvider {
     previewNodeId: string,
     finalNodeId: string,
     onProgress: (event: ComfyProgressEvent) => void,
+    overrides?: { megapixel?: string; aspectRatio?: string },
   ) {
-    return this.service.startProgressiveWithProgress(workflowName, prompt, previewNodeId, finalNodeId, onProgress);
+    return this.service.startProgressiveWithProgress(workflowName, prompt, previewNodeId, finalNodeId, onProgress, overrides);
   }
 
   /** Returns progressive meta if the workflow supports it, null otherwise. */

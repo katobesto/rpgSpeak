@@ -104,6 +104,8 @@ export function SceneDebugModal({
   const [refCharId,       setRefCharId]       = useState<string>('');
   const [selectedLora,    setSelectedLora]    = useState<string>('');
   const [loraStrength,    setLoraStrength]    = useState(1.0);
+  const [megapixel,       setMegapixel]       = useState<string>('');
+  const [aspectRatio,     setAspectRatio]     = useState<string>('');
   const sseCleanupRef = useRef<(() => void) | null>(null);
 
   // ── Settings + workflows ──────────────────────────────────────────────────
@@ -120,8 +122,9 @@ export function SceneDebugModal({
     initialWorkflow ?? settings?.bzComfyWorkflow ?? '',
   );
 
-  const selectedWorkflowObj = workflows.find((w) => w.id === selectedWorkflow) ?? null;
-  const workflowHasLora = isBzComfy && !!selectedWorkflowObj?.hasLora;
+  const selectedWorkflowObj   = workflows.find((w) => w.id === selectedWorkflow) ?? null;
+  const workflowHasLora       = isBzComfy && !!selectedWorkflowObj?.hasLora;
+  const workflowHasResolution = !!selectedWorkflowObj?.hasResolutionControl;
 
   const { data: availableLoras = [] } = useQuery<string[]>({
     queryKey: ['bzcomfy-loras'],
@@ -142,6 +145,18 @@ export function SceneDebugModal({
       );
     }
   }, [workflows]);
+
+  // Sync resolution defaults when selected workflow changes
+  useEffect(() => {
+    const wf = workflows.find((w) => w.id === selectedWorkflow);
+    if (wf?.hasResolutionControl) {
+      setMegapixel(wf.defaultMegapixel ?? '');
+      setAspectRatio(wf.defaultAspectRatio ?? '');
+    } else {
+      setMegapixel('');
+      setAspectRatio('');
+    }
+  }, [selectedWorkflow, workflows]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   function toggle(id: string) {
@@ -233,6 +248,8 @@ export function SceneDebugModal({
         referenceCharId: refCharId || undefined,
         loraName: workflowHasLora ? (selectedLora || undefined) : undefined,
         loraStrength: workflowHasLora ? loraStrength : undefined,
+        megapixel: workflowHasResolution && megapixel ? megapixel : undefined,
+        aspectRatio: workflowHasResolution && aspectRatio ? aspectRatio : undefined,
       },
       (evt) => {
         if (evt.type === 'status') {
@@ -542,6 +559,46 @@ export function SceneDebugModal({
                 </section>
               )}
 
+              {/* Resolution control (FluxResolutionNode workflows) */}
+              {workflowHasResolution && (
+                <section className="space-y-2.5">
+                  <p className="text-xs font-semibold text-text-secondary">Resolución base</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-text-muted">Megapíxeles</label>
+                      <select
+                        value={megapixel}
+                        onChange={(e) => setMegapixel(e.target.value)}
+                        className="w-full border border-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+                        style={{ background: 'var(--surface-2)' }}
+                      >
+                        {MEGAPIXEL_OPTIONS.map((v) => (
+                          <option key={v} value={v}>{v} MP</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="space-y-1">
+                      <label className="text-[10px] text-text-muted">Proporción</label>
+                      <select
+                        value={aspectRatio}
+                        onChange={(e) => setAspectRatio(e.target.value)}
+                        className="w-full border border-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+                        style={{ background: 'var(--surface-2)' }}
+                      >
+                        {ASPECT_RATIO_OPTIONS.map((v) => (
+                          <option key={v.value} value={v.value}>{v.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  {megapixel && aspectRatio && (
+                    <p className="text-[10px] text-text-muted">
+                      {megapixel} MP · {aspectRatio.split(' ')[0]}
+                    </p>
+                  )}
+                </section>
+              )}
+
               {/* BETA FaceID */}
               <section>
                 <div className="flex items-center gap-2 border border-border rounded-xl px-3 py-2.5 w-fit">
@@ -706,6 +763,25 @@ export function SceneDebugModal({
 
   return createPortal(modal, document.body);
 }
+
+// ── Resolution constants (must match FluxResolutionNode combo values exactly) ──
+const MEGAPIXEL_OPTIONS = ['0.25', '0.5', '1.0', '1.5', '2.0', '2.5', '3.0', '4.0'];
+
+const ASPECT_RATIO_OPTIONS: { value: string; label: string }[] = [
+  { value: '1:1 (Perfect Square)',      label: '1:1 — Cuadrado' },
+  { value: '4:3 (Classic Landscape)',   label: '4:3 — Paisaje clásico' },
+  { value: '3:4 (Classic Portrait)',    label: '3:4 — Retrato clásico' },
+  { value: '3:2 (Standard Landscape)',  label: '3:2 — Paisaje estándar' },
+  { value: '2:3 (Standard Portrait)',   label: '2:3 — Retrato estándar' },
+  { value: '16:9 (Widescreen)',         label: '16:9 — Panorámica' },
+  { value: '9:16 (Mobile Portrait)',    label: '9:16 — Vertical móvil' },
+  { value: '7:5 (Balanced Landscape)',  label: '7:5 — Paisaje equilibrado' },
+  { value: '5:7 (Balanced Portrait)',   label: '5:7 — Retrato equilibrado' },
+  { value: '5:4 (Large Format)',        label: '5:4 — Gran formato H' },
+  { value: '4:5 (Large Format Portrait)', label: '4:5 — Gran formato V' },
+  { value: '21:9 (Ultrawide)',          label: '21:9 — Ultrapanorámica' },
+  { value: '9:21 (Super Tall)',         label: '9:21 — Super vertical' },
+];
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 

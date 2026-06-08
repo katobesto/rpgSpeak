@@ -44,13 +44,22 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
           const meta = JSON.parse(await readFile(path.join(WORKFLOWS_DIR, `${id}_meta.json`), 'utf-8'));
           if (meta.label) label = meta.label;
         } catch { /* no meta file */ }
+        let hasResolutionControl = false;
+        let defaultMegapixel: string | undefined;
+        let defaultAspectRatio: string | undefined;
         try {
-          const wf = JSON.parse(await readFile(path.join(WORKFLOWS_DIR, f), 'utf-8'));
-          const loadNode = Object.values(wf as Record<string, { class_type?: string; _meta?: { title?: string } }>)
-            .find((n) => n.class_type === 'LoadImage');
+          const wf = JSON.parse(await readFile(path.join(WORKFLOWS_DIR, f), 'utf-8')) as Record<string, { class_type?: string; inputs?: Record<string, unknown>; _meta?: { title?: string } }>;
+          const nodes = Object.values(wf);
+          const loadNode = nodes.find((n) => n.class_type === 'LoadImage');
           if (loadNode) { hasImageInput = true; imageInputLabel = loadNode._meta?.title ?? 'Reference Image'; }
+          const resNode = nodes.find((n) => n.class_type === 'FluxResolutionNode');
+          if (resNode) {
+            hasResolutionControl = true;
+            defaultMegapixel = resNode.inputs?.megapixel as string | undefined;
+            defaultAspectRatio = resNode.inputs?.aspect_ratio as string | undefined;
+          }
         } catch { /* skip */ }
-        workflows.push({ id, label, hasImageInput, imageInputLabel });
+        workflows.push({ id, label, hasImageInput, imageInputLabel, hasResolutionControl, defaultMegapixel, defaultAspectRatio });
       }
       return reply.send({ data: workflows });
     } catch (err) {

@@ -20,6 +20,8 @@ export function streamSceneImage(
     referenceCharId?: string;
     loraName?: string;
     loraStrength?: number;
+    megapixel?: string;
+    aspectRatio?: string;
   },
   onEvent: (evt: SceneImageSseEvent) => void,
 ): () => void {
