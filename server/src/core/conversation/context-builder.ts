@@ -197,8 +197,14 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
       `• PROHIBIDO mostrar curiosidad o atracción ante ese contacto\n` +
       `• afinidad < 40 = enfado explícito o rechazo duro; 40-60 = rechazo firme; 61-79 = rechazo claro con herida`;
 
-    affinityBlock = affinitySystemPrompt?.trim()
-      ? `${affinitySystemPrompt.trim()}\n\n${consentDirective}`
+    // consentDirective (current state) always first so the LLM knows the real
+    // emotional state before anything else.
+    // affinitySystemPrompt (tier guide + [AFINIDAD:...] tag instruction) only
+    // when fast LLM is OFF — it's meaningless (and wastes tokens) when the fast
+    // LLM handles affinity analysis. Placed AFTER consentDirective so the tag
+    // emission instruction is as close as possible to the generation point.
+    affinityBlock = (!fastLlmEnabled && affinitySystemPrompt?.trim())
+      ? `${consentDirective}\n\n---\n\n${affinitySystemPrompt.trim()}`
       : consentDirective;
   }
   // ─────────────────────────────────────────────────────────────────────────────
