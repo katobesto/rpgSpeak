@@ -502,6 +502,17 @@ function onWorkflowChange() {
   } else {
     powerLoraField.classList.add('hidden')
   }
+
+  const resolutionField = el('resolution-field')
+  if (state.currentWorkflow?.hasResolutionControl) {
+    resolutionField.classList.remove('hidden')
+    initResolutionControls(
+      state.currentWorkflow.defaultMegapixel,
+      state.currentWorkflow.defaultAspectRatio,
+    )
+  } else {
+    resolutionField.classList.add('hidden')
+  }
 }
 
 function renderPowerLoras(loras) {
@@ -530,6 +541,39 @@ function renderPowerLoras(loras) {
       num.textContent = parseFloat(slider.value).toFixed(2)
     })
   })
+}
+
+// ── Resolution controls ────────────────────────────────────────────────────
+
+const MEGAPIXEL_OPTIONS = ['0.25', '0.5', '1.0', '1.5', '2.0', '2.5', '3.0', '4.0']
+
+const ASPECT_RATIO_OPTIONS = [
+  { value: '1:1 (Perfect Square)',        label: '1:1 — Cuadrado' },
+  { value: '4:3 (Classic Landscape)',     label: '4:3 — Paisaje clásico' },
+  { value: '3:4 (Classic Portrait)',      label: '3:4 — Retrato clásico' },
+  { value: '3:2 (Standard Landscape)',    label: '3:2 — Paisaje estándar' },
+  { value: '2:3 (Standard Portrait)',     label: '2:3 — Retrato estándar' },
+  { value: '16:9 (Widescreen)',           label: '16:9 — Panorámica' },
+  { value: '9:16 (Mobile Portrait)',      label: '9:16 — Vertical móvil' },
+  { value: '7:5 (Balanced Landscape)',    label: '7:5 — Paisaje equilibrado' },
+  { value: '5:7 (Balanced Portrait)',     label: '5:7 — Retrato equilibrado' },
+  { value: '5:4 (Large Format)',          label: '5:4 — Gran formato H' },
+  { value: '4:5 (Large Format Portrait)', label: '4:5 — Gran formato V' },
+  { value: '21:9 (Ultrawide)',            label: '21:9 — Ultrapanorámica' },
+  { value: '9:21 (Super Tall)',           label: '9:21 — Super vertical' },
+]
+
+function initResolutionControls(defaultMegapixel, defaultAspectRatio) {
+  const mpSel = el('megapixel-select')
+  const arSel = el('aspect-ratio-select')
+
+  mpSel.innerHTML = MEGAPIXEL_OPTIONS
+    .map(v => `<option value="${v}"${v === defaultMegapixel ? ' selected' : ''}>${v} MP</option>`)
+    .join('')
+
+  arSel.innerHTML = ASPECT_RATIO_OPTIONS
+    .map(o => `<option value="${o.value}"${o.value === defaultAspectRatio ? ' selected' : ''}>${o.label}</option>`)
+    .join('')
 }
 
 async function loadLoras() {
@@ -673,6 +717,13 @@ async function generate() {
           strength: parseFloat(item.querySelector('.power-lora-strength').value),
         }))
       }
+    }
+
+    if (state.currentWorkflow?.hasResolutionControl) {
+      const mp = el('megapixel-select').value
+      const ar = el('aspect-ratio-select').value
+      if (mp) body.megapixel  = mp
+      if (ar) body.aspectRatio = ar
     }
 
     const res = await apiFetch('/api/generate', {

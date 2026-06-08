@@ -483,6 +483,8 @@ app.get('/api/workflows', async (_req, res) => {
           )
           const imgNode = detectImageInputNode(workflowData, meta)
           const powerLora = detectPowerLoraNode(workflowData)
+          // Detect FluxResolutionNode for megapixel / aspect_ratio controls
+          const resNode = Object.values(workflowData).find(n => n.class_type === 'FluxResolutionNode')
           return {
             id,
             label,
@@ -491,6 +493,9 @@ app.get('/api/workflows', async (_req, res) => {
             hasLora: !!(meta?.loraNodeId),
             hasPowerLora: !!powerLora,
             powerLoras: powerLora?.loras ?? [],
+            hasResolutionControl: !!resNode,
+            defaultMegapixel: resNode?.inputs?.megapixel ?? null,
+            defaultAspectRatio: resNode?.inputs?.aspect_ratio ?? null,
           }
         })
     )
@@ -540,7 +545,7 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
 
 // Start a generation
 app.post('/api/generate', async (req, res) => {
-  const { workflow: workflowName, prompt, negativePrompt = '', referenceImageName, loraName, loraStrength, powerLoraUpdates, seed } = req.body
+  const { workflow: workflowName, prompt, negativePrompt = '', referenceImageName, loraName, loraStrength, powerLoraUpdates, seed, megapixel, aspectRatio } = req.body
   if (!workflowName || !prompt?.trim()) {
     return res.status(400).json({ error: 'workflow and prompt are required' })
   }
@@ -597,6 +602,17 @@ app.post('/api/generate', async (req, res) => {
               node.inputs[update.key].strength = update.strength
             }
           }
+        }
+      }
+    }
+
+    // Inject FluxResolutionNode overrides (megapixel + aspect_ratio)
+    if (megapixel || aspectRatio) {
+      for (const node of Object.values(workflow)) {
+        if (node.class_type === 'FluxResolutionNode') {
+          if (megapixel)   node.inputs.megapixel    = megapixel
+          if (aspectRatio) node.inputs.aspect_ratio = aspectRatio
+          break
         }
       }
     }

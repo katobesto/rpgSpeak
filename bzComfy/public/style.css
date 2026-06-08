@@ -521,6 +521,23 @@ textarea { resize: vertical; line-height: 1.55; }
 /* ── Utilities ──────────────────────────────────────── */
 .hidden { display: none !important; }
 
+/* ── Resolution controls ────────────────────────────── */
+.resolution-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.resolution-col {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.resolution-sublabel {
+  font-size: 10px;
+  color: var(--text-dim);
+  font-weight: 500;
+}
+
 /* ── LoRA strength row ──────────────────────────────── */
 .lora-strength-row {
   display: flex;

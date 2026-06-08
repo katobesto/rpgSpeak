@@ -142,6 +142,25 @@
         <div id="power-lora-list" class="power-lora-list"></div>
       </div>
 
+      <!-- Resolution controls — only shown for workflows with FluxResolutionNode -->
+      <div id="resolution-field" class="field hidden">
+        <label>Resolución base</label>
+        <div class="resolution-row">
+          <div class="resolution-col">
+            <span class="resolution-sublabel">Megapíxeles</span>
+            <div class="select-wrap">
+              <select id="megapixel-select"></select>
+            </div>
+          </div>
+          <div class="resolution-col">
+            <span class="resolution-sublabel">Proporción</span>
+            <div class="select-wrap">
+              <select id="aspect-ratio-select"></select>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div class="field grow">
         <label for="prompt">Prompt</label>
         <textarea id="prompt" rows="10"
