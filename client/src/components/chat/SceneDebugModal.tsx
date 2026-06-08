@@ -568,27 +568,6 @@ export function SceneDebugModal({
                 </div>
               </section>
 
-              {/* Preview image area */}
-              <section>
-                <div
-                  className="w-full rounded-xl border border-border overflow-hidden flex items-center justify-center"
-                  style={{ background: 'var(--surface-2)', minHeight: '220px' }}
-                >
-                  {latentPreviewUrl ? (
-                    <img
-                      src={latentPreviewUrl}
-                      alt="Preview"
-                      className="w-full h-full object-contain max-h-80"
-                    />
-                  ) : (
-                    <div className="flex flex-col items-center justify-center gap-2 py-10 text-text-muted">
-                      <ImageIcon size={36} className="opacity-15" />
-                      <span className="text-xs opacity-40">La imagen aparecerá aquí durante la generación</span>
-                    </div>
-                  )}
-                </div>
-              </section>
-
               {/* Progress */}
               {generatingImage && (
                 <section className="space-y-2">
@@ -698,6 +677,30 @@ export function SceneDebugModal({
           </div>
         </div>
       </div>
+
+      {/* Floating streaming preview – esquina inferior derecha */}
+      {latentPreviewUrl && (
+        <div
+          className="absolute bottom-6 right-6 w-52 rounded-xl overflow-hidden shadow-2xl border border-white/10 z-10"
+          style={{ background: 'var(--surface-1)' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <img src={latentPreviewUrl} alt="Vista previa" className="w-full object-contain" />
+          <div className="px-2.5 py-1.5 flex items-center gap-1.5 border-t border-white/8">
+            {generatingImage && <Loader size={10} className="animate-spin text-accent flex-shrink-0" />}
+            <span className="text-[10px] text-text-muted truncate flex-1">
+              {stepMax > 0
+                ? `${currentNode || 'Paso'} ${stepValue}/${stepMax}`
+                : (currentNode || statusMessage || 'Generando…')}
+            </span>
+            {stepMax > 0 && (
+              <span className="text-[10px] text-text-muted tabular-nums">
+                {Math.round((stepValue / stepMax) * 100)}%
+              </span>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 
