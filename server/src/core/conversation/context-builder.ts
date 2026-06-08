@@ -197,13 +197,13 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
       `• PROHIBIDO mostrar curiosidad o atracción ante ese contacto\n` +
       `• afinidad < 40 = enfado explícito o rechazo duro; 40-60 = rechazo firme; 61-79 = rechazo claro con herida`;
 
-    // In narrator mode the LLM controls multiple characters simultaneously —
-    // the generic "tu nivel de afinidad" (singular) in affinitySystemPrompt is
-    // contradictory. Use only the consentDirective which lists each character
-    // by name with their current affinity value.
-    // In single-char mode (not narrator), include the full affinitySystemPrompt
-    // when fastLlm is off so the LLM knows the affinity tier scale.
-    affinityBlock = (!fastLlmEnabled && !narratorMode && affinitySystemPrompt?.trim())
+    // Include the full affinitySystemPrompt when fastLlm is off — it contains
+    // both the tier descriptions (what each affinity level means behaviorally)
+    // AND the instruction to emit [AFINIDAD:...] tags that engine.ts parses.
+    // Without it the main LLM never emits those tags and affinity never changes.
+    // The prompt already uses "Cada personaje" / "NombrePersonaje" so it works
+    // equally well in narrator mode (multiple characters) as in single-char mode.
+    affinityBlock = (!fastLlmEnabled && affinitySystemPrompt?.trim())
       ? `${affinitySystemPrompt.trim()}\n\n${consentDirective}`
       : consentDirective;
   }
