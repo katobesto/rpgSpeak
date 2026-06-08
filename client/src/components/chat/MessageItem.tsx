@@ -85,7 +85,8 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
 
   // TTS — settings leídos de cache (sin petición extra)
   const { data: settings } = useQuery({ queryKey: ['settings'], queryFn: settingsApi.get });
-  const showTokenCount = useUiStore((s) => s.appearance.showTokenCount);
+  const showTokenCount  = useUiStore((s) => s.appearance.showTokenCount);
+  const showTimestamps  = useUiStore((s) => s.appearance.showTimestamps);
   const isAdmin = useAuthStore((s) => s.isAdmin);
   const { speak, playingId, loadingId } = useTtsStore();
   const openLightbox = useLightboxStore((s) => s.open);
@@ -304,6 +305,11 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
           <span className="text-xs font-medium text-text-secondary">
             {isUser ? 'You' : (characterName ?? 'Assistant')}
           </span>
+          {showTimestamps && message.createdAt && (
+            <span className="text-[10px] text-text-muted tabular-nums">
+              {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          )}
           {message.metadata?.generationTime && (
             <span className="text-[10px] text-text-muted">
               {Math.round((message.metadata.generationTime as number) / 1000 * 10) / 10}s
