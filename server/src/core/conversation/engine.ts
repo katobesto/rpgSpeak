@@ -767,7 +767,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
           const currentAffinity = conversation.characters.find((l) => l.characterId === found.id)?.affinity ?? 50;
           const newAffinity = Math.max(1, Math.min(100, currentAffinity + delta));
           convRepo.updateCharacterAffinity(conversationId, found.id, newAffinity);
-          affinityUpdates.push({ characterId: found.id, newAffinity });
+          affinityUpdates.push({ characterId: found.id, newAffinity, previousAffinity: currentAffinity });
         }
       }
       cleanContent = accumulated.replace(/\[AFINIDAD:[^\]]+\]/g, '').trimEnd();
@@ -925,7 +925,7 @@ async function analyzeExchangeAsync(
 
       const newAffinity = Math.max(1, Math.min(100, current + delta));
       convRepo.updateCharacterAffinity(conversationId, found.id, newAffinity);
-      affinityUpdates.push({ characterId: found.id, newAffinity });
+      affinityUpdates.push({ characterId: found.id, newAffinity, previousAffinity: current });
     }
 
     return { affinityUpdates, rawResponse: responseText, rawPrompt: analysisPrompt };

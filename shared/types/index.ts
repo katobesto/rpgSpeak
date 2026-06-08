@@ -457,6 +457,7 @@ export interface GenerateResponse {
 export interface AffinityUpdate {
   characterId: string;
   newAffinity: number;
+  previousAffinity?: number;
 }
 
 export interface StreamChunk {

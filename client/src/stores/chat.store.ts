@@ -210,6 +210,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                       } : {}),
                       ...(promptMessages?.length ? { promptMessages } : {}),
                       ...(fastLlmDebug ? { fastLlmDebug } : {}),
+                      ...(affinityUpdates?.length ? { affinityUpdates } : {}),
                     },
                   }
                 : m

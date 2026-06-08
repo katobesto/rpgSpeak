@@ -383,6 +383,14 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
           )}
         </div>
 
+        {/* Affinity change indicator */}
+        {!isUser && !isStreaming && (message.metadata?.affinityUpdates as import('@rpgspeak/shared').AffinityUpdate[] | undefined)?.length ? (
+          <AffinityChangeBar
+            updates={message.metadata!.affinityUpdates as import('@rpgspeak/shared').AffinityUpdate[]}
+            characters={groupCharacters ?? []}
+          />
+        ) : null}
+
         {/* Fast LLM debug panel — solo admin */}
         {isAdmin && !isUser && !isStreaming && message.metadata?.fastLlmDebug != null && (
           <FastLlmDebugPanel debug={message.metadata.fastLlmDebug as FastLlmDebug} messageId={message.id} />
@@ -549,6 +557,52 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
           />
         )}
       </div>
+    </div>
+  );
+}
+
+// ─── Affinity Change Bar ──────────────────────────────────────────────────────
+
+function AffinityChangeBar({
+  updates,
+  characters,
+}: {
+  updates: import('@rpgspeak/shared').AffinityUpdate[];
+  characters: import('@rpgspeak/shared').Character[];
+}) {
+  return (
+    <div className="flex flex-wrap gap-1.5 mt-1">
+      {updates.map((u) => {
+        const char = characters.find((c) => c.id === u.characterId);
+        const name = char?.name ?? u.characterId;
+        const prev = u.previousAffinity ?? u.newAffinity;
+        const delta = u.newAffinity - prev;
+        const isPositive = delta > 0;
+        const isNeutral  = delta === 0;
+
+        const colors = isNeutral
+          ? 'bg-white/5 border-white/10 text-text-muted'
+          : isPositive
+          ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400'
+          : 'bg-red-500/10 border-red-500/25 text-red-400';
+
+        return (
+          <span
+            key={u.characterId}
+            className={`inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full border font-mono ${colors}`}
+            title={`${name}: ${prev} → ${u.newAffinity}`}
+          >
+            <span className="text-[9px] opacity-70">{isPositive ? '▲' : isNeutral ? '●' : '▼'}</span>
+            {name}
+            {!isNeutral && (
+              <span className="font-semibold">
+                {isPositive ? '+' : ''}{delta}
+              </span>
+            )}
+            <span className="opacity-50">({u.newAffinity}/100)</span>
+          </span>
+        );
+      })}
     </div>
   );
 }
