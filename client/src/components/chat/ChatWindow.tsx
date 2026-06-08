@@ -35,6 +35,9 @@ import {
   SlidersHorizontal,
   UserCircle,
   Filter,
+  Map,
+  Info,
+  Navigation,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar.tsx';
 import type { Character, Story, Conversation, User } from '@rpgspeak/shared';
@@ -58,6 +61,7 @@ export function ChatWindow() {
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [anchorModalOpen, setAnchorModalOpen] = useState(false);
+  const [locationsModalOpen, setLocationsModalOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
@@ -270,6 +274,13 @@ export function ChatWindow() {
             <Pin size={15} />
           </button>
           <button
+            onClick={() => setLocationsModalOpen(true)}
+            className="p-2 rounded-lg hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors"
+            title="Mapa de ubicaciones"
+          >
+            <Map size={15} />
+          </button>
+          <button
             onClick={() => setGroupPanelOpen(true)}
             className="p-2 rounded-lg hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors"
             title="Gestionar grupo"
@@ -403,6 +414,14 @@ export function ChatWindow() {
           }}
         />
       )}
+
+      {locationsModalOpen && (
+        <LocationsModal
+          onClose={() => setLocationsModalOpen(false)}
+          storyIds={activeConversation.stories.map((s) => s.storyId)}
+          allStories={allStories}
+        />
+      )}
     </div>
   );
 }
@@ -482,6 +501,120 @@ function ContextAnchorModal({ onClose, onSubmit }: {
             <Pin size={13} />
             {saving ? 'Anclando…' : 'Anclar'}
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Locations Modal ─────────────────────────────────────────────────────────
+
+function LocationsModal({ onClose, storyIds, allStories }: {
+  onClose: () => void;
+  storyIds: string[];
+  allStories: Story[];
+}) {
+  const sendMessage = useChatStore((s) => s.sendMessage);
+  const isStreaming = useChatStore((s) => s.isStreaming);
+
+  const linkedStories = allStories.filter((s) => storyIds.includes(s.id));
+  const allLocations = linkedStories.flatMap((s) =>
+    s.locations.map((loc) => ({ ...loc, storyName: s.name }))
+  );
+
+  async function handleMention(locationName: string) {
+    onClose();
+    await sendMessage({ message: `¿Podéis darme más información sobre ${locationName}?` });
+  }
+
+  async function handleGo(locationName: string) {
+    onClose();
+    await sendMessage({ message: `Vamos a ${locationName}` });
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.72)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        className="w-full max-w-lg rounded-xl border border-border flex flex-col animate-slide-up"
+        style={{ background: 'var(--surface-1)', maxHeight: '80vh' }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <Map size={15} className="text-accent" />
+            <div>
+              <p className="font-semibold text-sm">Mapa de ubicaciones</p>
+              <p className="text-[10px] text-text-muted mt-0.5">
+                {allLocations.length === 0
+                  ? 'Sin ubicaciones definidas en las historias vinculadas'
+                  : `${allLocations.length} ubicación${allLocations.length !== 1 ? 'es' : ''} disponible${allLocations.length !== 1 ? 's' : ''}`}
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors">
+            <X size={15} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto flex-1 p-3 space-y-2">
+          {allLocations.length === 0 ? (
+            <div className="py-10 text-center">
+              <Map size={28} className="mx-auto mb-3 text-text-muted opacity-40" />
+              <p className="text-sm text-text-muted">No hay ubicaciones definidas.</p>
+              <p className="text-xs text-text-muted mt-1">Añádelas en el editor de historia → Ubicaciones.</p>
+            </div>
+          ) : (
+            allLocations.map((loc) => (
+              <div
+                key={loc.id}
+                className="rounded-xl border border-border p-3.5 flex flex-col gap-2.5"
+                style={{ background: 'var(--surface-2)' }}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sm leading-tight">{loc.name}</p>
+                    {linkedStories.length > 1 && (
+                      <p className="text-[10px] text-text-muted mt-0.5">{loc.storyName}</p>
+                    )}
+                    {loc.description && (
+                      <p className="text-xs text-text-muted mt-1 leading-relaxed line-clamp-2">
+                        {loc.description}
+                      </p>
+                    )}
+                    {loc.atmosphere && (
+                      <p className="text-[10px] text-text-muted italic mt-0.5 line-clamp-1">
+                        {loc.atmosphere}
+                      </p>
+                    )}
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleMention(loc.name)}
+                    disabled={isStreaming}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-border hover:bg-white/5 text-text-secondary hover:text-text-primary transition-colors disabled:opacity-40"
+                  >
+                    <Info size={12} />
+                    Mencionar
+                  </button>
+                  <button
+                    onClick={() => handleGo(loc.name)}
+                    disabled={isStreaming}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors disabled:opacity-40"
+                    style={{ background: 'var(--accent)', color: '#fff' }}
+                  >
+                    <Navigation size={12} />
+                    Ir
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>
