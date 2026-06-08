@@ -806,6 +806,7 @@ function finishGeneration() {
   setTimeout(() => {
     showProgressPanel(false)
     el('preview-badge').classList.add('hidden')
+    el('stream-float').classList.add('hidden')
   }, 1200)
 
   if (state.eventSource) { state.eventSource.close(); state.eventSource = null }
@@ -854,6 +855,8 @@ function resetViewer() {
   img.src = ''
   el('placeholder').classList.remove('hidden')
   el('preview-badge').classList.add('hidden')
+  el('stream-float').classList.add('hidden')
+  el('stream-float-img').src = ''
   state.currentImageSrc = null
   state.currentImageFilename = null
   resetImageView()
@@ -870,14 +873,22 @@ function downloadImage() {
 }
 
 function showImage(src, isPreview, filename) {
+  if (isPreview) {
+    // Latent preview → ventana flotante, no toca el visor principal
+    el('stream-float-img').src = src
+    el('stream-float').classList.remove('hidden')
+    return
+  }
+
+  // Imagen real → visor principal
   const img = el('result-img')
   const info = el('image-info')
   img.onload = () => {
     img.classList.remove('hidden')
     img.classList.add('fade-in')
     el('placeholder').classList.add('hidden')
-    resetImageView()  // fit native-resolution image in container via CSS transform
-    if (!isPreview && filename) {
+    resetImageView()
+    if (filename) {
       el('image-filename').textContent = filename
       el('image-dimensions').textContent = `${img.naturalWidth} × ${img.naturalHeight} px`
       info.classList.remove('hidden')
@@ -886,8 +897,7 @@ function showImage(src, isPreview, filename) {
     }
   }
   img.src = src
-  el('preview-badge').classList.toggle('hidden', !isPreview)
-  if (isPreview) info.classList.add('hidden')
+  el('preview-badge').classList.add('hidden')
 }
 
 function showProgressPanel(visible) {
