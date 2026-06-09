@@ -350,9 +350,9 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
   // (character prompt + stories) can be fully reused by the KV cache across turns,
   // even when affinity values or memory sets change.
 
-  // In single-char mode inject the location block (with [UBICACION:...] instruction).
-  // In narrator mode the narrator orchestrates all movement so no anchor is needed.
-  const spatialCoherenceBlock = !narratorMode ? buildLocationBlock(currentLocation) : null;
+  // Inject the location block in all modes (single-char AND narrator).
+  // The narrator needs to know the current location just as much as a single character.
+  const spatialCoherenceBlock = buildLocationBlock(currentLocation);
 
   const shouldInjectMemories = allMemories.length > 0 && memoryInjectionPrompt?.trim();
   const needsSplit = shouldInjectMemories || Boolean(contextIndexBlock) || Boolean(affinityBlock) || Boolean(narrationStylePrompt?.trim()) || Boolean(spatialCoherenceBlock);
