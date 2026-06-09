@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { useBackHandler } from '../../hooks/useBackHandler.ts';
 import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
@@ -43,6 +44,9 @@ export function SceneDebugModal({
   const currentUser = useAuthStore((s) => s.user);
   const activeConversation = useChatStore((s) => s.activeConversation);
   const allMessages         = useChatStore((s) => s.messages);
+
+  // Close on mobile swipe-back (component is only mounted while open)
+  useBackHandler(true, onClose);
 
   // ── Entity list ───────────────────────────────────────────────────────────
   const entities: SelectableEntity[] = (() => {

@@ -2,18 +2,20 @@ import { useEffect } from 'react';
 import { X, Download, RotateCcw } from 'lucide-react';
 import { useLightboxStore } from '../../stores/lightbox.store.ts';
 import { useImagePanZoom } from '../../hooks/useImagePanZoom.ts';
+import { useBackHandler } from '../../hooks/useBackHandler.ts';
 
 export function ImageLightbox() {
   const { src, name, close } = useLightboxStore();
   const { wrapRef, imgRef, reset, onMouseDown } = useImagePanZoom(!!src, src);
 
-  // Escape key
+  // Escape key + mobile swipe-back
   useEffect(() => {
     if (!src) return;
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [src, close]);
+  useBackHandler(!!src, close);
 
   // Prevent body scroll while open
   useEffect(() => {

@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { X } from 'lucide-react';
+import { useBackHandler } from '../../hooks/useBackHandler.ts';
 
 interface ModalProps {
   open: boolean;
@@ -16,6 +17,9 @@ export function Modal({ open, onClose, title, children, size = 'md', footer }: M
     if (open) document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
   }, [open, onClose]);
+
+  // Close on mobile swipe-back gesture
+  useBackHandler(open, onClose);
 
   if (!open) return null;
 

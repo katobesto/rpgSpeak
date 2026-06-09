@@ -1,4 +1,5 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
+import { useBackHandler } from '../../hooks/useBackHandler.ts';
 import { MessageList, type MessageListHandle } from './MessageList.tsx';
 import { MessageInput } from './MessageInput.tsx';
 import { GroupPanel } from './GroupPanel.tsx';
@@ -65,6 +66,22 @@ export function ChatWindow() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
+
+  // Close topmost open modal/panel on mobile swipe-back
+  const anyModalOpen = groupPanelOpen || summaryModalOpen || statsModalOpen ||
+    contextModalOpen || galleryOpen || anchorModalOpen || locationsModalOpen || searchOpen;
+  const closeTopModal = useCallback(() => {
+    if (searchOpen)         { setSearchOpen(false);         return; }
+    if (galleryOpen)        { setGalleryOpen(false);        return; }
+    if (anchorModalOpen)    { setAnchorModalOpen(false);    return; }
+    if (locationsModalOpen) { setLocationsModalOpen(false); return; }
+    if (groupPanelOpen)     { setGroupPanelOpen(false);     return; }
+    if (summaryModalOpen)   { setSummaryModalOpen(false);   return; }
+    if (statsModalOpen)     { setStatsModalOpen(false);     return; }
+    if (contextModalOpen)   { setContextModalOpen(false);   return; }
+  }, [searchOpen, galleryOpen, anchorModalOpen, locationsModalOpen,
+      groupPanelOpen, summaryModalOpen, statsModalOpen, contextModalOpen]);
+  useBackHandler(anyModalOpen, closeTopModal);
   const messageListRef = useRef<MessageListHandle>(null);
 
   const convId = activeConversation?.id;

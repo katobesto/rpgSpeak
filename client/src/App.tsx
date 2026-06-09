@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { Routes, Route, useLocation } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
+import { backHandlerStack } from './utils/backHandlerStack.ts';
 import { MainLayout } from './components/layout/MainLayout.tsx';
 import { ImageLightbox } from './components/ui/ImageLightbox.tsx';
 import { ChatPage } from './pages/ChatPage.tsx';
@@ -13,7 +14,6 @@ import { useAuthStore } from './stores/auth.store.ts';
 export default function App() {
   const { theme, initForUser, mobileSidebarOpen, setMobileSidebarOpen } = useUiStore();
   const { isAuthenticated, user, clearAuth } = useAuthStore();
-  const location = useLocation();
 
   // Load per-user appearance settings (localStorage) on login / page refresh
   useEffect(() => {
@@ -53,19 +53,27 @@ export default function App() {
   //
   // We use refs so the single-mount effect always reads the latest values
   // without needing to be re-registered on every render.
-  const pathnameRef        = useRef(location.pathname);
-  const mobileSidebarRef   = useRef(mobileSidebarOpen);
-  const setSidebarRef      = useRef(setMobileSidebarOpen);
-  useEffect(() => { pathnameRef.current = location.pathname; },  [location.pathname]);
+  const mobileSidebarRef = useRef(mobileSidebarOpen);
+  const setSidebarRef    = useRef(setMobileSidebarOpen);
   useEffect(() => { mobileSidebarRef.current = mobileSidebarOpen; }, [mobileSidebarOpen]);
 
+  // Prevent mobile swipe-back from leaving the app.
+  //
+  // Priority chain on each popstate event:
+  //  1. Pop the top entry from backHandlerStack (closes the topmost open
+  //     modal / overlay / panel — registered via useBackHandler).
+  //  2. If the stack is empty, toggle the left-sidebar drawer.
+  //
+  // pushState never fires popstate, so re-pushing after each swipe is safe
+  // and creates no infinite loop.
   useEffect(() => {
     window.history.pushState(null, '');
     const handlePopState = () => {
-      // Always re-push to prevent leaving the app
       window.history.pushState(null, '');
-      // On the chat page, use the gesture to toggle the sidebar drawer
-      if (pathnameRef.current === '/') {
+      const handler = backHandlerStack.pop();
+      if (handler) {
+        handler();
+      } else {
         setSidebarRef.current(!mobileSidebarRef.current);
       }
     };
