@@ -100,12 +100,20 @@ export function createUser(username, password, role = 'user') {
   return safe
 }
 
-export function updateUser(id, { password, role, mustChangePassword }) {
+export function updateUser(id, { username, password, role, mustChangePassword }) {
   const users = load()
   const idx   = users.findIndex(u => u.id === id)
   if (idx === -1) throw new Error('Usuario no encontrado')
 
-  if (password !== undefined)           users[idx].passwordHash       = hashPassword(password)
+  if (username !== undefined) {
+    const trimmed = username.trim()
+    if (!trimmed) throw new Error('El nombre de usuario no puede estar vacío')
+    const duplicate = users.find(u => u.id !== id && u.username.toLowerCase() === trimmed.toLowerCase())
+    if (duplicate) throw new Error(`El nombre de usuario "${trimmed}" ya existe`)
+    users[idx].username = trimmed
+  }
+  if (password !== undefined && password !== '')
+                                        users[idx].passwordHash       = hashPassword(password)
   if (role !== undefined)               users[idx].role               = role
   if (mustChangePassword !== undefined) users[idx].mustChangePassword = mustChangePassword
 

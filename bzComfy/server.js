@@ -192,9 +192,9 @@ app.post('/api/users', requireAdmin, (req, res) => {
 })
 
 app.put('/api/users/:id', requireAdmin, (req, res) => {
-  const { password, role, mustChangePassword } = req.body || {}
+  const { username, password, role, mustChangePassword } = req.body || {}
   try {
-    const user = Users.updateUser(req.params.id, { password, role, mustChangePassword })
+    const user = Users.updateUser(req.params.id, { username, password, role, mustChangePassword })
     res.json(user)
   } catch (e) {
     res.status(400).json({ error: e.message })

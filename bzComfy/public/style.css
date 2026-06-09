@@ -521,6 +521,35 @@ textarea { resize: vertical; line-height: 1.55; }
 /* ── Utilities ──────────────────────────────────────── */
 .hidden { display: none !important; }
 
+/* ── User management inline actions ────────────────── */
+.um-btn {
+  font-size: 11px;
+  background: none;
+  border: 1px solid #2a2a30;
+  border-radius: 6px;
+  padding: 4px 10px;
+  color: #a1a1aa;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+  flex-shrink: 0;
+}
+.um-btn:hover { background: rgba(255,255,255,0.05); color: #e2e2e5; }
+.um-btn-primary { background: #7c6fff; border-color: #7c6fff; color: #fff; }
+.um-btn-primary:hover { background: #6d60e8; }
+.um-btn-danger { border-color: rgba(239,68,68,.35); color: #f87171; }
+.um-btn-danger:hover { background: rgba(239,68,68,.1); }
+.um-edit-form { flex-direction: column; gap: 6px; margin-top: 8px; }
+.um-delete-confirm {
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: rgba(239,68,68,.07);
+  border: 1px solid rgba(239,68,68,.2);
+  border-radius: 8px;
+}
+
 /* ── Resolution controls ────────────────────────────── */
 .resolution-row {
   display: grid;

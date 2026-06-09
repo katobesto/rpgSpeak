@@ -42,10 +42,12 @@ async function checkAuth() {
     const res = await fetch('/auth/me', { headers: { Authorization: `Bearer ${token}` } })
     if (!res.ok) { setSessionToken(''); window.location.href = '/login.html'; return false }
     currentUser = await res.json()
-    // Mostrar botón de usuarios solo a admins
+    // Mostrar botones admin-only solo a admins
     if (currentUser.role === 'admin') {
-      const btn = el('users-btn')
-      if (btn) btn.style.display = 'flex'
+      const usersBtn = el('users-btn')
+      if (usersBtn) usersBtn.style.display = 'flex'
+      const settingsBtn = el('settings-btn')
+      if (settingsBtn) settingsBtn.style.display = 'flex'
     }
     return true
   } catch {
@@ -65,9 +67,16 @@ async function logout() {
 }
 
 // ── Gestión de usuarios ───────────────────────────────────────────────────────
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+}
+function escAttr(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/”/g,'&quot;').replace(/'/g,'&#39;')
+}
+
 function openUsersModal() {
-  const modal = el('users-modal')
-  modal.style.display = 'flex'
+  el('users-modal').style.display = 'flex'
   loadUsers()
 }
 function closeUsersModal() {
@@ -78,18 +87,87 @@ async function loadUsers() {
   const res = await apiFetch('/api/users')
   if (!res.ok) return
   const users = await res.json()
-  const list = el('users-list')
-  list.innerHTML = users.map(u => `
-    <div style=”display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #2a2a30”>
-      <div style=”flex:1”>
-        <span style=”font-size:13px;font-weight:500”>${u.username}</span>
-        <span style=”font-size:10px;margin-left:6px;padding:1px 6px;border-radius:4px;background:${u.role==='admin'?'rgba(124,111,255,.2)':'rgba(113,113,122,.2)'};color:${u.role==='admin'?'#a78bfa':'#a1a1aa'}”>${u.role}</span>
-        ${u.mustChangePassword ? '<span style=”font-size:10px;color:#fbbf24;margin-left:4px”>⚠ cambio requerido</span>' : ''}
+  el('users-list').innerHTML = users.map(u => `
+    <div id=”ur-${u.id}” style=”border-bottom:1px solid #2a2a30;padding:10px 0”>
+
+      <!-- Vista normal -->
+      <div id=”uv-${u.id}” style=”display:flex;align-items:center;gap:8px”>
+        <div style=”flex:1;min-width:0;overflow:hidden”>
+          <span style=”font-size:13px;font-weight:500”>${escHtml(u.username)}</span>
+          <span style=”font-size:10px;margin-left:6px;padding:1px 6px;border-radius:4px;
+            background:${u.role==='admin'?'rgba(124,111,255,.2)':'rgba(113,113,122,.2)'};
+            color:${u.role==='admin'?'#a78bfa':'#a1a1aa'}”>${u.role}</span>
+          ${u.mustChangePassword ? '<span style=”font-size:10px;color:#fbbf24;margin-left:4px”>⚠ cambio req.</span>' : ''}
+        </div>
+        <button class=”um-btn” onclick=”startEditUser('${u.id}')”>Editar</button>
+        ${u.id !== '1' ? `<button class=”um-btn um-btn-danger” onclick=”startDeleteUser('${u.id}','${escAttr(u.username)}')”>Eliminar</button>` : ''}
       </div>
-      <button onclick=”resetUserPassword('${u.id}','${u.username}')” style=”font-size:11px;background:none;border:1px solid #2a2a30;border-radius:6px;padding:3px 8px;color:#a1a1aa;cursor:pointer”>Reset pass</button>
-      ${u.id !== '1' ? `<button onclick=”deleteUser('${u.id}','${u.username}')” style=”font-size:11px;background:none;border:1px solid rgba(239,68,68,.3);border-radius:6px;padding:3px 8px;color:#f87171;cursor:pointer”>Eliminar</button>` : ''}
+
+      <!-- Formulario de edición (oculto) -->
+      <div id=”ue-${u.id}” class=”um-edit-form” style=”display:none”>
+        <input id=”en-${u.id}” value=”${escAttr(u.username)}” placeholder=”Usuario”
+          style=”background:#0d0d0f;border:1px solid #2a2a30;border-radius:8px;padding:6px 10px;font-size:12px;color:#e2e2e5;outline:none;width:100%;box-sizing:border-box” />
+        <select id=”er-${u.id}”
+          style=”background:#0d0d0f;border:1px solid #2a2a30;border-radius:8px;padding:6px 10px;font-size:12px;color:#e2e2e5;outline:none”>
+          <option value=”user”${u.role==='user'?' selected':''}>user</option>
+          <option value=”admin”${u.role==='admin'?' selected':''}>admin</option>
+        </select>
+        <input id=”ep-${u.id}” type=”password” placeholder=”Nueva contraseña (vacío = sin cambiar)”
+          style=”background:#0d0d0f;border:1px solid #2a2a30;border-radius:8px;padding:6px 10px;font-size:12px;color:#e2e2e5;outline:none;width:100%;box-sizing:border-box” />
+        <div id=”ee-${u.id}” style=”font-size:11px;color:#f87171;display:none”></div>
+        <div style=”display:flex;gap:6px;justify-content:flex-end;margin-top:2px”>
+          <button class=”um-btn” onclick=”cancelEditUser('${u.id}')”>Cancelar</button>
+          <button class=”um-btn um-btn-primary” onclick=”saveEditUser('${u.id}')”>Guardar</button>
+        </div>
+      </div>
+
+      <!-- Confirmación de borrado (oculto) -->
+      <div id=”ud-${u.id}” class=”um-delete-confirm” style=”display:none”>
+        <span style=”flex:1;font-size:12px;color:#e2e2e5”>¿Eliminar <strong>${escHtml(u.username)}</strong>?</span>
+        <button class=”um-btn” onclick=”cancelDeleteUser('${u.id}')”>No</button>
+        <button class=”um-btn um-btn-danger” onclick=”confirmDeleteUser('${u.id}')”>Sí, eliminar</button>
+      </div>
+
     </div>
   `).join('')
+}
+
+function startEditUser(id) {
+  el('uv-' + id).style.display = 'none'
+  el('ue-' + id).style.display = 'flex'
+  el('ep-' + id).value = ''
+  el('ee-' + id).style.display = 'none'
+}
+function cancelEditUser(id) {
+  el('ue-' + id).style.display = 'none'
+  el('uv-' + id).style.display = 'flex'
+}
+async function saveEditUser(id) {
+  const username = el('en-' + id).value.trim()
+  const role     = el('er-' + id).value
+  const password = el('ep-' + id).value
+  const errEl    = el('ee-' + id)
+  errEl.style.display = 'none'
+  if (!username) { errEl.textContent = 'El nombre de usuario no puede estar vacío'; errEl.style.display = 'block'; return }
+  const body = { username, role }
+  if (password) { body.password = password; body.mustChangePassword = false }
+  const res = await apiFetch(`/api/users/${id}`, { method: 'PUT', body: JSON.stringify(body) })
+  if (res.ok) { loadUsers() }
+  else { const d = await res.json().catch(() => ({})); errEl.textContent = d.error || 'Error al guardar'; errEl.style.display = 'block' }
+}
+
+function startDeleteUser(id, username) {
+  el('uv-' + id).style.display = 'none'
+  el('ud-' + id).style.display = 'flex'
+}
+function cancelDeleteUser(id) {
+  el('ud-' + id).style.display = 'none'
+  el('uv-' + id).style.display = 'flex'
+}
+async function confirmDeleteUser(id) {
+  const res = await apiFetch(`/api/users/${id}`, { method: 'DELETE' })
+  if (res.ok) { loadUsers() }
+  else { const d = await res.json().catch(() => ({})); el('ud-' + id).querySelector('span').textContent = d.error || 'Error al eliminar' }
 }
 
 async function createUser() {
@@ -105,21 +183,6 @@ async function createUser() {
   el('new-username').value = ''
   el('new-password').value = ''
   loadUsers()
-}
-
-async function resetUserPassword(id, username) {
-  const pw = prompt(`Nueva contraseña para “${username}”:`)
-  if (!pw) return
-  const res = await apiFetch(`/api/users/${id}`, { method: 'PUT', body: JSON.stringify({ password: pw, mustChangePassword: true }) })
-  if (res.ok) loadUsers()
-  else alert('Error al cambiar contraseña')
-}
-
-async function deleteUser(id, username) {
-  if (!confirm(`¿Eliminar usuario “${username}”?`)) return
-  const res = await apiFetch(`/api/users/${id}`, { method: 'DELETE' })
-  if (res.ok) loadUsers()
-  else { const d = await res.json(); alert(d.error) }
 }
 
 const state = {
