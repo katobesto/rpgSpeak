@@ -47,7 +47,7 @@ export interface AffinityUpdate {
 export interface StreamOptions extends GenerateOptions {
   signal?: AbortSignal;
   onToken: (token: string) => void;
-  onDone: (response: { messageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string }) => void;
+  onDone: (response: { messageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null }) => void;
   onError: (error: Error) => void;
 }
 
@@ -600,6 +600,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       embeddingProviderId: settings.embeddingProviderId,
       embeddingModel:      settings.embeddingModel,
       narrationStylePrompt,
+      currentLocation:     conversation.currentLocation,
     });
 
     // Use character's contextLength, then settings default, then 32768
@@ -774,6 +775,20 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       cleanContent = accumulated.replace(/\[AFINIDAD:[^\]]+\]/g, '').trimEnd();
     }
 
+    // ── Parse [UBICACION:...] location tags ───────────────────────────────────
+    // The main LLM emits this tag when the scene moves to a new place.
+    // We take the LAST occurrence (most authoritative in long responses),
+    // persist it and strip all occurrences from the visible content.
+    const LOCATION_RE = /\[UBICACION:\s*([^\]]+?)\s*\]/gi;
+    let locationUpdate: string | null | undefined;
+    const locationMatches = [...cleanContent.matchAll(LOCATION_RE)];
+    if (locationMatches.length > 0) {
+      locationUpdate = locationMatches[locationMatches.length - 1][1].trim();
+      convRepo.updateLocation(conversationId, locationUpdate);
+      cleanContent = cleanContent.replace(LOCATION_RE, '').trimEnd();
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     // Always persist whatever content was generated (full or partial)
     msgRepo.update(assistantMsg.id, {
       content: cleanContent,
@@ -794,7 +809,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
 
     if (!aborted) {
       convRepo.incrementCounts(conversationId, finalTokens);
-      onDone({ messageId: assistantMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent });
+      onDone({ messageId: assistantMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, locationUpdate });
       // Fire-and-forget background tasks (non-blocking)
       updateSummaryAsync(conversationId, provider, modelId, narratorMode);
       const updatedConv = convRepo.findById(conversationId);

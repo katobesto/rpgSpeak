@@ -39,6 +39,7 @@ import {
   Map,
   Info,
   Navigation,
+  MapPin,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar.tsx';
 import type { Character, Story, Conversation, User } from '@rpgspeak/shared';
@@ -46,13 +47,15 @@ import type { Character, Story, Conversation, User } from '@rpgspeak/shared';
 export function ChatWindow() {
   const {
     activeConversation, setMessages, messages, setActiveConversation,
-    addMessage,
+    addMessage, updateCurrentLocation,
   } = useChatStore();
   const isAdmin = useAuthStore((s) => s.isAdmin);
   const qc = useQueryClient();
   const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleValue, setTitleValue] = useState('');
+  const [locationEditing, setLocationEditing] = useState(false);
+  const [locationValue, setLocationValue] = useState('');
 
   // Panel / modal states
   const [groupPanelOpen, setGroupPanelOpen] = useState(false);
@@ -209,6 +212,20 @@ export function ChatWindow() {
     },
   });
 
+  const updateLocationMutation = useMutation({
+    mutationFn: (location: string | null) => conversationsApi.updateLocation(convId!, location),
+    onSuccess: (_, location) => {
+      updateCurrentLocation(location);
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+    },
+  });
+
+  function saveLocation() {
+    const trimmed = locationValue.trim() || null;
+    updateLocationMutation.mutate(trimmed);
+    setLocationEditing(false);
+  }
+
   function handleCharacterChange(id: string) {
     setActiveCharacterId(id);
     updateActiveChar.mutate(id);
@@ -263,9 +280,48 @@ export function ChatWindow() {
               </button>
             </div>
           )}
-          <p className="text-[10px] text-text-muted">
-            {activeChar?.name ?? 'Sin personaje'} · {messages.length} mensajes
-          </p>
+          <div className="flex items-center gap-2 mt-0.5">
+            <p className="text-[10px] text-text-muted shrink-0">
+              {activeChar?.name ?? 'Sin personaje'} · {messages.length} mensajes
+            </p>
+            {/* ── Location indicator / editor ── */}
+            <div className="flex items-center min-w-0">
+              {locationEditing ? (
+                <input
+                  autoFocus
+                  value={locationValue}
+                  onChange={(e) => setLocationValue(e.target.value)}
+                  onBlur={saveLocation}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') saveLocation();
+                    if (e.key === 'Escape') {
+                      setLocationEditing(false);
+                      setLocationValue(activeConversation.currentLocation ?? '');
+                    }
+                  }}
+                  placeholder="Nombre del lugar..."
+                  className="bg-transparent text-[10px] text-text-primary focus:outline-none border-b border-accent w-32 placeholder:text-text-muted"
+                />
+              ) : (
+                <button
+                  onClick={() => {
+                    setLocationValue(activeConversation.currentLocation ?? '');
+                    setLocationEditing(true);
+                  }}
+                  className="flex items-center gap-0.5 text-[10px] transition-colors hover:text-text-primary group/loc"
+                  title="Editar ubicación actual de la escena"
+                >
+                  <MapPin
+                    size={9}
+                    className={activeConversation.currentLocation ? 'text-accent flex-shrink-0' : 'text-text-muted flex-shrink-0'}
+                  />
+                  <span className={`truncate max-w-[120px] ${activeConversation.currentLocation ? 'text-accent' : 'text-text-muted opacity-60'}`}>
+                    {activeConversation.currentLocation ?? 'Sin ubicación'}
+                  </span>
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
         <div className="flex items-center gap-1">

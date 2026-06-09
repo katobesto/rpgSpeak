@@ -32,6 +32,7 @@ function dbToConversation(
     id: row.id,
     title: row.title,
     summary: row.summary,
+    currentLocation: (row as any).currentLocation ?? null,
     mode: row.mode as Conversation['mode'],
     activeCharacterId: row.activeCharacterId,
     isArchived: Boolean(row.isArchived),
@@ -224,6 +225,15 @@ export class ConversationRepository {
   delete(id: string): boolean {
     this.db.run(sql`DELETE FROM conversations WHERE id = ${id}`);
     return true;
+  }
+
+  updateLocation(id: string, location: string | null): void {
+    const ts = now();
+    this.db.run(sql`
+      UPDATE conversations
+      SET current_location = ${location}, updated_at = ${ts}
+      WHERE id = ${id}
+    `);
   }
 
   updateCharacterAffinity(conversationId: string, characterId: string, newAffinity: number): void {

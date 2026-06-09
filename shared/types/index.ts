@@ -168,6 +168,8 @@ export interface Conversation {
   id: string;
   title: string;
   summary: string | null;
+  /** Current scene location — updated automatically when the LLM emits [UBICACION:...] */
+  currentLocation: string | null;
   mode: 'single' | 'group' | 'story';
   activeCharacterId: string | null;
   isArchived: boolean;
@@ -471,6 +473,8 @@ export interface StreamChunk {
   narrator?: boolean;
   /** The characterId stored on the persisted message (null for narrator) */
   characterId?: string | null;
+  /** New location emitted by the LLM via [UBICACION:...] — null if cleared, undefined if unchanged */
+  locationUpdate?: string | null;
 }
 
 // ─── Conversation Summary Types ───────────────────────────────────────────────

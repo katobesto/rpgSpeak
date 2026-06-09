@@ -60,6 +60,16 @@ export const conversationRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({ success: true, data: updated });
   });
 
+  // PATCH /api/conversations/:id/location — set / clear the current scene location
+  app.patch<{ Params: { id: string } }>('/:id/location', async (req, reply) => {
+    const result = z.object({ location: z.string().max(300).nullable() }).safeParse(req.body);
+    if (!result.success) throw new ValidationError(result.error.issues[0].message);
+    const conv = convRepo.findById(req.params.id);
+    if (!conv) throw new NotFoundError('Conversation', req.params.id);
+    convRepo.updateLocation(req.params.id, result.data.location);
+    return reply.send({ success: true, data: { location: result.data.location } });
+  });
+
   // PATCH /api/conversations/:id/characters/:charId/affinity
   app.patch<{ Params: { id: string; charId: string } }>(
     '/:id/characters/:charId/affinity',

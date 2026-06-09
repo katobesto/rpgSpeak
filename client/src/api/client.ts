@@ -80,7 +80,7 @@ export interface TokenBreakdown {
 
 export interface StreamCallbacks {
   onToken: (token: string) => void;
-  onDone: (result: { messageId: string; tokens: number; tokenBreakdown?: TokenBreakdown; promptMessages?: unknown[]; affinityUpdates?: AffinityUpdate[]; fastLlmDebug?: string; narrator?: boolean; characterId?: string | null; content?: string }) => void;
+  onDone: (result: { messageId: string; tokens: number; tokenBreakdown?: TokenBreakdown; promptMessages?: unknown[]; affinityUpdates?: AffinityUpdate[]; fastLlmDebug?: string; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null }) => void;
   onError: (err: Error) => void;
 }
 
@@ -138,13 +138,14 @@ export async function streamGenerate(
               narrator?: boolean;
               characterId?: string | null;
               content?: string;
+              locationUpdate?: string | null;
               error?: string;
             };
 
             if (event.type === 'token' && event.token) {
               callbacks.onToken(event.token);
             } else if (event.type === 'done') {
-              callbacks.onDone({ messageId: event.messageId!, tokens: event.tokens!, tokenBreakdown: event.tokenBreakdown, promptMessages: event.promptMessages, affinityUpdates: event.affinityUpdates, fastLlmDebug: event.fastLlmDebug, narrator: event.narrator, characterId: event.characterId, content: event.content });
+              callbacks.onDone({ messageId: event.messageId!, tokens: event.tokens!, tokenBreakdown: event.tokenBreakdown, promptMessages: event.promptMessages, affinityUpdates: event.affinityUpdates, fastLlmDebug: event.fastLlmDebug, narrator: event.narrator, characterId: event.characterId, content: event.content, locationUpdate: event.locationUpdate });
             } else if (event.type === 'error') {
               callbacks.onError(new Error(event.error ?? 'Unknown stream error'));
             }

@@ -31,6 +31,8 @@ export const conversationsApi = {
   }>(`/conversations/stats${filterUserId ? `?filterUserId=${encodeURIComponent(filterUserId)}` : ''}`),
   updateCharacterAffinity: (convId: string, charId: string, affinity: number) =>
     api.patch<{ affinity: number }>(`/conversations/${convId}/characters/${charId}/affinity`, { affinity }),
+  updateLocation: (convId: string, location: string | null) =>
+    api.patch<{ location: string | null }>(`/conversations/${convId}/location`, { location }),
 };
 
 export const messagesApi = {

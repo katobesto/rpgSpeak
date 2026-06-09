@@ -25,6 +25,7 @@ interface ChatState extends StreamingState {
 
   setActiveConversation: (conv: Conversation | null) => void;
   updateCharacterAffinities: (updates: AffinityUpdate[]) => void;
+  updateCurrentLocation: (location: string | null) => void;
   setMessages: (messages: Message[]) => void;
   addMessage: (message: Message) => void;
   updateMessage: (id: string, updates: Partial<Message>) => void;
@@ -102,6 +103,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return u ? { ...link, affinity: u.newAffinity } : link;
       });
       return { activeConversation: { ...s.activeConversation, characters: updatedChars } };
+    }),
+
+  updateCurrentLocation: (location) =>
+    set((s) => {
+      if (!s.activeConversation) return s;
+      return { activeConversation: { ...s.activeConversation, currentLocation: location } };
     }),
 
   setMessages: (messages) => set({ messages }),
@@ -182,7 +189,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             };
           });
         },
-        onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content }) => {
+        onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate }) => {
           set((s) => ({
             isStreaming: false,
             streamingContent: '',
@@ -217,6 +224,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ),
           }));
           if (affinityUpdates?.length) get().updateCharacterAffinities(affinityUpdates);
+          if (locationUpdate !== undefined) get().updateCurrentLocation(locationUpdate);
         },
         onError: (err) => {
           // Show error as assistant bubble — no silent failure

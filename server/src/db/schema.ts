@@ -88,6 +88,7 @@ export const conversations = sqliteTable('conversations', {
   id: text('id').primaryKey(),
   title: text('title').notNull().default('New Conversation'),
   summary: text('summary'),
+  currentLocation: text('current_location'),             // active scene location (nullable)
   mode: text('mode').notNull().default('single'), // single | group | story
   activeCharacterId: text('active_character_id'),
   isArchived: integer('is_archived', { mode: 'boolean' }).notNull().default(false),

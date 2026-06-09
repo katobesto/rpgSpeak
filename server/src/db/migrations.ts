@@ -204,6 +204,9 @@ export function runMigrations(db: Db): void {
   // ─── Stories — locations column ──────────────────────────────────────────
   try { db.run(sql`ALTER TABLE stories ADD COLUMN locations TEXT NOT NULL DEFAULT '[]'`); } catch { /* already exists */ }
 
+  // ─── Conversations — current scene location ───────────────────────────────
+  try { db.run(sql`ALTER TABLE conversations ADD COLUMN current_location TEXT`); } catch { /* already exists */ }
+
   // ─── Conversation Summaries (historial acumulativo con rangos de mensajes) ──
   db.run(sql`
     CREATE TABLE IF NOT EXISTS conversation_summaries (

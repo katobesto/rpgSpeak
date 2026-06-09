@@ -37,21 +37,43 @@ export interface BuildContextOptions {
   embeddingModel?:      string | null;
   // Estilo de narración del usuario: prompt inyectado justo antes del último mensaje
   narrationStylePrompt?: string;
+  /** Current scene location — injected as a spatial-coherence block with [UBICACION:...] instruction */
+  currentLocation?: string | null;
 }
 
 // ── Aviso de aventura para modo personaje individual (sin narrador) ─────────
 const ADVENTURE_CONTEXT_NOTICE = `## Contexto de aventura activa
 Eres consciente de tu ficha RPG (stats, habilidades, inventario). Actúa de forma coherente con ellos en situaciones de combate, reto o tensión. Antes de hablar, describe brevemente entre paréntesis tu acción o gesto físico en tercera persona.`;
 
-// ── Ancla de coherencia espacial — inyectada en modo personaje individual ────
-// Prevents the character from "drifting" to their natural habitat when the
-// current scene is set elsewhere (e.g. a port character staying in a village).
-const SPATIAL_COHERENCE_NOTICE = `## Coherencia espacial — REGLA ABSOLUTA
-Tu "lugar habitual" (donde vives, trabajas o sueles estar) NO importa en este momento.
-Lo que importa es el lugar donde la conversación actual transcurre.
-Estás AQUÍ, en la escena activa — no en tu hogar ni en tu entorno habitual.
-PROHIBIDO referirte a ubicaciones, personas o situaciones de tu contexto habitual
-si la escena actual transcurre en otro lugar. Respeta siempre dónde te ha dejado la narración.`;
+// ── Bloque de ubicación — inyectado en modo personaje individual ─────────────
+// Builds the location-coherence block. When a location is known it anchors the
+// scene and includes the [UBICACION:...] emission instruction. When unknown it
+// asks the LLM to establish one as soon as the scene takes place somewhere.
+function buildLocationBlock(currentLocation: string | null | undefined): string {
+  if (currentLocation?.trim()) {
+    return (
+      `## UBICACIÓN ACTUAL DE LA ESCENA\n\n` +
+      `La acción transcurre en: **${currentLocation.trim()}**\n\n` +
+      `REGLA ABSOLUTA DE COHERENCIA ESPACIAL:\n` +
+      `Los personajes están en este lugar. Sus acciones, percepciones y referencias ` +
+      `deben ser coherentes con ese entorno. No puedes cambiar el escenario de forma ` +
+      `arbitraria ni teleportar a los personajes.\n\n` +
+      `Si la narrativa lleva explícitamente a los personajes a un lugar claramente distinto, ` +
+      `escribe al final de tu respuesta (no en medio):\n` +
+      `[UBICACION:nombre del nuevo lugar]\n` +
+      `No emitas [UBICACION:...] si la escena continúa en el mismo lugar.`
+    );
+  }
+  return (
+    `## UBICACIÓN DE LA ESCENA\n\n` +
+    `La ubicación de la escena aún no está registrada.\n` +
+    `Si tu respuesta sitúa la acción en un lugar concreto, indícalo al ` +
+    `final de tu respuesta con:\n` +
+    `[UBICACION:nombre del lugar]\n\n` +
+    `Una vez establecida, los personajes permanecerán en ese lugar hasta que ` +
+    `la narrativa los lleve explícitamente a otro.`
+  );
+}
 
 /**
  * Assembles the full context array to send to the LLM.
@@ -84,6 +106,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
     embeddingProviderId,
     embeddingModel,
     narrationStylePrompt,
+    currentLocation,
   } = opts;
 
   const systemParts: string[] = [];
@@ -327,9 +350,9 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
   // (character prompt + stories) can be fully reused by the KV cache across turns,
   // even when affinity values or memory sets change.
 
-  // In single-char mode, always inject spatial coherence notice to prevent the
-  // character from drifting back to their "natural habitat" when the scene is elsewhere.
-  const spatialCoherenceBlock = !narratorMode ? SPATIAL_COHERENCE_NOTICE : null;
+  // In single-char mode inject the location block (with [UBICACION:...] instruction).
+  // In narrator mode the narrator orchestrates all movement so no anchor is needed.
+  const spatialCoherenceBlock = !narratorMode ? buildLocationBlock(currentLocation) : null;
 
   const shouldInjectMemories = allMemories.length > 0 && memoryInjectionPrompt?.trim();
   const needsSplit = shouldInjectMemories || Boolean(contextIndexBlock) || Boolean(affinityBlock) || Boolean(narrationStylePrompt?.trim()) || Boolean(spatialCoherenceBlock);
