@@ -35,6 +35,24 @@ export default function App() {
     document.documentElement.classList.toggle('theme-light', theme === 'light');
   }, [theme]);
 
+  // Prevent mobile swipe-back gesture from leaving the app.
+  //
+  // How it works: we push a duplicate history entry on mount so there is always
+  // at least one "fake" entry behind the current one.  Whenever the browser
+  // fires a popstate event (swipe-back / hardware back button), we immediately
+  // push again — pushState never fires popstate, so there is no infinite loop.
+  //
+  // React Router still handles the URL change first (its popstate listener was
+  // registered earlier), so in-app navigation via the back gesture does work for
+  // one step (e.g. /characters → /chat), but repeated swipes stay put at the
+  // current page instead of leaving the app or the browser.
+  useEffect(() => {
+    window.history.pushState(null, '');
+    const handlePopState = () => window.history.pushState(null, '');
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   if (!isAuthenticated) {
     return <LoginPage />;
   }
