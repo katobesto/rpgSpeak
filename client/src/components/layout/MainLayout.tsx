@@ -44,6 +44,45 @@ export function MainLayout({ children }: MainLayoutProps) {
   const location = useLocation();
   useEffect(() => { if (location.pathname !== '/') setMobileSidebarOpen(false); }, [location.pathname]);
 
+  // ── iOS edge-swipe interception ────────────────────────────────────────────
+  // iOS Safari starts the native back-swipe animation in the touchstart phase,
+  // before popstate ever fires.  Calling preventDefault() with { passive:false }
+  // stops that animation entirely so there is never a black-screen flash.
+  // We then implement the gesture ourselves: a swipe-right from the left edge
+  // opens the sidebar drawer.
+  useEffect(() => {
+    if (!isMobile) return;
+
+    let startX = 0;
+    let startY = 0;
+
+    const onTouchStart = (e: TouchEvent) => {
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      // Intercept left-edge touches to kill the iOS back-swipe animation
+      if (startX <= 24) {
+        e.preventDefault();
+      }
+    };
+
+    const onTouchEnd = (e: TouchEvent) => {
+      const endX = e.changedTouches[0].clientX;
+      const endY = Math.abs(e.changedTouches[0].clientY - startY);
+      const dx   = endX - startX;
+      // Left-edge swipe right, more horizontal than vertical → open sidebar
+      if (startX <= 24 && dx > 40 && endY < dx * 0.8) {
+        setMobileSidebarOpen(true);
+      }
+    };
+
+    document.addEventListener('touchstart', onTouchStart, { passive: false });
+    document.addEventListener('touchend',   onTouchEnd,   { passive: true  });
+    return () => {
+      document.removeEventListener('touchstart', onTouchStart);
+      document.removeEventListener('touchend',   onTouchEnd);
+    };
+  }, [isMobile, setMobileSidebarOpen]);
+
   // On mobile the sidebar is always "expanded" (labels always visible)
   const effectiveCollapsed = isMobile ? false : sidebarCollapsed;
 
@@ -108,9 +147,14 @@ export function MainLayout({ children }: MainLayoutProps) {
           ].join(' ')}
           style={{
             background: 'var(--surface-1)',
-            maxWidth: effectiveCollapsed ? '56px' : '288px',
-            minWidth: effectiveCollapsed ? '56px' : '288px',
-            width:    effectiveCollapsed ? '56px' : '288px',
+            // On mobile the drawer is full-width (Tailwind w-full handles it).
+            // On desktop we constrain via explicit px values so the CSS transition
+            // on width works correctly.
+            ...(isMobile ? {} : {
+              maxWidth: effectiveCollapsed ? '56px' : '288px',
+              minWidth: effectiveCollapsed ? '56px' : '288px',
+              width:    effectiveCollapsed ? '56px' : '288px',
+            }),
           }}
         >
           <Sidebar collapsed={effectiveCollapsed} isMobile={isMobile} />
