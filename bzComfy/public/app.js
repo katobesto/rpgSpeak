@@ -544,36 +544,31 @@ function renderPowerLoras(loras) {
 }
 
 // ── Resolution controls ────────────────────────────────────────────────────
+// Options are fetched live from ComfyUI's object_info so they always match
+// the exact combo values of the installed FluxResolutionNode version.
 
-const MEGAPIXEL_OPTIONS = ['0.25', '0.5', '1.0', '1.5', '2.0', '2.5', '3.0', '4.0']
-
-const ASPECT_RATIO_OPTIONS = [
-  { value: '1:1 (Perfect Square)',        label: '1:1 — Cuadrado' },
-  { value: '4:3 (Classic Landscape)',     label: '4:3 — Paisaje clásico' },
-  { value: '3:4 (Classic Portrait)',      label: '3:4 — Retrato clásico' },
-  { value: '3:2 (Standard Landscape)',    label: '3:2 — Paisaje estándar' },
-  { value: '2:3 (Standard Portrait)',     label: '2:3 — Retrato estándar' },
-  { value: '16:9 (Widescreen)',           label: '16:9 — Panorámica' },
-  { value: '9:16 (Mobile Portrait)',      label: '9:16 — Vertical móvil' },
-  { value: '7:5 (Balanced Landscape)',    label: '7:5 — Paisaje equilibrado' },
-  { value: '5:7 (Balanced Portrait)',     label: '5:7 — Retrato equilibrado' },
-  { value: '5:4 (Large Format)',          label: '5:4 — Gran formato H' },
-  { value: '4:5 (Large Format Portrait)', label: '4:5 — Gran formato V' },
-  { value: '21:9 (Ultrawide)',            label: '21:9 — Ultrapanorámica' },
-  { value: '9:21 (Super Tall)',           label: '9:21 — Super vertical' },
-]
-
-function initResolutionControls(defaultMegapixel, defaultAspectRatio) {
+async function initResolutionControls(defaultMegapixel, defaultAspectRatio) {
   const mpSel = el('megapixel-select')
   const arSel = el('aspect-ratio-select')
+  mpSel.innerHTML = '<option value="">Cargando…</option>'
+  arSel.innerHTML = '<option value="">Cargando…</option>'
 
-  mpSel.innerHTML = MEGAPIXEL_OPTIONS
-    .map(v => `<option value="${v}"${v === defaultMegapixel ? ' selected' : ''}>${v} MP</option>`)
-    .join('')
+  try {
+    const res = await apiFetch('/api/resolution-options')
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const { megapixels = [], aspectRatios = [] } = await res.json()
 
-  arSel.innerHTML = ASPECT_RATIO_OPTIONS
-    .map(o => `<option value="${o.value}"${o.value === defaultAspectRatio ? ' selected' : ''}>${o.label}</option>`)
-    .join('')
+    mpSel.innerHTML = megapixels
+      .map(v => `<option value="${v}"${v === defaultMegapixel ? ' selected' : ''}>${v} MP</option>`)
+      .join('') || '<option value="">Sin opciones</option>'
+
+    arSel.innerHTML = aspectRatios
+      .map(v => `<option value="${v}"${v === defaultAspectRatio ? ' selected' : ''}>${v}</option>`)
+      .join('') || '<option value="">Sin opciones</option>'
+  } catch (err) {
+    mpSel.innerHTML = '<option value="">Error</option>'
+    arSel.innerHTML = `<option value="">Error: ${err.message}</option>`
+  }
 }
 
 async function loadLoras() {

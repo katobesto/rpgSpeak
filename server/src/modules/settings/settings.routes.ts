@@ -67,6 +67,34 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // GET /api/settings/comfyui-resolution-options — queries ComfyUI object_info for FluxResolutionNode
+  // combo values so the UI always shows the exact valid strings for the installed node version.
+  app.get('/comfyui-resolution-options', async (_req, reply) => {
+    const comfyUrl = service.get('comfyUiUrl') as string | null;
+    if (!comfyUrl) return reply.status(400).send({ error: 'comfyUiUrl no configurada' });
+    const cfId  = service.get('comfyUiCfClientId')     as string | null;
+    const cfSec = service.get('comfyUiCfClientSecret') as string | null;
+    const headers: Record<string, string> = {};
+    if (cfId && cfSec) {
+      headers['CF-Access-Client-Id']     = cfId;
+      headers['CF-Access-Client-Secret'] = cfSec;
+    }
+    try {
+      const res = await fetch(`${comfyUrl}/object_info/FluxResolutionNode`, {
+        headers,
+        signal: AbortSignal.timeout(8_000),
+      });
+      if (!res.ok) return reply.status(res.status).send({ error: `ComfyUI respondió con ${res.status}` });
+      const info = await res.json() as Record<string, { input?: { required?: Record<string, [unknown[]]> } }>;
+      const required  = info?.FluxResolutionNode?.input?.required ?? {};
+      const megapixels   = (required?.megapixel?.[0]    ?? []) as string[];
+      const aspectRatios = (required?.aspect_ratio?.[0] ?? []) as string[];
+      return reply.send({ data: { megapixels, aspectRatios } });
+    } catch (err) {
+      return reply.status(503).send({ error: err instanceof Error ? err.message : 'No se pudo conectar a ComfyUI' });
+    }
+  });
+
   // GET /api/settings/bzcomfy-workflows — proxy to the remote bzComfy /api/workflows endpoint
   app.get('/bzcomfy-workflows', async (_req, reply) => {
     const bzUrl   = service.get('bzComfyUrl')      as string | null;

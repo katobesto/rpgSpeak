@@ -505,6 +505,21 @@ app.get('/api/workflows', async (_req, res) => {
   }
 })
 
+// List FluxResolutionNode options (megapixel + aspect_ratio combo values) from ComfyUI
+app.get('/api/resolution-options', async (_req, res) => {
+  try {
+    const r = await fetch(`${config.comfyUrl}/object_info/FluxResolutionNode`)
+    if (!r.ok) throw new Error(`ComfyUI ${r.status}`)
+    const info = await r.json()
+    const required = info?.FluxResolutionNode?.input?.required ?? {}
+    const megapixels  = required?.megapixel?.[0]    ?? []
+    const aspectRatios = required?.aspect_ratio?.[0] ?? []
+    res.json({ megapixels, aspectRatios })
+  } catch (err) {
+    res.status(503).json({ error: `No se pudo obtener opciones de FluxResolutionNode: ${err.message}` })
+  }
+})
+
 // List available LoRA models from ComfyUI
 app.get('/api/loras', async (_req, res) => {
   try {

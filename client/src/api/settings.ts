@@ -10,4 +10,6 @@ export const settingsApi = {
   bzComfyWorkflows: () => api.get<BzWorkflow[]>('/settings/bzcomfy-workflows'),
   comfyUiWorkflows: () => api.get<BzWorkflow[]>('/settings/comfyui-workflows'),
   bzComfyLoras: () => api.get<string[]>('/settings/bzcomfy-loras'),
+  comfyUiResolutionOptions: () =>
+    api.get<{ megapixels: string[]; aspectRatios: string[] }>('/settings/comfyui-resolution-options'),
 };

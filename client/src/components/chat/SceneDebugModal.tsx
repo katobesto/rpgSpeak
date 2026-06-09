@@ -133,6 +133,15 @@ export function SceneDebugModal({
     staleTime: 60_000,
   });
 
+  // Fetch the actual combo values from ComfyUI's object_info so they always
+  // match the installed node version exactly (no hardcoded strings).
+  const { data: resolutionOptions } = useQuery({
+    queryKey: ['comfyui-resolution-options'],
+    queryFn: settingsApi.comfyUiResolutionOptions,
+    enabled: !isBzComfy && workflowHasResolution,
+    staleTime: 5 * 60_000,
+  });
+
   useEffect(() => {
     if (workflows.length === 0) return;
     const preferred = settings?.bzComfyWorkflow;
@@ -572,7 +581,7 @@ export function SceneDebugModal({
                         className="w-full border border-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
                         style={{ background: 'var(--surface-2)' }}
                       >
-                        {MEGAPIXEL_OPTIONS.map((v) => (
+                        {(resolutionOptions?.megapixels ?? []).map((v) => (
                           <option key={v} value={v}>{v} MP</option>
                         ))}
                       </select>
@@ -585,8 +594,8 @@ export function SceneDebugModal({
                         className="w-full border border-border rounded-lg px-2.5 py-1.5 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
                         style={{ background: 'var(--surface-2)' }}
                       >
-                        {ASPECT_RATIO_OPTIONS.map((v) => (
-                          <option key={v.value} value={v.value}>{v.label}</option>
+                        {(resolutionOptions?.aspectRatios ?? []).map((v) => (
+                          <option key={v} value={v}>{v}</option>
                         ))}
                       </select>
                     </div>
@@ -763,25 +772,6 @@ export function SceneDebugModal({
 
   return createPortal(modal, document.body);
 }
-
-// ── Resolution constants (must match FluxResolutionNode combo values exactly) ──
-const MEGAPIXEL_OPTIONS = ['0.25', '0.5', '1.0', '1.5', '2.0', '2.5', '3.0', '4.0'];
-
-const ASPECT_RATIO_OPTIONS: { value: string; label: string }[] = [
-  { value: '1:1 (Perfect Square)',      label: '1:1 — Cuadrado' },
-  { value: '4:3 (Classic Landscape)',   label: '4:3 — Paisaje clásico' },
-  { value: '3:4 (Classic Portrait)',    label: '3:4 — Retrato clásico' },
-  { value: '3:2 (Standard Landscape)',  label: '3:2 — Paisaje estándar' },
-  { value: '2:3 (Standard Portrait)',   label: '2:3 — Retrato estándar' },
-  { value: '16:9 (Widescreen)',         label: '16:9 — Panorámica' },
-  { value: '9:16 (Mobile Portrait)',    label: '9:16 — Vertical móvil' },
-  { value: '7:5 (Balanced Landscape)',  label: '7:5 — Paisaje equilibrado' },
-  { value: '5:7 (Balanced Portrait)',   label: '5:7 — Retrato equilibrado' },
-  { value: '5:4 (Large Format)',        label: '5:4 — Gran formato H' },
-  { value: '4:5 (Large Format Portrait)', label: '4:5 — Gran formato V' },
-  { value: '21:9 (Ultrawide)',          label: '21:9 — Ultrapanorámica' },
-  { value: '9:21 (Super Tall)',         label: '9:21 — Super vertical' },
-];
 
 // ── Small helpers ─────────────────────────────────────────────────────────────
 
