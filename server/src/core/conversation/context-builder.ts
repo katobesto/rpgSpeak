@@ -90,7 +90,20 @@ function buildLocationBlock(currentLocation: string | null | undefined): string 
  * Assembles the full context array to send to the LLM.
  * Order: global prompt → character system prompt → story context → memory → summary → conversation history
  */
-export async function buildContext(opts: BuildContextOptions): Promise<ChatMessage[]> {
+export interface BuildContextResult {
+  messages: ChatMessage[];
+  /**
+   * Number of trailing "footer" messages (late injections: context index, memories,
+   * affinity, spatial/object coherence, narration style, last user message) appended
+   * after the conversation history. trimContext must preserve at least this many
+   * trailing items PLUS a few real conversation turns — otherwise, when these
+   * directive blocks fill up the whole `preserveRecent` window, real history gets
+   * trimmed away entirely and the LLM loses track of recent events.
+   */
+  footerCount: number;
+}
+
+export async function buildContext(opts: BuildContextOptions): Promise<BuildContextResult> {
   const {
     character,
     stories,
@@ -375,9 +388,12 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
     history.push({ role: m.role, content: m.content });
   }
 
+  let footerCount = 0;
+
   // 1. Context index (world background — furthest from generation)
   if (contextIndexBlock) {
     history.push({ role: 'system', content: contextIndexBlock });
+    footerCount++;
   }
 
   // 2. Memories (character-specific state)
@@ -385,6 +401,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
     const injectionBlock = buildMemoryInjectionBlock(allMemories, charNameMap, memoryInjectionPrompt!);
     console.log(`[memory] Injecting ${allMemories.length} memories for conv ${conversationId} (${charNameMap.size} chars)`);
     history.push({ role: 'system', content: injectionBlock });
+    footerCount++;
   } else if (allMemories.length > 0) {
     console.log(`[memory] Skipped injection — memories: ${allMemories.length}, prompt set: ${Boolean(memoryInjectionPrompt?.trim())}`);
   }
@@ -392,28 +409,33 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
   // 3. Affinity + consent directive
   if (affinityBlock && needsSplit) {
     history.push({ role: 'system', content: affinityBlock });
+    footerCount++;
   }
 
   // 4. Spatial coherence anchor — prevents location drift
   if (spatialCoherenceBlock && needsSplit) {
     history.push({ role: 'system', content: spatialCoherenceBlock });
+    footerCount++;
   }
 
   // 4b. Object coherence anchor — prevents established items from being
   // re-described, relocated or repurposed inconsistently across turns.
   history.push({ role: 'system', content: OBJECT_COHERENCE_BLOCK });
+  footerCount++;
 
   // 5. Narration style directive (user preference — overrides default verbosity)
   if (narrationStylePrompt?.trim() && needsSplit) {
     history.push({ role: 'system', content: narrationStylePrompt.trim() });
+    footerCount++;
   }
 
   // 6. Last user message (generation point)
   if (needsSplit && lastMessage) {
     history.push({ role: lastMessage.role, content: lastMessage.content });
+    footerCount++;
   }
 
-  return [systemMessage, ...fewShot, ...history];
+  return { messages: [systemMessage, ...fewShot, ...history], footerCount };
 }
 
 function buildCharacterBlock(char: Character): string {

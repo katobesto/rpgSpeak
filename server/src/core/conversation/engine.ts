@@ -574,7 +574,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       ownerStyle === 'medium' ? (settings.narrationMediumPrompt || undefined) :
       undefined;
 
-    const rawContext = await buildContext({
+    const { messages: rawContext, footerCount } = await buildContext({
       character: character ?? groupCharacters[0],
       stories: linkedStories,
       messages: [...historyForContext, { ...userMsg, role: 'user' as const }],
@@ -606,7 +606,13 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     // Use character's contextLength, then settings default, then 32768
     const activeChar = character ?? groupCharacters[0];
     const maxCtxTokens = activeChar?.contextLength ?? settings.defaultContextLength ?? 32768;
-    const { messages: trimmedMessagesRaw } = trimContext(rawContext, maxCtxTokens);
+    // Always preserve `footerCount` trailing directive blocks (context index, memories,
+    // affinity, spatial/object coherence, narration style, last user msg) PLUS at least
+    // 6 real conversation turns. Without this, when maxCtxTokens is small (e.g. a
+    // character with the 4096-token default), the directive footer alone can fill the
+    // whole "preserveRecent" window and trim away ALL real history — the LLM then has
+    // no idea what just happened a couple of messages ago.
+    const { messages: trimmedMessagesRaw } = trimContext(rawContext, maxCtxTokens, footerCount + 6);
     const trimmedMessages = [...trimmedMessagesRaw];
 
     // ── Pre-turn behavioral directive injection ────────────────────────────────

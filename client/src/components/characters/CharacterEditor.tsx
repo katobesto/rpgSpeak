@@ -28,7 +28,7 @@ const DEFAULT_CHAR: CreateCharacterDto = {
   temperature: 0.8,
   modelId: null,
   providerId: null,
-  contextLength: 4096,
+  contextLength: 8192,
   memoryEnabled: true,
   memoryType: 'rolling',
   memoryWindow: 20,

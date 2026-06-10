@@ -439,7 +439,7 @@ export interface GenerateRequest {
   /** When true, adds allow_fallbacks:false to OpenAI-compatible requests (e.g. OpenRouter). */
   disableFallbacks?: boolean;
   /** Enables `thinking` mode on supporting models (e.g. DeepSeek V4). */
-  reasoning?: { enabled: boolean; effort?: 'high' | 'max' };
+  reasoning?: { enabled: boolean; effort?: 'high' | 'max'; expose?: boolean };
 }
 
 export interface ChatMessage {
