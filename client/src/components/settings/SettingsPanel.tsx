@@ -471,16 +471,32 @@ export function SettingsPanel() {
                   {/* ── Estructura visual del prompt ──────────────────────────── */}
                   <Section title="Estructura de la petición al LLM">
                     <p className="text-xs text-text-muted mb-3 leading-relaxed">
-                      Orden en que se ensamblan los mensajes enviados al modelo en cada turno de chat:
+                      Orden en que se ensamblan los mensajes enviados al modelo en cada turno de chat.
+                      Este es el mismo agrupamiento que verás en los bloques desplegables del "Debug prompt"
+                      de cada respuesta.
                     </p>
                     <div className="rounded-lg border border-border bg-surface-2 px-4 py-3 font-mono text-[11px] leading-6 space-y-0.5">
+                      <div className="text-text-muted/60 mt-1 mb-0.5">— Mensaje de sistema único (cacheable) —</div>
                       <div>
                         <span className="text-blue-400/80">[SYSTEM]</span>
                         <span className="text-text-secondary ml-2">Prompt de sistema global</span>
                       </div>
                       <div>
                         <span className="text-blue-400/80">[SYSTEM]</span>
-                        <span className="text-text-secondary ml-2">Prompt del personaje / Narrador / Game Master</span>
+                        <span className="text-text-secondary ml-2">Nombre del usuario</span>
+                        <span className="text-text-muted/50 ml-1">(si está configurado)</span>
+                      </div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Personaje / Narrador / Game Master</span>
+                      </div>
+                      <div className="pl-11 text-text-muted">
+                        └─ <span className="text-text-muted/70">Aviso de aventura</span>
+                        <span className="text-text-muted/40 ml-1">(modo personaje + aventura)</span>
+                      </div>
+                      <div className="pl-11 text-text-muted">
+                        └─ <span className="text-text-muted/70">Otros personajes del grupo</span>
+                        <span className="text-text-muted/40 ml-1">(si hay personajes secundarios)</span>
                       </div>
                       <div className="pl-11 text-text-muted">
                         └─ <span className="text-text-muted/70">Formato de respuesta</span>
@@ -491,14 +507,35 @@ export function SettingsPanel() {
                         <span className="text-text-secondary ml-2">Lore e historias vinculadas</span>
                         <span className="text-text-muted/50 ml-1">(si las hay)</span>
                       </div>
-                      <div className="text-text-muted/40 py-0.5">···</div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Memorias activas (bloque básico)</span>
+                        <span className="text-text-muted/50 ml-1">(solo si NO hay plantilla de "Memorias inyectadas")</span>
+                      </div>
                       <div>
                         <span className="text-amber-400/70">[USER]</span>
                         <span className="text-text-muted mx-1">/</span>
                         <span className="text-green-400/70">[ASSISTANT]</span>
-                        <span className="text-text-secondary ml-2">historial de mensajes</span>
+                        <span className="text-text-secondary ml-2">Ejemplos de diálogo</span>
+                        <span className="text-text-muted/50 ml-1">(few-shot, si el personaje los tiene)</span>
                       </div>
-                      <div className="text-text-muted/40 py-0.5">···</div>
+
+                      <div className="text-text-muted/40 py-0.5 mt-1">···</div>
+
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Resumen de sucesos</span>
+                        <span className="text-text-muted/50 ml-1">("Historia hasta ahora" — si la conversación tiene resumen)</span>
+                      </div>
+                      <div>
+                        <span className="text-amber-400/70">[USER]</span>
+                        <span className="text-text-muted mx-1">/</span>
+                        <span className="text-green-400/70">[ASSISTANT]</span>
+                        <span className="text-text-secondary ml-2">Historial de conversación</span>
+                      </div>
+
+                      <div className="text-text-muted/40 py-0.5 mt-1">— Bloques de directiva final (más cerca de la generación) —</div>
+
                       <div>
                         <span className="text-blue-400/80">[SYSTEM]</span>
                         <span className="text-text-secondary ml-2">Índice de Contexto</span>
@@ -507,7 +544,27 @@ export function SettingsPanel() {
                       <div>
                         <span className="text-blue-400/80">[SYSTEM]</span>
                         <span className="text-text-secondary ml-2">Memorias inyectadas</span>
-                        <span className="text-text-muted/50 ml-1">(si está activado)</span>
+                        <span className="text-text-muted/50 ml-1">(plantilla "Memorias inyectadas" — si hay memorias y está configurada)</span>
+                      </div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Afinidad / estado emocional</span>
+                        <span className="text-text-muted/50 ml-1">(estado actual + reglas de consentimiento — si hay personajes con afinidad)</span>
+                      </div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Coherencia espacial (ubicación)</span>
+                        <span className="text-text-muted/50 ml-1">(siempre)</span>
+                      </div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Coherencia de objetos</span>
+                        <span className="text-text-muted/50 ml-1">(siempre — evita reubicar/reinventar objetos ya descritos)</span>
+                      </div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Estilo de narración</span>
+                        <span className="text-text-muted/50 ml-1">(si está configurado)</span>
                       </div>
                       <div>
                         <span className="text-amber-400/70">[USER]</span>
@@ -738,11 +795,11 @@ export function SettingsPanel() {
                   onChange={(e) => update('defaultContextLength', parseInt(e.target.value) || 32768)}
                   min={1024}
                   max={131072}
-                  hint="Cuántos tokens del historial se envían al modelo."
+                  hint="Tamaño MÍNIMO (en tokens) de la ventana de contexto para TODOS los personajes. Si un personaje tiene un 'Context Length' propio menor que este valor, se ignora y se usa este valor global; si lo tiene mayor, se respeta el del personaje. Es decir, este valor es el suelo: el contexto efectivo nunca será menor que esto."
                 />
                 <Input label="Máx. mensajes en contexto" type="number" value={draft.maxContextMessages}
                   onChange={(e) => update('maxContextMessages', parseInt(e.target.value))} min={5} max={200}
-                  hint="Número máximo de mensajes del historial incluidos." />
+                  hint="Número máximo de mensajes del historial considerados antes de aplicar el recorte por tokens. El recorte final también respeta siempre los últimos mensajes reales más los bloques de directivas (afinidad, ubicación, objetos, memorias, etc.)." />
                 <Input label="Umbral de auto-resumen" type="number" value={draft.autoSummarizeThreshold}
                   onChange={(e) => update('autoSummarizeThreshold', parseInt(e.target.value))} min={5} max={200}
                   hint="Resumir contexto cuando el número de mensajes supera este valor." />

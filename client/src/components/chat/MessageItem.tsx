@@ -872,8 +872,131 @@ const ROLE_STYLES: Record<string, { label: string; badge: string; border: string
   assistant: { label: 'assistant', badge: 'bg-green-500/20 text-green-300 border border-green-500/30',    border: 'border-green-500/20',  bg: 'bg-green-500/5' },
 };
 
+// ─── Prompt structure grouping (mirrors "Estructura de la petición al LLM" in Ajustes → Generación) ───
+
+interface PromptGroup {
+  title: string;
+  hint?: string;
+  items: ChatMessage[];
+  defaultOpen?: boolean;
+}
+
+function classifyHeaderPart(content: string): { title: string; hint?: string } {
+  const c = content.trim();
+  if (/^# Character:/.test(c)) {
+    const m = c.match(/^# Character:\s*(.+)/);
+    return { title: `Personaje${m ? `: ${m[1]}` : ''}` };
+  }
+  if (/^## Personajes en la aventura/.test(c)) return { title: 'Personajes (Game Master)' };
+  if (/^## Personajes presentes en la escena/.test(c)) return { title: 'Personajes (Narrador)' };
+  if (/^## Otros personajes presentes/.test(c)) return { title: 'Otros personajes del grupo' };
+  if (/^## Contexto de aventura activa/.test(c)) return { title: 'Aviso de aventura' };
+  if (/^# Story Context:/.test(c)) {
+    const m = c.match(/^# Story Context:\s*(.+)/);
+    return { title: `Lore / Historia${m ? `: ${m[1]}` : ''}` };
+  }
+  if (/^## Memorias activas/.test(c)) return { title: 'Memorias activas (bloque básico)' };
+  if (/^Recuerda que el usuario se llama/.test(c)) return { title: 'Nombre del usuario' };
+  if (c.startsWith('[Example conversations:]')) return { title: 'Ejemplos de diálogo (few-shot)' };
+  return { title: 'Prompt de sistema global / personaje', hint: 'Incluye el prompt global, formato de respuesta y/o instrucciones del personaje' };
+}
+
+function classifyFooterPart(content: string): string {
+  const c = content.trim();
+  if (/^## Historia hasta ahora/.test(c)) return 'Resumen de sucesos';
+  if (/^## Índice de contexto/.test(c)) return 'Índice de Contexto';
+  if (/^## UBICACIÓN/.test(c)) return 'Coherencia espacial (ubicación)';
+  if (/^## COHERENCIA DE OBJETOS/.test(c)) return 'Coherencia de objetos';
+  if (/ESTADO EMOCIONAL ACTUAL/.test(c)) return 'Afinidad / estado emocional';
+  if (/^## Hechos establecidos|memoria/i.test(c)) return 'Memorias inyectadas';
+  return 'Estilo de narración / directiva adicional';
+}
+
+function groupPromptMessages(messages: ChatMessage[]): PromptGroup[] {
+  const groups: PromptGroup[] = [];
+  if (messages.length === 0) return groups;
+
+  let i = 0;
+
+  // Header: leading system message — split by the '---' separators used to join systemParts
+  if (messages[0].role === 'system') {
+    const parts = messages[0].content.split('\n\n---\n\n');
+    for (const part of parts) {
+      if (!part.trim()) continue;
+      const { title, hint } = classifyHeaderPart(part);
+      groups.push({ title, hint, items: [{ role: 'system', content: part }] });
+    }
+    i = 1;
+  }
+
+  let convBuffer: ChatMessage[] = [];
+  const flushConv = () => {
+    if (convBuffer.length === 0) return;
+    if (convBuffer.length === 1 && convBuffer[0].role === 'user') {
+      groups.push({ title: 'Último mensaje del jugador', items: convBuffer, defaultOpen: true });
+    } else {
+      groups.push({ title: `Historial de conversación (${convBuffer.length} mensajes)`, items: [...convBuffer] });
+    }
+    convBuffer = [];
+  };
+
+  for (; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === 'system') {
+      flushConv();
+      groups.push({ title: classifyFooterPart(m.content), items: [m] });
+    } else {
+      convBuffer.push(m);
+    }
+  }
+  flushConv();
+  return groups;
+}
+
+function PromptAccordionGroup({ group, defaultOpen }: { group: PromptGroup; defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const chars = group.items.reduce((sum, m) => sum + m.content.length, 0);
+
+  return (
+    <div className="rounded-lg border border-border overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center gap-2 px-3 py-2 bg-surface-2 hover:bg-white/5 transition-colors text-left"
+      >
+        <ChevronDown size={13} className={`text-text-muted shrink-0 transition-transform ${open ? '' : '-rotate-90'}`} />
+        <span className="text-xs font-medium text-text-primary">{group.title}</span>
+        {group.hint && <span className="text-[10px] text-text-muted hidden sm:inline">— {group.hint}</span>}
+        <span className="text-[11px] text-text-muted ml-auto shrink-0">
+          {group.items.length > 1 ? `${group.items.length} msgs · ` : ''}{chars.toLocaleString()} chars
+        </span>
+      </button>
+      {open && (
+        <div className="p-2 space-y-2">
+          {group.items.map((msg, i) => {
+            const style = ROLE_STYLES[msg.role] ?? ROLE_STYLES.user;
+            return (
+              <div key={i} className={`rounded-lg border ${style.border} ${style.bg} overflow-hidden`}>
+                <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/5">
+                  <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${style.badge}`}>
+                    {style.label}
+                  </span>
+                  <span className="text-[11px] text-text-muted ml-auto">{msg.content.length} chars</span>
+                </div>
+                <pre className="p-3 text-xs text-text-primary font-mono whitespace-pre-wrap break-words leading-relaxed">
+                  {msg.content}
+                </pre>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PromptModal({ messages, model, onClose }: { messages: ChatMessage[]; model?: string; onClose: () => void }) {
   const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+  const groups = useMemo(() => groupPromptMessages(messages), [messages]);
 
   return (
     <div
@@ -909,26 +1032,11 @@ function PromptModal({ messages, model, onClose }: { messages: ChatMessage[]; mo
           </div>
         </div>
 
-        {/* Scrollable messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {messages.map((msg, i) => {
-            const style = ROLE_STYLES[msg.role] ?? ROLE_STYLES.user;
-            return (
-              <div key={i} className={`rounded-lg border ${style.border} ${style.bg} overflow-hidden`}>
-                {/* Role badge */}
-                <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/5">
-                  <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${style.badge}`}>
-                    {style.label}
-                  </span>
-                  <span className="text-[11px] text-text-muted ml-auto">{msg.content.length} chars</span>
-                </div>
-                {/* Content */}
-                <pre className="p-3 text-xs text-text-primary font-mono whitespace-pre-wrap break-words leading-relaxed">
-                  {msg.content}
-                </pre>
-              </div>
-            );
-          })}
+        {/* Scrollable messages, grouped into a collapsed-by-default accordion */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          {groups.map((group, i) => (
+            <PromptAccordionGroup key={i} group={group} defaultOpen={Boolean(group.defaultOpen)} />
+          ))}
         </div>
 
         {/* Footer */}

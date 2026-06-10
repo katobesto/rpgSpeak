@@ -737,7 +737,7 @@ export function CharacterEditor({ character, open, onClose }: CharacterEditorPro
               value={form.contextLength}
               onChange={(e) => set('contextLength', parseInt(e.target.value, 10))}
               min={512} max={131072}
-              hint="Maximum context window for this character."
+              hint="Ventana de contexto para este personaje. Solo tiene efecto si es MAYOR que el valor global de Ajustes → Contexto → 'Tokens de contexto de entrada'; si es menor, se ignora y se usa el valor global."
             />
 
             {/* Memory */}

@@ -603,9 +603,15 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       currentLocation:     conversation.currentLocation,
     });
 
-    // Use character's contextLength, then settings default, then 32768
+    // The global "Ajustes → Contexto" value (settings.defaultContextLength) is the
+    // AUTHORITATIVE FLOOR for the context window. A per-character `contextLength`
+    // can only ever EXTEND the window beyond the global value, never shrink it
+    // below it — otherwise an old/low per-character value (e.g. the legacy 4096
+    // default) silently overrides the user's global settings and crowds out real
+    // conversation history (see footerCount usage below).
     const activeChar = character ?? groupCharacters[0];
-    const maxCtxTokens = activeChar?.contextLength ?? settings.defaultContextLength ?? 32768;
+    const globalCtxTokens = settings.defaultContextLength ?? 32768;
+    const maxCtxTokens = Math.max(activeChar?.contextLength ?? 0, globalCtxTokens);
     // Always preserve `footerCount` trailing directive blocks (context index, memories,
     // affinity, spatial/object coherence, narration style, last user msg) PLUS at least
     // 6 real conversation turns. Without this, when maxCtxTokens is small (e.g. a
