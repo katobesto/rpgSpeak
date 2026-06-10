@@ -24,19 +24,29 @@ export class OpenAIProvider implements LLMProvider {
   }
 
   private buildBody(request: GenerateRequest, stream: boolean) {
+    const reasoning = request.reasoning?.enabled;
     return {
       model: request.model ?? '',
       messages: request.messages,
       stream,
-      temperature: request.temperature,
+      // Thinking mode (e.g. DeepSeek V4) ignores temperature/top_p/penalties anyway,
+      // but omit them so the intent is explicit and providers don't warn about them.
+      ...(reasoning ? {} : {
+        temperature: request.temperature,
+        top_p: request.topP,
+        frequency_penalty: request.repetitionPenalty,
+      }),
       // Si no hay límite explícito, enviamos -1 para LM Studio / OpenRouter que lo aceptan,
       // o lo omitimos si el valor es undefined (OpenAI real usa el máximo del modelo)
       ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
-      top_p: request.topP,
-      frequency_penalty: request.repetitionPenalty,
       stop: request.stopSequences?.length ? request.stopSequences : undefined,
       // OpenRouter: prevent automatic fallback to alternative (potentially paid) providers.
       ...(request.disableFallbacks ? { allow_fallbacks: false } : {}),
+      // DeepSeek V4 thinking mode
+      ...(reasoning ? {
+        thinking: { type: 'enabled' },
+        reasoning_effort: request.reasoning?.effort ?? 'high',
+      } : {}),
     };
   }
 

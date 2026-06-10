@@ -19,7 +19,7 @@ import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
 
 type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats' | 'backup';
 
-const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'charImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength'];
+const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'charImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret', 'bzComfyUrl', 'bzComfyApiToken', 'bzComfyWorkflow'];
 
@@ -244,6 +244,25 @@ export function SettingsPanel() {
                       checked={draft.disableFallbacks ?? false}
                       onChange={(v) => update('disableFallbacks', v)}
                     />
+                    <ToggleRow
+                      label="Razonamiento (thinking) en el modelo principal"
+                      description="Activa el modo thinking (p.ej. DeepSeek V4: thinking:enabled + reasoning_effort). Mejora la coherencia y el seguimiento de detalles (objetos, ubicaciones), pero aumenta la latencia y el coste por respuesta. Solo funciona con modelos que soporten este modo."
+                      checked={draft.reasoningEnabled ?? false}
+                      onChange={(v) => update('reasoningEnabled', v)}
+                    />
+                    {draft.reasoningEnabled && (
+                      <div className="mt-2">
+                        <label className="block text-sm font-medium text-text-secondary mb-1">Nivel de esfuerzo</label>
+                        <select
+                          className="w-full px-3 py-2 rounded-lg bg-surface-2 border border-border text-sm text-text-primary"
+                          value={draft.reasoningEffort ?? 'high'}
+                          onChange={(e) => update('reasoningEffort', e.target.value as AppSettings['reasoningEffort'])}
+                        >
+                          <option value="high">Alto</option>
+                          <option value="max">Máximo</option>
+                        </select>
+                      </div>
+                    )}
                   </Section>
 
                   <Section title="Prompt de sistema global">

@@ -682,6 +682,9 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       stopSequences: activeChar?.llmParams?.stopSequences,
       stream: true,
       disableFallbacks: settings.disableFallbacks,
+      reasoning: settings.reasoningEnabled
+        ? { enabled: true, effort: settings.reasoningEffort }
+        : undefined,
     };
 
     const assistantMsg = msgRepo.create({

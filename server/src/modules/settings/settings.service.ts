@@ -439,6 +439,9 @@ Responde de forma breve y directa: máximo 2 párrafos cortos. Ve al punto esenc
   summaryMaxLength: 5,   // máximo de frases por resumen generado
   // API options
   disableFallbacks: false,
+  // Thinking / razonamiento (DeepSeek V4 y modelos compatibles)
+  reasoningEnabled: false,
+  reasoningEffort: 'high',
   // Cloudflare Access — para ComfyUI remoto tras túnel
   comfyUiCfClientId: null,
   comfyUiCfClientSecret: null,
