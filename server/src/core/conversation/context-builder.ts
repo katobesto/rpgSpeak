@@ -45,6 +45,17 @@ export interface BuildContextOptions {
 const ADVENTURE_CONTEXT_NOTICE = `## Contexto de aventura activa
 Eres consciente de tu ficha RPG (stats, habilidades, inventario). Actúa de forma coherente con ellos en situaciones de combate, reto o tensión. Antes de hablar, describe brevemente entre paréntesis tu acción o gesto físico en tercera persona.`;
 
+// ── Bloque de coherencia de objetos — inyectado en todos los modos ──────────
+// Once an object/item has been described (identity, location, owner, purpose),
+// those details are fixed facts. Prevents the LLM from re-describing or
+// relocating established items (e.g. a key found two messages ago suddenly
+// appearing in a different place and unlocking something different).
+const OBJECT_COHERENCE_BLOCK = `## COHERENCIA DE OBJETOS Y ELEMENTOS NARRATIVOS
+
+REGLA ABSOLUTA: Cuando un objeto, ítem o elemento relevante (llaves, armas, objetos mágicos, pertenencias, pistas, etc.) ya ha sido descrito en la conversación —su aspecto, ubicación, quién lo lleva o para qué sirve— esos detalles son HECHOS FIJOS. No los reinventes, no los reubiques ni les asignes una función o significado distinto sin que la narrativa lo justifique de forma EXPLÍCITA (alguien lo mueve, lo entrega, lo usa, lo pierde).
+
+Antes de mencionar de nuevo un objeto ya establecido, revisa cómo se describió antes y mantente coherente con ello. Si no recuerdas un detalle concreto (p.ej. para qué cerradura sirve una llave), no inventes uno nuevo cada vez — deja la incógnita abierta o reutiliza lo último que se dijo.`;
+
 // ── Bloque de ubicación — inyectado en modo personaje individual ─────────────
 // Builds the location-coherence block. When a location is known it anchors the
 // scene and includes the [UBICACION:...] emission instruction. When unknown it
@@ -342,7 +353,8 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
   //   1. Context index      — world-state background knowledge
   //   2. Memories           — character-specific past events, may include emotional coloring
   //   3. Affinity block     — current relationship state + consent rules
-  //   4. Spatial coherence  — (single-char mode only) prevents location drift
+  //   4. Spatial coherence  — prevents location drift
+  //   4b. Object coherence  — prevents established items from drifting
   //   5. Narration style    — user preference for verbosity
   //   6. [Last user msg]    ← generation starts here
   //
@@ -355,7 +367,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
   const spatialCoherenceBlock = buildLocationBlock(currentLocation);
 
   const shouldInjectMemories = allMemories.length > 0 && memoryInjectionPrompt?.trim();
-  const needsSplit = shouldInjectMemories || Boolean(contextIndexBlock) || Boolean(affinityBlock) || Boolean(narrationStylePrompt?.trim()) || Boolean(spatialCoherenceBlock);
+  const needsSplit = true; // OBJECT_COHERENCE_BLOCK is always injected, so the split always applies
   const historyBody = needsSplit ? trimmedMessages.slice(0, -1) : trimmedMessages;
   const lastMessage = needsSplit ? trimmedMessages[trimmedMessages.length - 1] : null;
 
@@ -382,10 +394,14 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
     history.push({ role: 'system', content: affinityBlock });
   }
 
-  // 4. Spatial coherence anchor (single-char mode) — prevents location drift
+  // 4. Spatial coherence anchor — prevents location drift
   if (spatialCoherenceBlock && needsSplit) {
     history.push({ role: 'system', content: spatialCoherenceBlock });
   }
+
+  // 4b. Object coherence anchor — prevents established items from being
+  // re-described, relocated or repurposed inconsistently across turns.
+  history.push({ role: 'system', content: OBJECT_COHERENCE_BLOCK });
 
   // 5. Narration style directive (user preference — overrides default verbosity)
   if (narrationStylePrompt?.trim() && needsSplit) {
