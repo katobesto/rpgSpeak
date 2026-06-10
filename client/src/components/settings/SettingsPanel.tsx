@@ -523,18 +523,13 @@ export function SettingsPanel() {
                       <div className="text-text-muted/40 py-0.5 mt-1">···</div>
 
                       <div>
-                        <span className="text-blue-400/80">[SYSTEM]</span>
-                        <span className="text-text-secondary ml-2">Resumen de sucesos</span>
-                        <span className="text-text-muted/50 ml-1">("Historia hasta ahora" — si la conversación tiene resumen)</span>
-                      </div>
-                      <div>
                         <span className="text-amber-400/70">[USER]</span>
                         <span className="text-text-muted mx-1">/</span>
                         <span className="text-green-400/70">[ASSISTANT]</span>
                         <span className="text-text-secondary ml-2">Historial de conversación</span>
                       </div>
 
-                      <div className="text-text-muted/40 py-0.5 mt-1">— Bloques de directiva final (más cerca de la generación) —</div>
+                      <div className="text-text-muted/40 py-0.5 mt-1">— Bloques de directiva final (ordenados de más estables a más cambiantes, para maximizar la caché) —</div>
 
                       <div>
                         <span className="text-blue-400/80">[SYSTEM]</span>
@@ -548,11 +543,6 @@ export function SettingsPanel() {
                       </div>
                       <div>
                         <span className="text-blue-400/80">[SYSTEM]</span>
-                        <span className="text-text-secondary ml-2">Afinidad / estado emocional</span>
-                        <span className="text-text-muted/50 ml-1">(estado actual + reglas de consentimiento — si hay personajes con afinidad)</span>
-                      </div>
-                      <div>
-                        <span className="text-blue-400/80">[SYSTEM]</span>
                         <span className="text-text-secondary ml-2">Coherencia espacial (ubicación)</span>
                         <span className="text-text-muted/50 ml-1">(siempre)</span>
                       </div>
@@ -563,8 +553,18 @@ export function SettingsPanel() {
                       </div>
                       <div>
                         <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Afinidad / estado emocional</span>
+                        <span className="text-text-muted/50 ml-1">(estado actual + reglas de consentimiento — cambia a menudo, por eso va después de la coherencia)</span>
+                      </div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
                         <span className="text-text-secondary ml-2">Estilo de narración</span>
                         <span className="text-text-muted/50 ml-1">(si está configurado)</span>
+                      </div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Resumen de sucesos</span>
+                        <span className="text-text-muted/50 ml-1">("Historia hasta ahora" — cambia cada ~8 mensajes, va al final para no romper la caché del resto)</span>
                       </div>
                       <div>
                         <span className="text-amber-400/70">[USER]</span>

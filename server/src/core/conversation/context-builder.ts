@@ -296,16 +296,12 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     content: systemParts.join('\n\n---\n\n'),
   };
 
-  // Build history — inject summary section before actual messages
+  // Build history. NOTE: the "Historia hasta ahora" summary block is no longer
+  // injected here at the very front — it's pushed as part of the late-injection
+  // footer (close to the last user message) so it doesn't invalidate the KV cache
+  // for the entire conversation history every time it changes (~every 8 messages).
   const trimmedMessages = messages.slice(-maxMessages);
   const history: ChatMessage[] = [];
-
-  if (summary?.trim()) {
-    history.push({
-      role: 'system',
-      content: `## Historia hasta ahora\n${summary.trim()}`,
-    });
-  }
 
   // ── Context index injection (world-state background, further from generation) ──
   let contextIndexBlock: string | null = null;
@@ -365,12 +361,16 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // Injection order (furthest → closest to the generation point):
   //   1. Context index      — world-state background knowledge
   //   2. Memories           — character-specific past events, may include emotional coloring
-  //   3. Affinity block     — current relationship state + consent rules
-  //   4. Spatial coherence  — prevents location drift
-  //   4b. Object coherence  — prevents established items from drifting
+  //   3. Spatial coherence  — prevents location drift
+  //   3b. Object coherence  — prevents established items from drifting
+  //   4. Affinity block     — current relationship state + consent rules (changes often)
   //   5. Narration style    — user preference for verbosity
-  //   6. [Last user msg]    ← generation starts here
+  //   6. Summary            — "Historia hasta ahora" (changes ~every 8 messages)
+  //   7. [Last user msg]    ← generation starts here
   //
+  // Ordered so that the blocks most likely to change between consecutive turns
+  // (affinity, summary, last message) sit closest to the end. This keeps the
+  // longest possible common prefix stable across turns, maximizing KV-cache reuse.
   // Keeping these OUT of the first SYSTEM message means the large static prefix
   // (character prompt + stories) can be fully reused by the KV cache across turns,
   // even when affinity values or memory sets change.
@@ -406,22 +406,24 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     console.log(`[memory] Skipped injection — memories: ${allMemories.length}, prompt set: ${Boolean(memoryInjectionPrompt?.trim())}`);
   }
 
-  // 3. Affinity + consent directive
-  if (affinityBlock && needsSplit) {
-    history.push({ role: 'system', content: affinityBlock });
-    footerCount++;
-  }
-
-  // 4. Spatial coherence anchor — prevents location drift
+  // 3. Spatial coherence anchor — prevents location drift
   if (spatialCoherenceBlock && needsSplit) {
     history.push({ role: 'system', content: spatialCoherenceBlock });
     footerCount++;
   }
 
-  // 4b. Object coherence anchor — prevents established items from being
+  // 3b. Object coherence anchor — prevents established items from being
   // re-described, relocated or repurposed inconsistently across turns.
   history.push({ role: 'system', content: OBJECT_COHERENCE_BLOCK });
   footerCount++;
+
+  // 4. Affinity + consent directive — placed AFTER spatial/object coherence
+  // because affinity values can change every turn; keeping the more static
+  // coherence blocks earlier preserves more of the cacheable prefix.
+  if (affinityBlock && needsSplit) {
+    history.push({ role: 'system', content: affinityBlock });
+    footerCount++;
+  }
 
   // 5. Narration style directive (user preference — overrides default verbosity)
   if (narrationStylePrompt?.trim() && needsSplit) {
@@ -429,7 +431,15 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     footerCount++;
   }
 
-  // 6. Last user message (generation point)
+  // 6. Summary ("Historia hasta ahora") — changes ~every 8 messages, kept close
+  // to the generation point so its periodic changes don't invalidate the cache
+  // for the conversation history and earlier directive blocks.
+  if (summary?.trim()) {
+    history.push({ role: 'system', content: `## Historia hasta ahora\n${summary.trim()}` });
+    footerCount++;
+  }
+
+  // 7. Last user message (generation point)
   if (needsSplit && lastMessage) {
     history.push({ role: lastMessage.role, content: lastMessage.content });
     footerCount++;

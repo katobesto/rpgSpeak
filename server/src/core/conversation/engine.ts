@@ -790,11 +790,13 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       cleanContent = accumulated.replace(/\[AFINIDAD:[^\]]+\]/g, '').trimEnd();
     }
 
-    // ── Parse [LOCATION:...] location tags ────────────────────────────────────
-    // The main LLM emits this tag when the scene moves to a new place.
+    // ── Parse [UBICACION:...] / [LOCATION:...] location tags ───────────────────
+    // The main LLM emits this tag (per the spatial-coherence directive, in
+    // Spanish: [UBICACION:...]) when the scene moves to a new place. We also
+    // accept the English [LOCATION:...] form for backward compatibility.
     // We take the LAST occurrence (most authoritative in long responses),
     // persist it and strip all occurrences from the visible content.
-    const LOCATION_RE = /\[LOCATION:\s*([^\]]+?)\s*\]/gi;
+    const LOCATION_RE = /\[(?:UBICACION|LOCATION):\s*([^\]]+?)\s*\]/gi;
     let locationUpdate: string | null | undefined;
     const locationMatches = [...cleanContent.matchAll(LOCATION_RE)];
     if (locationMatches.length > 0) {

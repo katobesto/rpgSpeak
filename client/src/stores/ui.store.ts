@@ -92,13 +92,19 @@ export const useUiStore = create<UiState>()(
 
       initForUser: (userId) => {
         const stored = localStorage.getItem(`rpgspeak-appearance-${userId}`);
-        // Migrate the persisted top-level theme as default (graceful first-run)
-        const base: AppearancePrefs = { ...DEFAULT_APPEARANCE, theme: get().theme };
+        // Base on the last known in-memory/persisted appearance (not hardcoded
+        // defaults) so that, if the per-user key was somehow never written
+        // (e.g. a toggle changed before _appearanceUserId was set), the user's
+        // last applied preferences aren't silently lost on next load.
+        const base: AppearancePrefs = { ...DEFAULT_APPEARANCE, ...get().appearance, theme: get().theme };
         const prefs: AppearancePrefs = stored
           ? { ...base, ...JSON.parse(stored) }
           : base;
         applyAppearance(prefs);
         set({ appearance: prefs, _appearanceUserId: userId, theme: prefs.theme });
+        // Backfill the per-user key immediately so future loads are consistent
+        // even if it didn't exist yet.
+        localStorage.setItem(`rpgspeak-appearance-${userId}`, JSON.stringify(prefs));
       },
 
       clearUserPrefs: () => {
@@ -136,11 +142,15 @@ export const useUiStore = create<UiState>()(
     }),
     {
       name: 'rpgspeak-ui',
-      // Only persist layout state — appearance is managed per-user via initForUser
+      // Layout state is global; appearance is additionally managed per-user via
+      // initForUser (rpgspeak-appearance-${userId}), but we also keep a generic
+      // copy here as a fallback so a toggle change is never lost even if the
+      // per-user key write is somehow missed (e.g. before _appearanceUserId is set).
       partialize: (state) => ({
         sidebarCollapsed: state.sidebarCollapsed,
         rightPanelCollapsed: state.rightPanelCollapsed,
         theme: state.theme,
+        appearance: state.appearance,
       }),
     },
   ),
