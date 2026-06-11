@@ -404,4 +404,68 @@ export function runMigrations(db: Db): void {
   db.run(sql`UPDATE characters    SET user_id = 'user-admin' WHERE user_id IS NULL`);
   db.run(sql`UPDATE stories       SET user_id = 'user-admin' WHERE user_id IS NULL`);
   db.run(sql`UPDATE conversations SET user_id = 'user-admin' WHERE user_id IS NULL`);
+
+  // ─── Migrate stored prompts: drop references to the removed chapter script ──
+  // The chapter-script system ("guión de capítulos") was removed in 3e7f5a6, but
+  // narratorPrompt/adventurePrompt persisted in the settings table may still order
+  // the LLM to advance a script that no longer exists — which makes it invent its
+  // own plot and escalate constantly. Replace those exact lines with the new
+  // destination-based phrasing. Lines the user customized (no exact match) are
+  // left untouched.
+  const PROMPT_FIXES: Record<string, Array<[oldText: string, newText: string]>> = {
+    narratorPrompt: [
+      [
+        'La historia tiene un guión de capítulos con eventos concretos que deben ocurrir. Tu trabajo como narrador no es ESPERAR a que el jugador llegue a esos eventos: es EMPUJAR el mundo hacia ellos.',
+        'El mundo tiene momentum propio: los PNJs toman iniciativas, las situaciones se desarrollan, los plazos se acortan. La historia avanza siempre, pero al ritmo de lo narrado — sin saltos.',
+      ],
+      [
+        '- El mundo tiene momentum propio: PNJs toman iniciativas, situaciones se desarrollan, plazos se acorcan\n',
+        '',
+      ],
+      [
+        '- Cada respuesta debe introducir, escalar o resolver algún elemento del guión activo',
+        '- Si el contexto incluye eventos clave de la historia que aún no han ocurrido, trátalos como DESTINOS, no como una ruta fija: cuando la escena se acerque a uno, oriéntala hacia él\n- Introduce como mucho un elemento nuevo de trama por respuesta, y solo si encaja de forma natural en la escena',
+      ],
+    ],
+    adventurePrompt: [
+      [
+        'La aventura tiene capítulos con objetivos concretos. Como GM, tu misión activa es hacer que esos objetivos avancen en cada turno.',
+        'La aventura avanza hacia los eventos clave definidos en el contexto de la historia. Trátalos como DESTINOS, no como una ruta fija.\n- Si hay eventos de la historia que aún no han ocurrido, vigila cuándo la situación se acerca a uno y oriéntala hacia él — sin forzar su llegada ni saltarte el recorrido',
+      ],
+      [
+        '- Cada escena debe escalar la tensión o revelar información que empuje hacia el clímax del capítulo',
+        '- Introduce como mucho un elemento nuevo de trama por escena, y solo si encaja de forma natural',
+      ],
+      [
+        '- Un capítulo no termina cuando el jugador "decide" terminarlo — termina cuando los eventos descritos han ocurrido narrativamente\n',
+        '',
+      ],
+      [
+        '→ Mueve un elemento del guión activo: introduce un PNJ, revela una pista, escala el conflicto',
+        '→ Si encaja de forma natural, mueve un elemento de la trama: introduce un PNJ, revela una pista, escala el conflicto',
+      ],
+    ],
+  };
+
+  for (const [key, pairs] of Object.entries(PROMPT_FIXES)) {
+    const row = db.get<{ value: string }>(sql`SELECT value FROM settings WHERE key = ${key}`);
+    if (!row?.value) continue;
+    let text: unknown;
+    try {
+      text = JSON.parse(row.value);
+    } catch {
+      continue;
+    }
+    if (typeof text !== 'string') continue;
+    let updated = text;
+    for (const [oldStr, newStr] of pairs) {
+      updated = updated.split(oldStr).join(newStr);
+    }
+    if (updated !== text) {
+      db.run(sql`
+        UPDATE settings SET value = ${JSON.stringify(updated)}, updated_at = datetime('now')
+        WHERE key = ${key}
+      `);
+    }
+  }
 }

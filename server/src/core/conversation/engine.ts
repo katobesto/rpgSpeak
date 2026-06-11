@@ -968,7 +968,98 @@ async function analyzeExchangeAsync(
   }
 }
 
-// ─── Summary Update ───────────────────────────────────────────────────────────
+// ─── Rolling Summary ──────────────────────────────────────────────────────────
+//
+// conversations.summary is a ROLLING summary of the WHOLE story, not just the
+// latest fragment: each update feeds the previous accumulated summary plus the
+// most recent exchanges back to the LLM, which returns an updated whole-story
+// summary. Without this, once the trimmer drops old history the LLM only ever
+// "remembers" the last ~6 messages worth of summarized story — everything
+// earlier evaporates from the context.
+
+async function generateRollingSummary(
+  conversationId: string,
+  provider: NonNullable<ReturnType<ProviderRepository['findById']>>,
+  modelId: string,
+  isNarrator: boolean,
+): Promise<void> {
+  const conv = convRepo.findById(conversationId);
+  if (!conv) return;
+
+  const allMessages    = msgRepo.findByConversation(conversationId);
+  const recentMessages = allMessages.slice(-6).filter((m) => m.role !== 'system');
+  if (recentMessages.length < 2) return;
+
+  const messageIndexTo  = allMessages.length - 1;
+  const settings        = settingsService.getAll();
+  const maxFrases       = settings.summaryMaxLength ?? 5;
+  const previousSummary = conv.summary?.trim() ?? '';
+  // The rolling summary covers the whole story, so it gets a larger budget than
+  // the per-fragment setting (which still applies to manual range summaries).
+  const maxFrasesTotal  = maxFrases * 3;
+
+  const messagesText = recentMessages
+    .map((m) => `${m.role === 'user' ? 'Jugador' : (isNarrator ? 'Narrador' : 'Personaje')}: ${m.content}`)
+    .join('\n\n');
+
+  const prompt = previousSummary
+    ? `Eres el cronista de una historia colaborativa de rol. Mantienes un resumen acumulado de TODA la historia.
+
+RESUMEN ACUMULADO HASTA AHORA:
+---
+${previousSummary}
+---
+
+NUEVOS INTERCAMBIOS (lo más reciente):
+---
+${messagesText}
+---
+
+Escribe la versión ACTUALIZADA del resumen acumulado, integrando los nuevos intercambios:
+- Cubre TODA la historia, no solo lo nuevo — nada importante del resumen anterior debe perderse
+- Conserva siempre: nombres propios, lugares, objetos relevantes, promesas, decisiones y el estado actual de la situación
+- Comprime más los eventos antiguos y da más detalle a los recientes
+- Máximo ${maxFrasesTotal} frases, en pasado narrativo
+- Sin explicaciones ni frases introductorias
+
+Responde SOLO con el texto del resumen actualizado.`
+    : `Eres el cronista de una historia colaborativa de rol. Revisa estos últimos intercambios:
+
+---
+${messagesText}
+---
+
+Escribe un resumen de lo ocurrido. El resumen debe ser:
+- Objetivo y fiel a lo narrado
+- Conciso: máximo ${maxFrases} frases
+- En pasado narrativo
+- Sin explicaciones ni frases introductorias
+
+Responde SOLO con el texto del resumen.`;
+
+  const llm = createProvider(provider);
+  const request: GenerateRequest = {
+    messages: [
+      { role: 'system', content: 'Eres un cronista que mantiene el resumen acumulado de una historia colaborativa de rol.' },
+      { role: 'user', content: prompt },
+    ],
+    model: modelId,
+    temperature: 0.3,
+    stream: false,
+    disableFallbacks: settings.disableFallbacks,
+  };
+
+  const response = await llm.generate(request);
+  const newSummary = response.content.trim();
+  if (!newSummary) return;
+
+  // Historial: el resumen rodante cubre la historia desde el principio; el primer
+  // resumen (sin acumulado previo) cubre solo el fragmento reciente.
+  const messageIndexFrom = previousSummary ? 0 : Math.max(0, messageIndexTo - 5);
+  summariesRepo.create({ conversationId, content: newSummary, messageIndexFrom, messageIndexTo });
+  // conversations.summary es lo que buildContext inyecta como "Historia hasta ahora"
+  convRepo.update(conversationId, { summary: newSummary });
+}
 
 async function updateSummaryAsync(
   conversationId: string,
@@ -985,55 +1076,7 @@ async function updateSummaryAsync(
     // Only update every N messages
     if (conv.messageCount % SUMMARY_EVERY_N !== 0) return;
 
-    // Take the last 6 messages
-    const allMessages   = msgRepo.findByConversation(conversationId);
-    const recentMessages = allMessages.slice(-6).filter((m) => m.role !== 'system');
-    if (recentMessages.length < 2) return;
-
-    const messageIndexTo   = allMessages.length - 1;
-    const messageIndexFrom = Math.max(0, messageIndexTo - 5);
-
-    const settings = settingsService.getAll();
-    const maxFrases = settings.summaryMaxLength ?? 5;
-    const messagesText = recentMessages
-      .map((m) => `${m.role === 'user' ? 'Jugador' : (isNarrator ? 'Narrador' : 'Personaje')}: ${m.content}`)
-      .join('\n\n');
-
-    const prompt = `Eres el asistente de una historia colaborativa de rol. Revisa estos últimos intercambios:
-
----
-${messagesText}
----
-
-Escribe un resumen de lo ocurrido en este fragmento. El resumen debe ser:
-- Objetivo y fiel a lo narrado
-- Conciso: máximo ${maxFrases} frases
-- En pasado narrativo
-- Sin explicaciones ni frases introductorias
-
-Responde SOLO con el texto del resumen.`;
-
-    const llm = createProvider(provider);
-    const request: GenerateRequest = {
-      messages: [
-        { role: 'system', content: 'Eres un asistente que resume fragmentos de historias colaborativas de rol.' },
-        { role: 'user', content: prompt },
-      ],
-      model: modelId,
-      temperature: 0.3,
-      stream: false,
-      disableFallbacks: settings.disableFallbacks,
-    };
-
-    const response = await llm.generate(request);
-    const newSummary = response.content.trim();
-
-    if (newSummary) {
-      // Guardar en historial acumulativo
-      summariesRepo.create({ conversationId, content: newSummary, messageIndexFrom, messageIndexTo });
-      // Mantener conversations.summary para inyección en el contexto
-      convRepo.update(conversationId, { summary: newSummary });
-    }
+    await generateRollingSummary(conversationId, provider, modelId, isNarrator);
   } catch (err) {
     // Summary update is non-critical — log and continue
     console.error('[summary] Error updating summary:', err);
@@ -1057,53 +1100,10 @@ export async function triggerSummaryUpdate(conversationId: string): Promise<Conv
   const modelId = firstChar?.modelId ?? provider.defaultModel ?? settings.defaultModelId;
   if (!modelId) return conv;
 
-  const allMessages    = msgRepo.findByConversation(conversationId);
-  const recentMessages = allMessages.slice(-6).filter((m) => m.role !== 'system');
-  if (recentMessages.length < 2) return conv;
-
-  const messageIndexTo   = allMessages.length - 1;
-  const messageIndexFrom = Math.max(0, messageIndexTo - 5);
-
-  const s = settingsService.getAll();
-  const maxFrases = s.summaryMaxLength ?? 5;
-  const messagesText = recentMessages
-    .map((m) => `${m.role === 'user' ? 'Jugador' : 'Personaje'}: ${m.content}`)
-    .join('\n\n');
-
-  const prompt = `Eres el asistente de una historia colaborativa de rol. Revisa estos últimos intercambios:
-
----
-${messagesText}
----
-
-Escribe un resumen de lo ocurrido en este fragmento. El resumen debe ser:
-- Objetivo y fiel a lo narrado
-- Conciso: máximo ${maxFrases} frases
-- En pasado narrativo
-- Sin explicaciones ni frases introductorias
-
-Responde SOLO con el texto del resumen.`;
+  const isNarrator = conv.mode === 'story' && !conv.activeCharacterId;
 
   try {
-    const llm = createProvider(provider);
-    const request: GenerateRequest = {
-      messages: [
-        { role: 'system', content: 'Eres un asistente que resume fragmentos de historias colaborativas de rol.' },
-        { role: 'user', content: prompt },
-      ],
-      model: modelId,
-      temperature: 0.3,
-      stream: false,
-      disableFallbacks: s.disableFallbacks,
-    };
-
-    const response = await llm.generate(request);
-    const newSummary = response.content.trim();
-
-    if (newSummary) {
-      summariesRepo.create({ conversationId, content: newSummary, messageIndexFrom, messageIndexTo });
-      convRepo.update(conversationId, { summary: newSummary });
-    }
+    await generateRollingSummary(conversationId, provider, modelId, isNarrator);
   } catch (err) {
     console.error('[summary] Error in triggerSummaryUpdate:', err);
   }
