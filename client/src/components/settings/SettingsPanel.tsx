@@ -564,7 +564,7 @@ export function SettingsPanel() {
                       <div>
                         <span className="text-blue-400/80">[SYSTEM]</span>
                         <span className="text-text-secondary ml-2">Resumen de sucesos</span>
-                        <span className="text-text-muted/50 ml-1">("Historia hasta ahora" — cambia cada ~8 mensajes, va al final para no romper la caché del resto)</span>
+                        <span className="text-text-muted/50 ml-1">("Historia hasta ahora" — resumen acumulado de TODA la historia, se actualiza cada 6 mensajes; va al final para no romper la caché del resto)</span>
                       </div>
                       <div>
                         <span className="text-amber-400/70">[USER]</span>
