@@ -459,6 +459,18 @@ export function runMigrations(db: Db): void {
         '→ Si encaja de forma natural, mueve un elemento de la trama: introduce un PNJ, revela una pista, escala el conflicto',
       ],
     ],
+    // affinitySystemPrompt only reaches the LLM when the fast LLM is OFF (the
+    // engine strips it otherwise), but a previous edit baked that condition INTO
+    // the prompt text itself as "(Solo cuando el LLM Rápido no está activo)". The
+    // LLM has no way to evaluate that condition — it's a backend concept it can't
+    // see — so it silently ignored the [AFINIDAD:...] tag instruction entirely,
+    // breaking affinity updates whenever the fast LLM was disabled.
+    affinitySystemPrompt: [
+      [
+        '(Solo cuando el LLM Rápido no está activo) Cuando algo cambie significativamente la afinidad',
+        'Cuando algo cambie significativamente la afinidad',
+      ],
+    ],
   };
 
   for (const [key, pairs] of Object.entries(PROMPT_FIXES)) {
