@@ -275,6 +275,39 @@ export interface SceneImage {
   description?: string;
 }
 
+// ─── Background Image (per-conversation) ──────────────────────────────────────
+
+export interface BackgroundImage {
+  id: string;
+  url: string;
+  prompt: string;
+  width: number;
+  height: number;
+  createdAt: string;
+}
+
+export interface ConversationBackground {
+  url: string;
+  prompt?: string;
+  /** 0-1, visibilidad de la imagen de fondo; default 1 */
+  opacity?: number;
+}
+
+export interface BackgroundAspectRatio {
+  id: string;
+  label: string;
+  width: number;
+  height: number;
+}
+
+export const BACKGROUND_ASPECT_RATIOS: BackgroundAspectRatio[] = [
+  { id: '1:1',  label: 'Cuadrado (1:1)',    width: 1024, height: 1024 },
+  { id: '16:9', label: 'Panorámico (16:9)', width: 1344, height: 768 },
+  { id: '9:16', label: 'Vertical (9:16)',   width: 768,  height: 1344 },
+  { id: '4:3',  label: 'Estándar (4:3)',    width: 1152, height: 896 },
+  { id: '3:4',  label: 'Retrato (3:4)',     width: 896,  height: 1152 },
+];
+
 // ─── TTS Types ────────────────────────────────────────────────────────────────
 
 export interface TtsTextReplacement {
@@ -337,6 +370,7 @@ export interface AppSettings {
   comfyUiUrl: string;
   sceneImagePrompt: string;
   charImagePrompt: string;
+  backgroundImagePrompt: string;
   // Image generation provider
   imageProvider: 'comfyui' | 'pollinations' | 'gemini' | 'fal' | 'bzcomfy';
   imageProviderApiKey: string | null;        // API key for Gemini / Fal

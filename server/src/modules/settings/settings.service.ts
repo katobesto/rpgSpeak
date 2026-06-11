@@ -468,6 +468,18 @@ Personalidad: {{personalidad}}
 Lore: {{lore}}
 
 Responde SOLO con el prompt de imagen, sin explicaciones adicionales.`,
+  // Prompt de mejora de descripción para fondos de la ventana de chat
+  backgroundImagePrompt: `Eres un experto generando prompts en inglés para IA de generación de imágenes (Stable Diffusion / ComfyUI), especializado en fondos y escenarios para juegos de rol.
+
+Toma la siguiente descripción de un lugar o escenario (puede estar en español o ser muy breve) y conviértela en UN prompt detallado en inglés, listo para usar.
+
+El prompt debe:
+- Describir el entorno, arquitectura, vegetación, clima, hora del día e iluminación.
+- Incluir palabras clave de estilo artístico y composición (fantasy art, digital painting, cinematic, wide shot, etc.).
+- NO incluir personajes ni personas — es un fondo/escenario vacío.
+- Ser un único párrafo de 60-120 palabras en inglés, sin comentarios, etiquetas ni comillas adicionales.
+
+DESCRIPCIÓN: {{prompt}}`,
 };
 
 export class SettingsService {

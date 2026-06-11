@@ -177,6 +177,7 @@ export class ConversationRepository {
     messageCount?: number;
     characterIds?: string[];
     storyIds?: string[];
+    metadata?: Record<string, unknown>;
   }): Conversation | null {
     if (!this.findById(id)) return null;
     const ts = now();
@@ -187,6 +188,7 @@ export class ConversationRepository {
     if (data.summary !== undefined) this.db.run(sql`UPDATE conversations SET summary = ${data.summary}, updated_at = ${ts} WHERE id = ${id}`);
     if (data.tokenCount !== undefined) this.db.run(sql`UPDATE conversations SET token_count = ${data.tokenCount}, updated_at = ${ts} WHERE id = ${id}`);
     if (data.messageCount !== undefined) this.db.run(sql`UPDATE conversations SET message_count = ${data.messageCount}, updated_at = ${ts} WHERE id = ${id}`);
+    if (data.metadata !== undefined) this.db.run(sql`UPDATE conversations SET metadata = ${JSON.stringify(data.metadata)}, updated_at = ${ts} WHERE id = ${id}`);
 
     if (data.characterIds !== undefined) {
       // Remove only characters no longer in the list (preserves affinity for kept/re-added chars)

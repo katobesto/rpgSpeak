@@ -294,17 +294,23 @@ export class ComfyUiService {
     return data.name;
   }
 
-  // ── Inject FluxResolutionNode overrides (megapixel + aspect_ratio) ─────────
-  // Finds the first FluxResolutionNode and patches its inputs.
-  // Values must match the node's combo-box enums exactly (e.g. "2.0", "5:7 (Balanced Portrait)").
-  injectResolution(workflow: Workflow, megapixel?: string, aspectRatio?: string): Workflow {
-    if (!megapixel && !aspectRatio) return workflow;
+  // ── Inject output resolution overrides ─────────────────────────────────────
+  // Patches inputs.width/height on any node whose class_type ends in
+  // "LatentImage" (EmptyLatentImage, EmptySD3LatentImage, etc.), and patches
+  // megapixel/aspect_ratio on FluxResolutionNode if present. The latter values
+  // must match the node's combo-box enums exactly (e.g. "2.0", "5:7 (Balanced Portrait)").
+  injectResolution(workflow: Workflow, overrides: { width?: number; height?: number; megapixel?: string; aspectRatio?: string }): Workflow {
+    const { width, height, megapixel, aspectRatio } = overrides;
+    if (width === undefined && height === undefined && !megapixel && !aspectRatio) return workflow;
     const patched: Workflow = JSON.parse(JSON.stringify(workflow));
     for (const node of Object.values(patched)) {
+      if (width !== undefined && height !== undefined && /LatentImage$/.test(node.class_type) && 'width' in node.inputs && 'height' in node.inputs) {
+        node.inputs.width = width;
+        node.inputs.height = height;
+      }
       if (node.class_type === 'FluxResolutionNode') {
         if (megapixel)   node.inputs.megapixel    = megapixel;
         if (aspectRatio) node.inputs.aspect_ratio = aspectRatio;
-        break;
       }
     }
     return patched;
@@ -326,13 +332,11 @@ export class ComfyUiService {
   async generateImage(
     workflowName: string,
     positivePrompt: string,
-    overrides?: { megapixel?: string; aspectRatio?: string },
+    overrides?: { width?: number; height?: number; megapixel?: string; aspectRatio?: string },
   ): Promise<{ buffer: Buffer; filename: string }> {
     const workflow = this.loadWorkflow(workflowName);
     let patched = this.injectPositivePrompt(workflow, positivePrompt);
-    if (overrides?.megapixel || overrides?.aspectRatio) {
-      patched = this.injectResolution(patched, overrides.megapixel, overrides.aspectRatio);
-    }
+    if (overrides) patched = this.injectResolution(patched, overrides);
     return this.runWorkflow(patched);
   }
 
@@ -434,9 +438,7 @@ export class ComfyUiService {
   } {
     const workflow = this.loadWorkflow(workflowName);
     let patched    = this.injectPositivePrompt(workflow, positivePrompt);
-    if (overrides?.megapixel || overrides?.aspectRatio) {
-      patched = this.injectResolution(patched, overrides.megapixel, overrides.aspectRatio);
-    }
+    if (overrides) patched = this.injectResolution(patched, overrides);
     const promptIdPromise = this.queuePrompt(patched);
     return {
       waitForPreview: async () => {
@@ -468,9 +470,7 @@ export class ComfyUiService {
     const clientId = `rpgspeak-${Date.now()}`;
     const workflow = this.loadWorkflow(workflowName);
     let patched    = this.injectPositivePrompt(workflow, positivePrompt);
-    if (overrides?.megapixel || overrides?.aspectRatio) {
-      patched = this.injectResolution(patched, overrides.megapixel, overrides.aspectRatio);
-    }
+    if (overrides) patched = this.injectResolution(patched, overrides);
 
     // Build nodeId → human-readable label map from this workflow
     const nodeNameMap = new Map<string, string>(

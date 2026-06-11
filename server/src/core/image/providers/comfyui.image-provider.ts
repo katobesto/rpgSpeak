@@ -17,6 +17,8 @@ export class ComfyUiImageProvider implements ImageProvider {
   async generate(req: ImageGenRequest): Promise<ImageGenResult> {
     const workflow = req.workflowName ?? 'image_z_image_turbo';
     return this.service.generateImage(workflow, req.prompt, {
+      width: req.width,
+      height: req.height,
       megapixel: req.megapixel,
       aspectRatio: req.aspectRatio,
     });

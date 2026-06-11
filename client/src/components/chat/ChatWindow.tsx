@@ -8,6 +8,7 @@ import { ContextModal } from './ContextModal.tsx';
 import { StatsModal } from './StatsModal.tsx';
 import { ChatSearchModal } from './ChatSearchModal.tsx';
 import { ImageGalleryModal } from './ImageGalleryModal.tsx';
+import { BackgroundGeneratorModal } from './BackgroundGeneratorModal.tsx';
 import { useChatStore } from '../../stores/chat.store.ts';
 import { useAuthStore } from '../../stores/auth.store.ts';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -40,9 +41,10 @@ import {
   Info,
   Navigation,
   MapPin,
+  ImagePlus,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar.tsx';
-import type { Character, Story, Conversation, User } from '@rpgspeak/shared';
+import type { Character, Story, Conversation, User, ConversationBackground } from '@rpgspeak/shared';
 
 export function ChatWindow() {
   const {
@@ -66,6 +68,7 @@ export function ChatWindow() {
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [anchorModalOpen, setAnchorModalOpen] = useState(false);
   const [locationsModalOpen, setLocationsModalOpen] = useState(false);
+  const [backgroundModalOpen, setBackgroundModalOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
@@ -246,6 +249,7 @@ export function ChatWindow() {
   }
 
   const activeChar = characters.find((c) => c.id === activeCharacterId);
+  const background = activeConversation.metadata?.background as ConversationBackground | undefined;
 
   return (
     <div className="flex flex-col h-full relative">
@@ -354,6 +358,13 @@ export function ChatWindow() {
             <Map size={15} />
           </button>
           <button
+            onClick={() => setBackgroundModalOpen(true)}
+            className="p-2 rounded-lg hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors"
+            title="Fondo de la conversación"
+          >
+            <ImagePlus size={15} />
+          </button>
+          <button
             onClick={() => setGroupPanelOpen(true)}
             className="p-2 rounded-lg hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors"
             title="Gestionar grupo"
@@ -403,12 +414,33 @@ export function ChatWindow() {
         </div>
       </div>
 
-      <MessageList
-        ref={messageListRef}
-        messages={messages}
-        characters={characters}
-        highlightedMessageId={highlightedMessageId}
-      />
+      <div className="relative flex-1 flex flex-col min-h-0 overflow-hidden">
+        {background && (
+          <>
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{
+                backgroundImage: `url(${background.url})`,
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                opacity: background.opacity ?? 1,
+              }}
+            />
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{ background: 'var(--surface-1)', opacity: 1 - (background.opacity ?? 1) }}
+            />
+          </>
+        )}
+        <div className="relative flex-1 flex flex-col min-h-0">
+          <MessageList
+            ref={messageListRef}
+            messages={messages}
+            characters={characters}
+            highlightedMessageId={highlightedMessageId}
+          />
+        </div>
+      </div>
 
       <MessageInput
         characters={characters.length > 0 ? characters : allCharacters}
@@ -493,6 +525,13 @@ export function ChatWindow() {
           onClose={() => setLocationsModalOpen(false)}
           storyIds={activeConversation.stories.map((s) => s.storyId)}
           allStories={allStories}
+        />
+      )}
+
+      {backgroundModalOpen && (
+        <BackgroundGeneratorModal
+          conversationId={convId!}
+          onClose={() => setBackgroundModalOpen(false)}
         />
       )}
     </div>

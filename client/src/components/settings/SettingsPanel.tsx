@@ -19,7 +19,7 @@ import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
 
 type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats' | 'backup';
 
-const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'charImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort'];
+const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'charImagePrompt', 'backgroundImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret', 'bzComfyUrl', 'bzComfyApiToken', 'bzComfyWorkflow'];
 
@@ -1601,6 +1601,12 @@ function ImageGenTab({
         onChange={(v) => update('sceneImagePrompt', v)}
       />
 
+      {/* ── Background image prompt ─────────────────────────────────────── */}
+      <BackgroundPromptSection
+        value={draft.backgroundImagePrompt ?? ''}
+        onChange={(v) => update('backgroundImagePrompt', v)}
+      />
+
       {/* ── Character image prompt ──────────────────────────────────────── */}
       <Section title="Prompt de descripción visual de personaje">
         <p className="text-xs text-text-muted mb-1 leading-relaxed">
@@ -1688,6 +1694,27 @@ function ScenePromptSection({ value, onChange }: { value: string; onChange: (v: 
         rows={12}
         mono
         hint="Incluye instrucciones de posicionamiento (on the left / in the center / on the right) para mejorar escenas con varios personajes."
+      />
+    </Section>
+  );
+}
+
+// ─── Background prompt section ───────────────────────────────────────────────
+
+function BackgroundPromptSection({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <Section title="Prompt de mejora de fondos de chat">
+      <p className="text-xs text-text-muted">
+        Plantilla que se envía al LLM al pulsar "Mejorar prompt" en el generador de fondos de la
+        ventana de chat. Usa <code className="bg-surface-3 px-1 rounded text-accent">{'{{prompt}}'}</code>{' '}
+        como variable para la descripción escrita por el usuario.
+      </p>
+      <RestorablePrompt
+        settingsKey="backgroundImagePrompt"
+        value={value}
+        onChange={onChange}
+        rows={10}
+        mono
       />
     </Section>
   );
