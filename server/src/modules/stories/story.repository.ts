@@ -1,8 +1,24 @@
 import { eq, like, sql, and } from 'drizzle-orm';
 import { getDb } from '../../db/index.js';
 import { stories, storyCharacters, type DbStory } from '../../db/schema.js';
-import type { Story, StoryCharacterLink } from '@rpgspeak/shared';
+import type { Story, StoryCharacterLink, StoryEvent, StoryLocation } from '@rpgspeak/shared';
 import { v4 as uuidv4 } from 'uuid';
+
+/** Normaliza eventos persistidos antes de añadir el campo trigger (evita undefined.trim()). */
+function normalizeEvents(events: StoryEvent[]): StoryEvent[] {
+  return events.map((e) => ({ ...e, trigger: e.trigger ?? '' }));
+}
+
+/** Normaliza ubicaciones persistidas con campos antiguos/incompletos. */
+function normalizeLocations(locations: StoryLocation[]): StoryLocation[] {
+  return locations.map((l) => ({
+    ...l,
+    description: l.description ?? '',
+    contents: l.contents ?? '',
+    exits: l.exits ?? '',
+    atmosphere: l.atmosphere ?? '',
+  }));
+}
 
 function resolveOwnerName(userId: string | null | undefined): string | null {
   if (!userId) return null;
@@ -28,8 +44,8 @@ function dbToStory(row: DbStory, chars: StoryCharacterLink[] = []): Story {
     globalContext: row.globalContext,
     narrativeRules: row.narrativeRules,
     worldLore: row.worldLore,
-    persistentEvents: JSON.parse(row.persistentEvents),
-    locations: JSON.parse((row as unknown as { locations?: string }).locations ?? '[]'),
+    persistentEvents: normalizeEvents(JSON.parse(row.persistentEvents)),
+    locations: normalizeLocations(JSON.parse((row as unknown as { locations?: string }).locations ?? '[]')),
     stateVariables: JSON.parse(row.stateVariables),
     behaviorRestrictions: JSON.parse(row.behaviorRestrictions),
     isActive: Boolean(row.isActive),
