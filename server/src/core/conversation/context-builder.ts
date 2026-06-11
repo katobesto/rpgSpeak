@@ -39,51 +39,48 @@ export interface BuildContextOptions {
   narrationStylePrompt?: string;
   /** Current scene location — injected as a spatial-coherence block with [UBICACION:...] instruction */
   currentLocation?: string | null;
+  /** IDs de eventos de historia (persistentEvents) ya ocurridos en esta conversación.
+   *  Los eventos con trigger no ocurridos se inyectan como "trama pendiente" (destinos). */
+  occurredEventIds?: Set<string>;
 }
 
 // ── Aviso de aventura para modo personaje individual (sin narrador) ─────────
 const ADVENTURE_CONTEXT_NOTICE = `## Contexto de aventura activa
 Eres consciente de tu ficha RPG (stats, habilidades, inventario). Actúa de forma coherente con ellos en situaciones de combate, reto o tensión. Antes de hablar, describe brevemente entre paréntesis tu acción o gesto físico en tercera persona.`;
 
-// ── Bloque de coherencia de objetos — inyectado en todos los modos ──────────
-// Once an object/item has been described (identity, location, owner, purpose),
-// those details are fixed facts. Prevents the LLM from re-describing or
-// relocating established items (e.g. a key found two messages ago suddenly
-// appearing in a different place and unlocking something different).
-const OBJECT_COHERENCE_BLOCK = `## COHERENCIA DE OBJETOS Y ELEMENTOS NARRATIVOS
-
-REGLA ABSOLUTA: Cuando un objeto, ítem o elemento relevante (llaves, armas, objetos mágicos, pertenencias, pistas, etc.) ya ha sido descrito en la conversación —su aspecto, ubicación, quién lo lleva o para qué sirve— esos detalles son HECHOS FIJOS. No los reinventes, no los reubiques ni les asignes una función o significado distinto sin que la narrativa lo justifique de forma EXPLÍCITA (alguien lo mueve, lo entrega, lo usa, lo pierde).
-
-Antes de mencionar de nuevo un objeto ya establecido, revisa cómo se describió antes y mantente coherente con ello. Si no recuerdas un detalle concreto (p.ej. para qué cerradura sirve una llave), no inventes uno nuevo cada vez — deja la incógnita abierta o reutiliza lo último que se dijo.`;
-
-// ── Bloque de ubicación — inyectado en modo personaje individual ─────────────
-// Builds the location-coherence block. When a location is known it anchors the
-// scene and includes the [UBICACION:...] emission instruction. When unknown it
-// asks the LLM to establish one as soon as the scene takes place somewhere.
-function buildLocationBlock(currentLocation: string | null | undefined): string {
-  if (currentLocation?.trim()) {
-    return (
-      `## UBICACIÓN ACTUAL DE LA ESCENA\n\n` +
-      `La acción transcurre en: **${currentLocation.trim()}**\n\n` +
-      `REGLA ABSOLUTA DE COHERENCIA ESPACIAL:\n` +
+// ── Bloque de coherencia de escena — inyectado en todos los modos ───────────
+// Consolida en UN solo mensaje de sistema las reglas de coherencia espacial
+// (ubicación + instrucción [UBICACION:...]) y de objetos establecidos. Un solo
+// bloque reduce la fatiga de directivas en el footer (menos bloques "REGLA
+// ABSOLUTA" compitiendo entre sí) y ahorra un mensaje del presupuesto.
+function buildSceneCoherenceBlock(currentLocation: string | null | undefined): string {
+  const locationPart = currentLocation?.trim()
+    ? `### Ubicación actual\n` +
+      `La acción transcurre en: **${currentLocation.trim()}**\n` +
       `Los personajes están en este lugar. Sus acciones, percepciones y referencias ` +
-      `deben ser coherentes con ese entorno. No puedes cambiar el escenario de forma ` +
-      `arbitraria ni teleportar a los personajes.\n\n` +
+      `deben ser coherentes con ese entorno. No cambies el escenario de forma ` +
+      `arbitraria ni teleportes a los personajes; los desplazamientos se narran.\n` +
       `Si la narrativa lleva explícitamente a los personajes a un lugar claramente distinto, ` +
       `escribe al final de tu respuesta (no en medio):\n` +
       `[UBICACION:nombre del nuevo lugar]\n` +
       `No emitas [UBICACION:...] si la escena continúa en el mismo lugar.`
-    );
-  }
-  return (
-    `## UBICACIÓN DE LA ESCENA\n\n` +
-    `La ubicación de la escena aún no está registrada.\n` +
-    `Si tu respuesta sitúa la acción en un lugar concreto, indícalo al ` +
-    `final de tu respuesta con:\n` +
-    `[UBICACION:nombre del lugar]\n\n` +
-    `Una vez establecida, los personajes permanecerán en ese lugar hasta que ` +
-    `la narrativa los lleve explícitamente a otro.`
-  );
+    : `### Ubicación de la escena\n` +
+      `La ubicación aún no está registrada. Si tu respuesta sitúa la acción en un ` +
+      `lugar concreto, indícalo al final de tu respuesta con:\n` +
+      `[UBICACION:nombre del lugar]\n` +
+      `Una vez establecida, los personajes permanecerán en ese lugar hasta que ` +
+      `la narrativa los lleve explícitamente a otro.`;
+
+  const objectsPart =
+    `### Objetos y elementos establecidos\n` +
+    `Cuando un objeto o elemento relevante (llaves, armas, objetos mágicos, pertenencias, pistas…) ` +
+    `ya ha sido descrito —su aspecto, ubicación, quién lo lleva o para qué sirve— esos detalles son ` +
+    `HECHOS FIJOS. No los reinventes, reubiques ni les asignes otra función sin que la narrativa lo ` +
+    `justifique de forma explícita (alguien lo mueve, lo entrega, lo usa, lo pierde). ` +
+    `Si no recuerdas un detalle concreto, no inventes uno nuevo — deja la incógnita abierta o ` +
+    `reutiliza lo último que se dijo.`;
+
+  return `## COHERENCIA DE ESCENA — REGLAS ABSOLUTAS\n\n${locationPart}\n\n${objectsPart}`;
 }
 
 /**
@@ -131,6 +128,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     embeddingModel,
     narrationStylePrompt,
     currentLocation,
+    occurredEventIds = new Set<string>(),
   } = opts;
 
   const systemParts: string[] = [];
@@ -258,7 +256,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
 
   // Active story contexts (sorted by priority)
   for (const story of stories) {
-    const storyBlock = buildStoryBlock(story);
+    const storyBlock = buildStoryBlock(story, occurredEventIds, currentLocation);
     if (storyBlock) systemParts.push(storyBlock);
   }
 
@@ -360,13 +358,13 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   //
   // Injection order (furthest → closest to the generation point):
   //   1. Context index      — world-state background knowledge
-  //   2. Memories           — character-specific past events, may include emotional coloring
-  //   3. Spatial coherence  — prevents location drift
-  //   3b. Object coherence  — prevents established items from drifting
-  //   4. Affinity block     — current relationship state + consent rules (changes often)
-  //   5. Narration style    — user preference for verbosity
-  //   6. Summary            — "Historia hasta ahora" (changes ~every 8 messages)
-  //   7. [Last user msg]    ← generation starts here
+  //   2. Pending plot events — script destinations (changes only when an event fires)
+  //   3. Memories           — character-specific past events, may include emotional coloring
+  //   4. Scene coherence    — location + established objects (one consolidated block)
+  //   5. Affinity block     — current relationship state + consent rules (changes often)
+  //   6. Narration style    — user preference for verbosity
+  //   7. Summary            — "Historia hasta ahora" (rolling, changes every ~6 messages)
+  //   8. [Last user msg]    ← generation starts here
   //
   // Ordered so that the blocks most likely to change between consecutive turns
   // (affinity, summary, last message) sit closest to the end. This keeps the
@@ -375,12 +373,13 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // (character prompt + stories) can be fully reused by the KV cache across turns,
   // even when affinity values or memory sets change.
 
-  // Inject the location block in all modes (single-char AND narrator).
-  // The narrator needs to know the current location just as much as a single character.
-  const spatialCoherenceBlock = buildLocationBlock(currentLocation);
+  // Scene coherence (location + objects) is injected in all modes — the narrator
+  // needs the current location just as much as a single character.
+  const sceneCoherenceBlock = buildSceneCoherenceBlock(currentLocation);
+  const pendingEventsBlock  = buildPendingEventsBlock(stories, occurredEventIds);
 
   const shouldInjectMemories = allMemories.length > 0 && memoryInjectionPrompt?.trim();
-  const needsSplit = true; // OBJECT_COHERENCE_BLOCK is always injected, so the split always applies
+  const needsSplit = true; // sceneCoherenceBlock is always injected, so the split always applies
   const historyBody = needsSplit ? trimmedMessages.slice(0, -1) : trimmedMessages;
   const lastMessage = needsSplit ? trimmedMessages[trimmedMessages.length - 1] : null;
 
@@ -396,7 +395,14 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     footerCount++;
   }
 
-  // 2. Memories (character-specific state)
+  // 2. Pending plot events ("trama pendiente") — script destinations with triggers.
+  // Changes only when an event fires, so it sits early in the footer.
+  if (pendingEventsBlock) {
+    history.push({ role: 'system', content: pendingEventsBlock });
+    footerCount++;
+  }
+
+  // 3. Memories (character-specific state)
   if (shouldInjectMemories && lastMessage) {
     const injectionBlock = buildMemoryInjectionBlock(allMemories, charNameMap, memoryInjectionPrompt!);
     console.log(`[memory] Injecting ${allMemories.length} memories for conv ${conversationId} (${charNameMap.size} chars)`);
@@ -406,40 +412,33 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     console.log(`[memory] Skipped injection — memories: ${allMemories.length}, prompt set: ${Boolean(memoryInjectionPrompt?.trim())}`);
   }
 
-  // 3. Spatial coherence anchor — prevents location drift
-  if (spatialCoherenceBlock && needsSplit) {
-    history.push({ role: 'system', content: spatialCoherenceBlock });
-    footerCount++;
-  }
-
-  // 3b. Object coherence anchor — prevents established items from being
-  // re-described, relocated or repurposed inconsistently across turns.
-  history.push({ role: 'system', content: OBJECT_COHERENCE_BLOCK });
+  // 4. Scene coherence anchor — location + established objects in one block.
+  history.push({ role: 'system', content: sceneCoherenceBlock });
   footerCount++;
 
-  // 4. Affinity + consent directive — placed AFTER spatial/object coherence
-  // because affinity values can change every turn; keeping the more static
-  // coherence blocks earlier preserves more of the cacheable prefix.
+  // 5. Affinity + consent directive — placed AFTER scene coherence because
+  // affinity values can change every turn; keeping the more static coherence
+  // block earlier preserves more of the cacheable prefix.
   if (affinityBlock && needsSplit) {
     history.push({ role: 'system', content: affinityBlock });
     footerCount++;
   }
 
-  // 5. Narration style directive (user preference — overrides default verbosity)
+  // 6. Narration style directive (user preference — overrides default verbosity)
   if (narrationStylePrompt?.trim() && needsSplit) {
     history.push({ role: 'system', content: narrationStylePrompt.trim() });
     footerCount++;
   }
 
-  // 6. Summary ("Historia hasta ahora") — changes ~every 8 messages, kept close
-  // to the generation point so its periodic changes don't invalidate the cache
-  // for the conversation history and earlier directive blocks.
+  // 7. Rolling summary ("Historia hasta ahora") — changes every ~6 messages, kept
+  // close to the generation point so its periodic changes don't invalidate the
+  // cache for the conversation history and earlier directive blocks.
   if (summary?.trim()) {
     history.push({ role: 'system', content: `## Historia hasta ahora\n${summary.trim()}` });
     footerCount++;
   }
 
-  // 7. Last user message (generation point)
+  // 8. Last user message (generation point)
   if (needsSplit && lastMessage) {
     history.push({ role: lastMessage.role, content: lastMessage.content });
     footerCount++;
@@ -503,10 +502,15 @@ function buildCharacterBlock(char: Character): string {
   return parts.join('\n\n');
 }
 
-function buildStoryBlock(story: Story): string {
-  if (!story.globalContext.trim() && !story.worldLore.trim() && !story.narrativeRules.trim()) {
-    return '';
-  }
+function buildStoryBlock(
+  story: Story,
+  occurredEventIds: Set<string>,
+  currentLocation?: string | null,
+): string {
+  const hasContent =
+    story.globalContext.trim() || story.worldLore.trim() || story.narrativeRules.trim() ||
+    story.persistentEvents.length > 0 || (story.locations?.length ?? 0) > 0;
+  if (!hasContent) return '';
 
   const parts: string[] = [`# Story Context: ${story.name}`];
 
@@ -526,8 +530,15 @@ function buildStoryBlock(story: Story): string {
     parts.push(`## Restrictions\n${story.behaviorRestrictions.map((r) => `- ${r}`).join('\n')}`);
   }
 
-  if (story.persistentEvents.length > 0) {
-    const events = story.persistentEvents
+  // Eventos: tres categorías según trigger + estado por conversación.
+  //   · Sin trigger              → hechos de trasfondo, van aquí como "Key Events" (comportamiento clásico)
+  //   · Con trigger, ya ocurrido → hechos del pasado de ESTA conversación, van aquí en pasado
+  //   · Con trigger, pendiente   → destino narrativo, va en el bloque "Trama pendiente" del footer (no aquí)
+  const factEvents = story.persistentEvents.filter(
+    (e) => !e.trigger.trim() && !occurredEventIds.has(e.id),
+  );
+  if (factEvents.length > 0) {
+    const events = factEvents
       .sort((a, b) => b.importance - a.importance)
       .slice(0, 5)
       .map((e) => `- [${e.title}]: ${e.description}`)
@@ -535,16 +546,20 @@ function buildStoryBlock(story: Story): string {
     parts.push(`## Key Events\n${events}`);
   }
 
+  const occurredEvents = story.persistentEvents.filter((e) => occurredEventIds.has(e.id));
+  if (occurredEvents.length > 0) {
+    const events = occurredEvents
+      .map((e) => `- [${e.title}]: ${e.description}`)
+      .join('\n');
+    parts.push(
+      `## Eventos del guión ya ocurridos en esta conversación\n` +
+      `Estos eventos YA SUCEDIERON narrativamente. Son hechos del pasado: trátalos como ` +
+      `parte de la historia vivida, no los repitas ni los narres de nuevo como novedad.\n${events}`,
+    );
+  }
+
   if (story.locations && story.locations.length > 0) {
-    const locationBlocks = story.locations.map((loc) => {
-      const locParts = [`### ${loc.name}`];
-      if (loc.description.trim()) locParts.push(loc.description.trim());
-      if (loc.contents.trim())    locParts.push(`**Contenido:** ${loc.contents.trim()}`);
-      if (loc.exits.trim())       locParts.push(`**Salidas:** ${loc.exits.trim()}`);
-      if (loc.atmosphere.trim())  locParts.push(`**Atmósfera:** ${loc.atmosphere.trim()}`);
-      return locParts.join('\n');
-    }).join('\n\n');
-    parts.push(`## Ubicaciones conocidas — REGLA IMPORTANTE\nLas siguientes ubicaciones son las que existen en esta historia. El narrador NO debe inventar lugares, objetos, puertas ni salidas que no estén descritos aquí.\n\n${locationBlocks}`);
+    parts.push(buildLocationsSection(story, currentLocation));
   }
 
   if (Object.keys(story.stateVariables).length > 0) {
@@ -555,6 +570,108 @@ function buildStoryBlock(story: Story): string {
   }
 
   return parts.join('\n\n');
+}
+
+// ── Ubicaciones de historia: proximidad + mundo abierto/cerrado ──────────────
+//
+// Si conocemos la ubicación actual y coincide con una del mapa, se detallan solo
+// la actual y sus adyacentes (conectadas por "exits"); el resto aparece como
+// lista de nombres. Esto ahorra tokens y concentra la atención del modelo en
+// donde está la escena. Si no hay coincidencia, se detallan todas (fallback).
+//
+// story.openWorld controla la regla: mapa cerrado (el narrador no inventa
+// lugares) vs mundo abierto (puede crear lugares nuevos coherentes y debe
+// registrarlos con [UBICACION:...]).
+function buildLocationsSection(story: Story, currentLocation?: string | null): string {
+  const locs = story.locations;
+  const norm = (s: string) => s.trim().toLowerCase();
+
+  let current: (typeof locs)[number] | null = null;
+  if (currentLocation?.trim()) {
+    const cur = norm(currentLocation);
+    current =
+      locs.find((l) => norm(l.name) === cur) ??
+      locs.find((l) => cur.includes(norm(l.name)) || norm(l.name).includes(cur)) ??
+      null;
+  }
+
+  const renderLoc = (loc: (typeof locs)[number], marker = '') => {
+    const locParts = [`### ${loc.name}${marker}`];
+    if (loc.description.trim()) locParts.push(loc.description.trim());
+    if (loc.contents.trim())    locParts.push(`**Contenido:** ${loc.contents.trim()}`);
+    if (loc.exits.trim())       locParts.push(`**Salidas:** ${loc.exits.trim()}`);
+    if (loc.atmosphere.trim())  locParts.push(`**Atmósfera:** ${loc.atmosphere.trim()}`);
+    return locParts.join('\n');
+  };
+
+  let body: string;
+  if (current) {
+    // Adyacentes: aparecen en las salidas de la actual, o sus salidas mencionan la actual
+    const adjacent = locs.filter(
+      (l) =>
+        l.id !== current!.id &&
+        (norm(current!.exits).includes(norm(l.name)) || norm(l.exits).includes(norm(current!.name))),
+    );
+    const detailedIds = new Set([current.id, ...adjacent.map((l) => l.id)]);
+    const others = locs.filter((l) => !detailedIds.has(l.id));
+
+    const sections = [
+      renderLoc(current, ' ← UBICACIÓN ACTUAL'),
+      ...adjacent.map((l) => renderLoc(l, ' (conectada)')),
+    ];
+    if (others.length > 0) {
+      sections.push(`### Otros lugares de esta historia\n${others.map((l) => `- ${l.name}`).join('\n')}`);
+    }
+    body = sections.join('\n\n');
+  } else {
+    body = locs.map((l) => renderLoc(l)).join('\n\n');
+  }
+
+  const rule = story.openWorld
+    ? `Las siguientes ubicaciones existen en esta historia. Prefiérelas al narrar. ` +
+      `Si la narrativa necesita un lugar que no está descrito aquí, puedes crearlo, ` +
+      `siempre coherente con el mundo y su tono — y registra el cambio de escena ` +
+      `emitiendo [UBICACION:nombre] al final de tu respuesta. Lo que SÍ está descrito ` +
+      `(contenidos, salidas, atmósfera) son hechos fijos que debes respetar.`
+    : `Las siguientes ubicaciones son las ÚNICAS que existen en esta historia (mapa cerrado). ` +
+      `El narrador NO debe inventar lugares, objetos, puertas ni salidas que no estén descritos aquí.`;
+
+  return `## Ubicaciones conocidas — REGLA IMPORTANTE\n${rule}\n\n${body}`;
+}
+
+// ── Trama pendiente: eventos con trigger aún no ocurridos ────────────────────
+//
+// Es el "guión" reintroducido: eventos con disparador que actúan como DESTINOS
+// narrativos. Se inyecta en el footer (cerca del punto de generación) y cambia
+// solo cuando un evento ocurre — el LLM lo marca emitiendo [EVENTO_OCURRIDO:...],
+// que engine.ts parsea y persiste por conversación.
+function buildPendingEventsBlock(stories: Story[], occurredEventIds: Set<string>): string | null {
+  const pending = stories.flatMap((story) =>
+    story.persistentEvents.filter((e) => e.trigger.trim() && !occurredEventIds.has(e.id)),
+  );
+  if (pending.length === 0) return null;
+
+  const top = pending.sort((a, b) => b.importance - a.importance).slice(0, 6);
+  const lines = top.map(
+    (e) =>
+      `- «${e.title}» (importancia ${e.importance}/10)\n` +
+      `  Disparador: ${e.trigger.trim()}\n` +
+      `  Qué ocurre: ${e.description.trim()}`,
+  );
+
+  return (
+    `## TRAMA PENDIENTE — DESTINOS NARRATIVOS\n\n` +
+    `Los siguientes eventos de la historia AÚN NO HAN OCURRIDO. Son destinos hacia los que ` +
+    `debe avanzar la narración — no una ruta fija, y NUNCA hechos del pasado:\n\n` +
+    `${lines.join('\n\n')}\n\n` +
+    `CÓMO USARLOS:\n` +
+    `- NO los menciones ni narres como si ya hubieran pasado\n` +
+    `- Cuando la situación se acerque al disparador de un evento, orienta la escena hacia él de forma natural\n` +
+    `- Como mucho UN evento puede ocurrir por respuesta, y solo si su disparador se ha cumplido\n` +
+    `- Cuando narres efectivamente uno de estos eventos, añade al final de tu respuesta (línea separada):\n` +
+    `[EVENTO_OCURRIDO:título exacto del evento]\n` +
+    `- No emitas esa etiqueta si el evento aún no ha sucedido en tu narración`
+  );
 }
 
 const TYPE_LABELS: Record<string, string> = {

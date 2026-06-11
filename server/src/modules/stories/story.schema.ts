@@ -22,15 +22,6 @@ const storyEventSchema = z.array(
   })
 );
 
-const timelineSchema = z.array(
-  z.object({
-    id: z.string(),
-    label: z.string(),
-    description: z.string(),
-    order: z.number().int(),
-  })
-);
-
 const storyCharacterLinkSchema = z.array(
   z.object({
     characterId: z.string(),
@@ -48,10 +39,10 @@ export const createStorySchema = z.object({
   persistentEvents: storyEventSchema.default([]),
   locations: storyLocationSchema.default([]),
   stateVariables: z.record(z.union([z.string(), z.number(), z.boolean()])).default({}),
-  timeline: timelineSchema.default([]),
   behaviorRestrictions: z.array(z.string()).default([]),
   isActive: z.boolean().default(false),
   adventureMode: z.boolean().default(false),
+  openWorld: z.boolean().default(false),
   characters: storyCharacterLinkSchema.default([]),
 });
 

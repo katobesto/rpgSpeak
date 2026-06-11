@@ -538,18 +538,18 @@ export function SettingsPanel() {
                       </div>
                       <div>
                         <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Trama pendiente</span>
+                        <span className="text-text-muted/50 ml-1">(eventos de historia con disparador aún no ocurridos — destinos narrativos; cambia solo cuando un evento ocurre)</span>
+                      </div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
                         <span className="text-text-secondary ml-2">Memorias inyectadas</span>
                         <span className="text-text-muted/50 ml-1">(plantilla "Memorias inyectadas" — si hay memorias y está configurada)</span>
                       </div>
                       <div>
                         <span className="text-blue-400/80">[SYSTEM]</span>
-                        <span className="text-text-secondary ml-2">Coherencia espacial (ubicación)</span>
-                        <span className="text-text-muted/50 ml-1">(siempre)</span>
-                      </div>
-                      <div>
-                        <span className="text-blue-400/80">[SYSTEM]</span>
-                        <span className="text-text-secondary ml-2">Coherencia de objetos</span>
-                        <span className="text-text-muted/50 ml-1">(siempre — evita reubicar/reinventar objetos ya descritos)</span>
+                        <span className="text-text-secondary ml-2">Coherencia de escena</span>
+                        <span className="text-text-muted/50 ml-1">(siempre — ubicación actual + objetos establecidos, en un solo bloque)</span>
                       </div>
                       <div>
                         <span className="text-blue-400/80">[SYSTEM]</span>

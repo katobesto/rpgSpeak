@@ -13,6 +13,7 @@ import { NotFoundError, ProviderError } from '../../shared/errors.js';
 import { getUserById } from '../../modules/auth/auth.service.js';
 import { autoExtractContextAsync } from '../context/context-extractor.js';
 import { SummariesRepository } from '../../modules/summaries/summaries.repository.js';
+import { EventStatusRepository } from '../../modules/stories/event-status.repository.js';
 
 const providerRepo   = new ProviderRepository();
 const charRepo       = new CharacterRepository();
@@ -22,6 +23,7 @@ const convRepo       = new ConversationRepository();
 const settingsService = new SettingsService();
 const memRepo        = new MemoryRepository();
 const summariesRepo  = new SummariesRepository();
+const eventStatusRepo = new EventStatusRepository();
 
 export interface GenerateOptions {
   conversationId: string;
@@ -574,6 +576,10 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       ownerStyle === 'medium' ? (settings.narrationMediumPrompt || undefined) :
       undefined;
 
+    // Eventos de historia ya ocurridos en esta conversación (los pendientes con
+    // trigger se inyectan como "trama pendiente" en el footer del contexto)
+    const occurredEventIds = eventStatusRepo.findOccurredIds(conversationId);
+
     const { messages: rawContext, footerCount } = await buildContext({
       character: character ?? groupCharacters[0],
       stories: linkedStories,
@@ -601,6 +607,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       embeddingModel:      settings.embeddingModel,
       narrationStylePrompt,
       currentLocation:     conversation.currentLocation,
+      occurredEventIds,
     });
 
     // The global "Ajustes → Contexto" value (settings.defaultContextLength) is the
@@ -803,6 +810,39 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       locationUpdate = locationMatches[locationMatches.length - 1][1].trim();
       convRepo.updateLocation(conversationId, locationUpdate);
       cleanContent = cleanContent.replace(LOCATION_RE, '').trimEnd();
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── Parse [EVENTO_OCURRIDO:...] story-event tags ──────────────────────────
+    // The pending-events footer block instructs the LLM to emit this tag when it
+    // narrates one of the script's pending events. We match the title against
+    // the linked stories' triggered events, persist the occurred status for this
+    // conversation, and strip all occurrences from the visible content.
+    const EVENT_DONE_RE = /\[EVENTO_OCURRIDO:\s*([^\]]+?)\s*\]/gi;
+    const eventMatches = [...cleanContent.matchAll(EVENT_DONE_RE)];
+    if (eventMatches.length > 0) {
+      for (const m of eventMatches) {
+        const tagTitle = m[1].trim().toLowerCase();
+        for (const story of linkedStories) {
+          const candidates = story.persistentEvents.filter(
+            (e) => e.trigger.trim() && !occurredEventIds.has(e.id),
+          );
+          // Exact title match first; fall back to containment for minor LLM rephrasing
+          const ev =
+            candidates.find((e) => e.title.trim().toLowerCase() === tagTitle) ??
+            candidates.find((e) => {
+              const t = e.title.trim().toLowerCase();
+              return t.includes(tagTitle) || tagTitle.includes(t);
+            });
+          if (ev) {
+            eventStatusRepo.markOccurred(conversationId, story.id, ev.id);
+            occurredEventIds.add(ev.id);
+            console.log(`[story-events] Evento ocurrido en conv ${conversationId}: "${ev.title}"`);
+            break;
+          }
+        }
+      }
+      cleanContent = cleanContent.replace(EVENT_DONE_RE, '').trimEnd();
     }
     // ─────────────────────────────────────────────────────────────────────────
 

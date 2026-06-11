@@ -122,10 +122,12 @@ export interface Story {
   persistentEvents: StoryEvent[];
   locations: StoryLocation[];
   stateVariables: Record<string, string | number | boolean>;
-  timeline: TimelineEntry[];
   behaviorRestrictions: string[];
   isActive: boolean;
   adventureMode: boolean;
+  /** true = mundo abierto: el narrador puede crear ubicaciones nuevas coherentes con el mundo;
+   *  false = mapa cerrado: solo existen las ubicaciones definidas en la historia */
+  openWorld: boolean;
   characters: StoryCharacterLink[];
   createdAt: string;
   updatedAt: string;
@@ -147,13 +149,6 @@ export interface StoryLocation {
   contents: string;
   exits: string;
   atmosphere: string;
-}
-
-export interface TimelineEntry {
-  id: string;
-  label: string;
-  description: string;
-  order: number;
 }
 
 export interface StoryCharacterLink {

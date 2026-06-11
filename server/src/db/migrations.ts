@@ -40,7 +40,6 @@ export function runMigrations(db: Db): void {
       world_lore TEXT NOT NULL DEFAULT '',
       persistent_events TEXT NOT NULL DEFAULT '[]',
       state_variables TEXT NOT NULL DEFAULT '{}',
-      timeline TEXT NOT NULL DEFAULT '[]',
       behavior_restrictions TEXT NOT NULL DEFAULT '[]',
       is_active INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
@@ -204,6 +203,22 @@ export function runMigrations(db: Db): void {
   // ─── Stories — locations column ──────────────────────────────────────────
   try { db.run(sql`ALTER TABLE stories ADD COLUMN locations TEXT NOT NULL DEFAULT '[]'`); } catch { /* already exists */ }
 
+  // ─── Stories — open world toggle (0 = mapa cerrado, comportamiento previo) ──
+  try { db.run(sql`ALTER TABLE stories ADD COLUMN open_world INTEGER DEFAULT 0`); } catch { /* already exists */ }
+
+  // ─── Conversation Story Events — eventos de historia ya ocurridos por chat ──
+  // Una fila = el evento (stories.persistent_events[].id) ya ocurrió
+  // narrativamente en esa conversación; sin fila = pendiente.
+  db.run(sql`
+    CREATE TABLE IF NOT EXISTS conversation_story_events (
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      story_id        TEXT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+      event_id        TEXT NOT NULL,
+      occurred_at     TEXT NOT NULL,
+      PRIMARY KEY (conversation_id, event_id)
+    )
+  `);
+
   // ─── Conversations — current scene location ───────────────────────────────
   try { db.run(sql`ALTER TABLE conversations ADD COLUMN current_location TEXT`); } catch { /* already exists */ }
 
@@ -350,7 +365,7 @@ export function runMigrations(db: Db): void {
   db.run(sql`
     INSERT OR IGNORE INTO stories (
       id, name, description, global_context, narrative_rules, world_lore,
-      persistent_events, state_variables, timeline, behavior_restrictions,
+      persistent_events, state_variables, behavior_restrictions,
       is_active, created_at, updated_at
     ) VALUES (
       'story-cronicas-rey-demonio',
@@ -375,7 +390,6 @@ export function runMigrations(db: Db): void {
 **El Corazón de Eclipse:** Un cristal negro del tamaño de un corazón humano, creado por los primeros vampiros hace cinco mil años. Puede sellar al Rey Demonio permanentemente, pero consume la esencia vital de quien lo activa.',
       '[{"id":"evt-1","title":"El Gran Sello se rompe","description":"Tras mil años, el sello que mantenía dormido al Rey Demonio Kael''tharion se ha quebrado. La onda de choque mágica fue sentida por todos los Antiguos vampíricos simultáneamente. Sorin Umbraveil fue el primero en reportarlo al Consejo.","timestamp":"2024-01-01T00:00:00Z","importance":10},{"id":"evt-2","title":"Consejo de Emergencia de los Antiguos","description":"Elara ha convocado a los cinco clanes vampíricos al Dominio de la Media Luna. Tres han respondido; dos permanecen en silencio sospechoso. Se debate si usar el Corazón de Eclipse o negociar con el Rey Demonio.","timestamp":"2024-01-02T00:00:00Z","importance":9},{"id":"evt-3","title":"La embajada humana llega al Dominio","description":"El Emperador de Valeth ha enviado una embajadora —Lady Mirren— con una propuesta de alianza. Los vampiros y los humanos no han cooperado en ochocientos años. La desconfianza es mutua y palpable.","timestamp":"2024-01-03T00:00:00Z","importance":7},{"id":"evt-4","title":"El Corazón de Eclipse ha sido robado","description":"El artefacto ha desaparecido de la Cámara de las Reliquias. Sólo alguien con acceso de Antiguo podría haber entrado. La traición viene de dentro.","timestamp":"2024-01-05T00:00:00Z","importance":10}]',
       '{"fase":"Crisis inicial","Rey Demonio estado":"Despertado, reuniendo fuerzas","Corazón de Eclipse":"ROBADO - ubicación desconocida","alianza_humana":"Negociando","clanes_vampiricos_leales":"3 de 5","clanes_vampiricos_silenciosos":"Clan Nocthar y Clan Velsh","Sorin_estado":"Investigando el robo","Elara_estado":"Presidiendo el Consejo, bajo presión"}',
-      '[{"id":"tl-1","label":"El Antiguo Mundo","description":"Hace 5000 años: Primer vampiro creado. Los Cinco Clanes originales fundan el Dominio.","order":1},{"id":"tl-2","label":"La Gran Guerra Demoníaca","description":"Hace 1000 años: El Rey Demonio conquista un tercio del continente. La alianza de razas lo sella a costa de miles de vidas.","order":2},{"id":"tl-3","label":"Los Siglos de Paz Frágil","description":"1000 años de calma tensa. Los vampiros decaen en número. Los humanos olvidan el peligro. Los elfos advierten.","order":3},{"id":"tl-4","label":"El Presente","description":"Ahora: El sello se rompe. El Corazón es robado. La guerra se acerca.","order":4}]',
       '["No describir actos sexuales explícitos","Respetar la jerarquía de poder establecida en el lore","Los humanos con magia solar hacen daño físico a los vampiros","El Rey Demonio no aparece directamente hasta que la historia lo justifique"]',
       1,
       datetime('now'),

@@ -31,10 +31,10 @@ function dbToStory(row: DbStory, chars: StoryCharacterLink[] = []): Story {
     persistentEvents: JSON.parse(row.persistentEvents),
     locations: JSON.parse((row as unknown as { locations?: string }).locations ?? '[]'),
     stateVariables: JSON.parse(row.stateVariables),
-    timeline: JSON.parse(row.timeline),
     behaviorRestrictions: JSON.parse(row.behaviorRestrictions),
     isActive: Boolean(row.isActive),
     adventureMode: Boolean(row.adventureMode),
+    openWorld: Boolean(row.openWorld),
     characters: chars,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -118,15 +118,16 @@ export class StoryRepository {
     this.db.run(sql`
       INSERT INTO stories (
         id, name, description, global_context, narrative_rules, world_lore,
-        persistent_events, locations, state_variables, timeline, behavior_restrictions,
-        is_active, adventure_mode, user_id, created_at, updated_at
+        persistent_events, locations, state_variables, behavior_restrictions,
+        is_active, adventure_mode, open_world, user_id, created_at, updated_at
       ) VALUES (
         ${id}, ${data.name}, ${data.description}, ${data.globalContext},
         ${data.narrativeRules}, ${data.worldLore},
         ${JSON.stringify(data.persistentEvents)}, ${JSON.stringify(data.locations ?? [])},
         ${JSON.stringify(data.stateVariables)},
-        ${JSON.stringify(data.timeline)}, ${JSON.stringify(data.behaviorRestrictions)},
-        ${data.isActive ? 1 : 0}, ${data.adventureMode ? 1 : 0}, ${userId ?? null}, ${ts}, ${ts}
+        ${JSON.stringify(data.behaviorRestrictions)},
+        ${data.isActive ? 1 : 0}, ${data.adventureMode ? 1 : 0}, ${data.openWorld ? 1 : 0},
+        ${userId ?? null}, ${ts}, ${ts}
       )
     `);
 
@@ -156,10 +157,10 @@ export class StoryRepository {
         persistent_events    = ${JSON.stringify(merged.persistentEvents)},
         locations            = ${JSON.stringify(merged.locations ?? [])},
         state_variables      = ${JSON.stringify(merged.stateVariables)},
-        timeline             = ${JSON.stringify(merged.timeline)},
         behavior_restrictions= ${JSON.stringify(merged.behaviorRestrictions)},
         is_active            = ${merged.isActive ? 1 : 0},
         adventure_mode       = ${merged.adventureMode ? 1 : 0},
+        open_world           = ${merged.openWorld ? 1 : 0},
         updated_at           = ${ts}
       WHERE id = ${id}
     `);
