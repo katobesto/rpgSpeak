@@ -1,4 +1,13 @@
 {
   "previewNodeId": "9",
-  "finalNodeId": "100"
+  "finalNodeId": "100",
+  "modelControl": {
+    "label": "Modelo base",
+    "nodeId": "245",
+    "input": "unet_name",
+    "objectInfoClass": "UNETLoader",
+    "objectInfoInput": "unet_name",
+    "allowPattern": "z[_-]?image",
+    "default": "z_image_turbo_bf16.safetensors"
+  }
 }

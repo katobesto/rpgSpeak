@@ -567,6 +567,60 @@ textarea { resize: vertical; line-height: 1.55; }
   font-weight: 500;
 }
 
+/* ── Upscaler controls ─────────────────────────────────────────────────── */
+.upscaler-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  padding: 10px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.upscaler-control {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.upscaler-control .resolution-sublabel {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.upscaler-num {
+  font-family: monospace;
+  color: var(--accent);
+  font-size: 12px;
+}
+#upscaler-grain {
+  width: 100%;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--surface3);
+  outline: none;
+  cursor: pointer;
+}
+#upscaler-grain::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: none;
+}
+#upscaler-grain::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: none;
+}
+
 /* ── LoRA strength row ──────────────────────────────── */
 .lora-strength-row {
   display: flex;

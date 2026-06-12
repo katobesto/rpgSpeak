@@ -1,0 +1,8 @@
+{
+  "label": "FaceID SDXL",
+  "promptNodeId": "2",
+  "negativeNodeId": "3",
+  "imageNodeId": "4",
+  "finalNodeId": "10",
+  "defaultNegativePrompt": "ugly, deformed, noisy, blurry, low quality, watermark, text, signature, extra limbs, bad anatomy, monochrome, grayscale, black and white, desaturated, pencil sketch, charcoal drawing"
+}

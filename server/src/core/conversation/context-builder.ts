@@ -50,28 +50,28 @@ Eres consciente de tu ficha RPG (stats, habilidades, inventario). Actúa de form
 // scene and includes the [UBICACION:...] emission instruction. When unknown it
 // asks the LLM to establish one as soon as the scene takes place somewhere.
 function buildLocationBlock(currentLocation: string | null | undefined): string {
+  // The tag uses "LOCATION" (English, pure ASCII) so LLMs never add accents.
+  // The regex in engine.ts matches this same tag.
   if (currentLocation?.trim()) {
     return (
       `## UBICACIÓN ACTUAL DE LA ESCENA\n\n` +
       `La acción transcurre en: **${currentLocation.trim()}**\n\n` +
-      `REGLA ABSOLUTA DE COHERENCIA ESPACIAL:\n` +
-      `Los personajes están en este lugar. Sus acciones, percepciones y referencias ` +
-      `deben ser coherentes con ese entorno. No puedes cambiar el escenario de forma ` +
-      `arbitraria ni teleportar a los personajes.\n\n` +
-      `Si la narrativa lleva explícitamente a los personajes a un lugar claramente distinto, ` +
-      `escribe al final de tu respuesta (no en medio):\n` +
-      `[UBICACION:nombre del nuevo lugar]\n` +
-      `No emitas [UBICACION:...] si la escena continúa en el mismo lugar.`
+      `REGLA ABSOLUTA: los personajes están aquí. No cambies el escenario de forma arbitraria.\n\n` +
+      `Si la narrativa lleva a los personajes a un lugar claramente distinto, ` +
+      `escribe EXACTAMENTE esta etiqueta al final de tu respuesta (solo una vez, sin espacios extra):\n` +
+      `[LOCATION:nombre del nuevo lugar]\n\n` +
+      `Ejemplo: [LOCATION:Bosque del Norte]\n` +
+      `NO emitas [LOCATION:...] si la escena continúa en el mismo lugar.`
     );
   }
   return (
     `## UBICACIÓN DE LA ESCENA\n\n` +
-    `La ubicación de la escena aún no está registrada.\n` +
-    `Si tu respuesta sitúa la acción en un lugar concreto, indícalo al ` +
-    `final de tu respuesta con:\n` +
-    `[UBICACION:nombre del lugar]\n\n` +
-    `Una vez establecida, los personajes permanecerán en ese lugar hasta que ` +
-    `la narrativa los lleve explícitamente a otro.`
+    `La ubicación actual aún no está registrada.\n` +
+    `OBLIGATORIO: en cuanto tu respuesta sitúe la acción en algún lugar, ` +
+    `escribe al final de tu respuesta EXACTAMENTE esta etiqueta:\n` +
+    `[LOCATION:nombre del lugar]\n\n` +
+    `Ejemplo: [LOCATION:Taberna El Dragón Dormido]\n` +
+    `Una vez establecida, los personajes permanecen allí hasta que la narrativa los mueva explícitamente.`
   );
 }
 

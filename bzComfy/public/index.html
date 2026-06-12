@@ -95,6 +95,15 @@
         </div>
       </div>
 
+      <div id="model-field" class="field hidden">
+        <label id="model-label" for="model-select">Modelo base</label>
+        <div class="select-wrap">
+          <select id="model-select">
+            <option value="">Cargando modelos…</option>
+          </select>
+        </div>
+      </div>
+
       <!-- Reference image upload — only shown for workflows with LoadImage -->
       <div id="ref-image-field" class="field hidden">
         <label id="ref-image-label">Imagen de referencia</label>
@@ -161,13 +170,38 @@
         </div>
       </div>
 
-      <div class="field grow">
+      <!-- Upscaler controls — only shown for SeedVR / grain workflows -->
+      <div id="upscaler-field" class="field hidden">
+        <label>Ajustes de escalado</label>
+        <div class="upscaler-grid">
+          <div class="upscaler-control">
+            <span class="resolution-sublabel">Escala SeedVR</span>
+            <input id="upscaler-resolution" type="number" min="512" max="4096" step="64" />
+          </div>
+          <div class="upscaler-control">
+            <span class="resolution-sublabel">
+              Ruido
+              <span id="upscaler-grain-value" class="upscaler-num">0.010</span>
+            </span>
+            <input id="upscaler-grain" type="range" min="0" max="0.05" step="0.001" value="0.01" />
+          </div>
+          <div class="upscaler-control">
+            <span class="resolution-sublabel">
+              Ruido pixel final
+              <span id="upscaler-final-grain-value" class="upscaler-num">0.015</span>
+            </span>
+            <input id="upscaler-final-grain" type="range" min="0" max="0.08" step="0.001" value="0.015" />
+          </div>
+        </div>
+      </div>
+
+      <div id="prompt-field" class="field grow">
         <label for="prompt">Prompt</label>
         <textarea id="prompt" rows="10"
           placeholder="Describe la imagen en detalle…"></textarea>
       </div>
 
-      <div class="field">
+      <div id="negative-prompt-field" class="field">
         <label for="negative-prompt">Negative Prompt <span class="optional">(opcional)</span></label>
         <textarea id="negative-prompt" rows="3"
           placeholder="Lo que quieres evitar…"></textarea>
@@ -249,7 +283,7 @@
     </main>
   </div>
 
-  <script src="app.js?v=8"></script>
+  <script src="app.js?v=16"></script>
 
   <!-- Floating streaming preview – esquina inferior derecha -->
   <div id="stream-float" class="stream-float hidden">

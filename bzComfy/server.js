@@ -288,6 +288,62 @@ function detectImageInputNode(workflow, meta) {
   return null
 }
 
+function detectUpscalerControls(workflow) {
+  const seedvrNode = Object.values(workflow).find(n => n.class_type === 'SeedVR2VideoUpscaler')
+  const grainNodes = Object.values(workflow).filter(n => n.class_type === 'FastFilmGrain')
+  const grainNode = grainNodes[0]
+  const finalGrainNode = Object.values(workflow).find(n => n.class_type === 'ImageAddNoise')
+    ?? Object.values(workflow).find(n => n.class_type === 'LayerFilter: AddGrain')
+    ?? grainNodes[1]
+  if (!seedvrNode && grainNodes.length === 0 && !finalGrainNode) return null
+  return {
+    hasScale: !!seedvrNode,
+    defaultResolution: seedvrNode?.inputs?.resolution ?? null,
+    maxResolution: seedvrNode?.inputs?.max_resolution ?? null,
+    hasGrain: !!grainNode,
+    defaultGrainIntensity: grainNode?.inputs?.grain_intensity ?? null,
+    hasFinalGrain: !!finalGrainNode,
+    finalGrainType: finalGrainNode?.class_type ?? null,
+    defaultFinalGrainIntensity: finalGrainNode?.inputs?.strength ?? finalGrainNode?.inputs?.grain_power ?? finalGrainNode?.inputs?.grain_intensity ?? null,
+    defaultFinalGrainScale: finalGrainNode?.inputs?.grain_scale ?? null,
+  }
+}
+
+function detectModelControl(workflow, meta) {
+  const control = meta?.modelControl
+  if (!control?.nodeId || !control?.input) return null
+  const node = workflow[control.nodeId]
+  if (!node) return null
+  const defaultModel = node.inputs?.[control.input] ?? control.default ?? null
+  return {
+    label: control.label || 'Modelo',
+    nodeId: control.nodeId,
+    input: control.input,
+    objectInfoClass: control.objectInfoClass || node.class_type,
+    objectInfoInput: control.objectInfoInput || control.input,
+    allowPattern: control.allowPattern || null,
+    defaultModel,
+  }
+}
+
+async function loadModelOptions(control) {
+  if (!control?.objectInfoClass || !control?.objectInfoInput) return []
+  const r = await fetch(`${config.comfyUrl}/object_info/${encodeURIComponent(control.objectInfoClass)}`)
+  if (!r.ok) throw new Error(`ComfyUI ${r.status}`)
+  const info = await r.json()
+  const values = info?.[control.objectInfoClass]?.input?.required?.[control.objectInfoInput]?.[0]
+  if (!Array.isArray(values)) return []
+  let options = values.filter(v => typeof v === 'string')
+  if (control.allowPattern) {
+    const re = new RegExp(control.allowPattern, 'i')
+    options = options.filter(v => re.test(v))
+  }
+  if (control.defaultModel && !options.includes(control.defaultModel)) {
+    options.unshift(control.defaultModel)
+  }
+  return options
+}
+
 function buildNodeMap(workflow) {
   return Object.fromEntries(
     Object.entries(workflow).map(([id, node]) => [
@@ -482,12 +538,25 @@ app.get('/api/workflows', async (_req, res) => {
             await readFile(path.join(WORKFLOWS_DIR, f), 'utf-8')
           )
           const imgNode = detectImageInputNode(workflowData, meta)
+          const promptNodes = detectPromptNodes(workflowData, meta)
+          const promptRequired = meta?.promptRequired ?? !!promptNodes.positiveNodeId
           const powerLora = detectPowerLoraNode(workflowData)
+          const upscalerControls = detectUpscalerControls(workflowData)
+          const modelControl = detectModelControl(workflowData, meta)
+          let modelOptions = []
+          if (modelControl) {
+            try {
+              modelOptions = await loadModelOptions(modelControl)
+            } catch {
+              modelOptions = modelControl.defaultModel ? [modelControl.defaultModel] : []
+            }
+          }
           // Detect FluxResolutionNode for megapixel / aspect_ratio controls
           const resNode = Object.values(workflowData).find(n => n.class_type === 'FluxResolutionNode')
           return {
             id,
             label,
+            promptRequired,
             hasImageInput: !!imgNode,
             imageInputLabel: imgNode?.label ?? null,
             hasLora: !!(meta?.loraNodeId),
@@ -496,6 +565,15 @@ app.get('/api/workflows', async (_req, res) => {
             hasResolutionControl: !!resNode,
             defaultMegapixel: resNode?.inputs?.megapixel ?? null,
             defaultAspectRatio: resNode?.inputs?.aspect_ratio ?? null,
+            defaultNegativePrompt: meta?.defaultNegativePrompt ?? null,
+            hasModelControl: !!modelControl,
+            modelControl: modelControl ? {
+              label: modelControl.label,
+              defaultModel: modelControl.defaultModel,
+              options: modelOptions,
+            } : null,
+            hasUpscalerControls: !!upscalerControls,
+            upscalerControls,
           }
         })
     )
@@ -560,9 +638,9 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
 
 // Start a generation
 app.post('/api/generate', async (req, res) => {
-  const { workflow: workflowName, prompt, negativePrompt = '', referenceImageName, loraName, loraStrength, powerLoraUpdates, seed, megapixel, aspectRatio } = req.body
-  if (!workflowName || !prompt?.trim()) {
-    return res.status(400).json({ error: 'workflow and prompt are required' })
+  const { workflow: workflowName, prompt, negativePrompt = '', referenceImageName, loraName, loraStrength, powerLoraUpdates, seed, megapixel, aspectRatio, baseModel, upscalerResolution, grainIntensity, finalGrainIntensity } = req.body
+  if (!workflowName) {
+    return res.status(400).json({ error: 'workflow is required' })
   }
 
   try {
@@ -572,9 +650,24 @@ app.post('/api/generate', async (req, res) => {
 
     const { positiveNodeId, negativeNodeId } = detectPromptNodes(workflow, meta)
     const nodeMap = buildNodeMap(workflow)
+    const promptRequired = meta?.promptRequired ?? !!positiveNodeId
 
-    if (positiveNodeId) workflow[positiveNodeId].inputs.text = prompt
+    if (promptRequired && !prompt?.trim()) {
+      return res.status(400).json({ error: 'prompt is required for this workflow' })
+    }
+
+    if (positiveNodeId && prompt?.trim()) workflow[positiveNodeId].inputs.text = prompt
     if (negativeNodeId && negativePrompt.trim()) workflow[negativeNodeId].inputs.text = negativePrompt
+
+    const modelControl = detectModelControl(workflow, meta)
+    if (modelControl && typeof baseModel === 'string' && baseModel.trim()) {
+      const requestedModel = baseModel.trim()
+      const modelOptions = await loadModelOptions(modelControl)
+      if (!modelOptions.includes(requestedModel)) {
+        return res.status(400).json({ error: `Modelo no compatible para este workflow: ${requestedModel}` })
+      }
+      workflow[modelControl.nodeId].inputs[modelControl.input] = requestedModel
+    }
 
     // Inject reference image filename into the LoadImage node
     if (referenceImageName) {
@@ -635,8 +728,50 @@ app.post('/api/generate', async (req, res) => {
     const usedSeed = (typeof seed === 'number' && Number.isInteger(seed) && seed >= 0)
       ? seed
       : Math.floor(Math.random() * 2 ** 32)
+
+    // Inject SeedVR / film grain overrides for upscaler-style workflows
+    if (upscalerResolution != null || grainIntensity != null || finalGrainIntensity != null) {
+      let grainIndex = 0
+      let appliedResolution = null
+      for (const node of Object.values(workflow)) {
+        if (node.class_type === 'SeedVR2VideoUpscaler' && upscalerResolution != null) {
+          const maxResolution = Number(node.inputs?.max_resolution) || 4096
+          const nextResolution = Math.round(Number(upscalerResolution))
+          if (Number.isFinite(nextResolution)) {
+            node.inputs.resolution = Math.min(Math.max(nextResolution, 512), maxResolution)
+            appliedResolution = node.inputs.resolution
+          }
+        }
+        if (node.class_type === 'FastFilmGrain') {
+          const nextGrain = grainIndex === 0
+            ? Number(grainIntensity)
+            : Number(finalGrainIntensity)
+          grainIndex++
+          if (Number.isFinite(nextGrain)) {
+            node.inputs.grain_intensity = Math.min(Math.max(nextGrain, 0), 0.1)
+          }
+        }
+        if (node.class_type === 'LayerFilter: AddGrain') {
+          const nextGrain = Number(finalGrainIntensity)
+          if (Number.isFinite(nextGrain)) {
+            node.inputs.grain_power = Math.min(Math.max(nextGrain, 0), 1)
+          }
+          const resolution = appliedResolution ?? Number(node.inputs?.resolution) ?? Number(upscalerResolution) ?? 2560
+          const resolutionScale = Math.min(Math.max(resolution / 2560, 0.4), 2.5)
+          node.inputs.grain_scale = Math.round(resolutionScale * 100) / 100
+        }
+        if (node.class_type === 'ImageAddNoise') {
+          const nextGrain = Number(finalGrainIntensity)
+          if (Number.isFinite(nextGrain)) {
+            node.inputs.strength = Math.min(Math.max(nextGrain, 0), 0.2)
+          }
+          node.inputs.seed = usedSeed
+        }
+      }
+    }
+
     for (const node of Object.values(workflow)) {
-      if (['KSampler', 'KSamplerAdvanced'].includes(node.class_type) && node.inputs?.seed != null) {
+      if (['KSampler', 'KSamplerAdvanced', 'SeedVR2VideoUpscaler', 'ImageAddNoise'].includes(node.class_type) && node.inputs?.seed != null) {
         node.inputs.seed = usedSeed
       }
     }

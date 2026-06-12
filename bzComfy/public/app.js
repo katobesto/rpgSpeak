@@ -72,7 +72,7 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
 }
 function escAttr(s) {
-  return String(s).replace(/&/g,'&amp;').replace(/”/g,'&quot;').replace(/'/g,'&#39;')
+  return String(s).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')
 }
 
 function openUsersModal() {
@@ -196,6 +196,7 @@ const state = {
   // Reference image
   workflows: [],
   currentWorkflow: null,
+  appliedDefaultNegativePrompt: '',
   uploadedImageName: null,
   uploadPending: false,
   // Current displayed image (for download)
@@ -396,6 +397,12 @@ async function init() {
   el('lora-strength').addEventListener('input', () => {
     el('lora-strength-value').textContent = parseFloat(el('lora-strength').value).toFixed(2)
   })
+  el('upscaler-grain').addEventListener('input', () => {
+    el('upscaler-grain-value').textContent = parseFloat(el('upscaler-grain').value).toFixed(3)
+  })
+  el('upscaler-final-grain').addEventListener('input', () => {
+    el('upscaler-final-grain-value').textContent = parseFloat(el('upscaler-final-grain').value).toFixed(3)
+  })
   el('drop-zone').addEventListener('click', () => el('ref-image-input').click())
   el('ref-image-input').addEventListener('change', onFileSelected)
   el('ref-clear-btn').addEventListener('click', e => { e.stopPropagation(); clearRefImage() })
@@ -451,32 +458,32 @@ async function saveSettings() {
     el('comfy-start-cmd').value  = data.comfyStartCmd
     el('api-token').value        = data.apiToken
     setToken(data.apiToken)
-    flashSettingsStatus('âœ” Guardado')
+    flashSettingsStatus('Guardado')
   } catch {
-    flashSettingsStatus('âœ— Error al guardar', true)
+    flashSettingsStatus('Error al guardar', true)
   }
 }
 
 async function autoDetect() {
   const btn = el('detect-btn')
   btn.disabled = true
-  btn.textContent = 'â€¦'
+  btn.textContent = '...'
   try {
     const res  = await apiFetch('/api/detect')
     const data = await res.json()
     if (!res.ok) {
-      flashSettingsStatus(`âœ— ${data.error}`, true)
+      flashSettingsStatus(`Error: ${data.error}`, true)
       return
     }
     el('comfy-url').value       = data.comfyUrl
     el('comfy-dir').value       = data.comfyDir
     el('comfy-start-cmd').value = data.comfyStartCmd
     const msg = data.hint
-      ? `âš  ${data.hint}`
-      : 'âœ“ Detectado â€” pulsa Guardar para confirmar'
+      ? `Aviso: ${data.hint}`
+      : 'Detectado - pulsa Guardar para confirmar'
     flashSettingsStatus(msg, !!data.hint)
   } catch (err) {
-    flashSettingsStatus(`âœ— ${err.message}`, true)
+    flashSettingsStatus(`Error: ${err.message}`, true)
   } finally {
     btn.disabled = false
     btn.textContent = 'Auto-detectar'
@@ -486,18 +493,18 @@ async function autoDetect() {
 async function launchComfyUI() {
   const btn = el('launch-btn')
   btn.disabled = true
-  flashSettingsStatus('Iniciando ComfyUIâ€¦')
+  flashSettingsStatus('Iniciando ComfyUI...')
 
   try {
     const res  = await apiFetch('/api/launch', { method: 'POST' })
     const data = await res.json()
     if (!res.ok) {
-      flashSettingsStatus(`âœ— ${data.error}`, true)
+      flashSettingsStatus(`Error: ${data.error}`, true)
     } else {
-      flashSettingsStatus('âœ“ ComfyUI arrancando â€” espera unos segundos')
+      flashSettingsStatus('ComfyUI arrancando - espera unos segundos')
     }
   } catch (err) {
-    flashSettingsStatus(`âœ— ${err.message}`, true)
+    flashSettingsStatus(`Error: ${err.message}`, true)
   } finally {
     btn.disabled = false
   }
@@ -527,6 +534,9 @@ async function loadWorkflows() {
     select.innerHTML = state.workflows
       .map(w => `<option value="${w.id}">${w.label}</option>`)
       .join('')
+    if (state.workflows.some(w => w.id === 'seedvr_upscaler')) {
+      select.value = 'seedvr_upscaler'
+    }
 
     // Trigger change for initial selection
     onWorkflowChange()
@@ -541,6 +551,26 @@ function onWorkflowChange() {
   state.currentWorkflow = state.workflows.find(w => w.id === id) ?? null
   clearRefImage()
 
+  const promptRequired = state.currentWorkflow?.promptRequired !== false
+  el('prompt-field').classList.toggle('hidden', !promptRequired)
+  el('negative-prompt-field').classList.toggle('hidden', !promptRequired)
+  if (!promptRequired) {
+    el('prompt').value = ''
+    el('negative-prompt').value = ''
+    state.appliedDefaultNegativePrompt = ''
+  } else {
+    const defaultNegative = state.currentWorkflow?.defaultNegativePrompt || ''
+    const negativeInput = el('negative-prompt')
+    if (defaultNegative && (!negativeInput.value.trim() || negativeInput.value === state.appliedDefaultNegativePrompt)) {
+      negativeInput.value = defaultNegative
+      state.appliedDefaultNegativePrompt = defaultNegative
+    } else if (!defaultNegative && negativeInput.value === state.appliedDefaultNegativePrompt) {
+      negativeInput.value = ''
+      state.appliedDefaultNegativePrompt = ''
+    }
+  }
+  updateActionCopy()
+
   const refField = el('ref-image-field')
   if (state.currentWorkflow?.hasImageInput) {
     el('ref-image-label').textContent =
@@ -548,6 +578,14 @@ function onWorkflowChange() {
     refField.classList.remove('hidden')
   } else {
     refField.classList.add('hidden')
+  }
+
+  const modelField = el('model-field')
+  if (state.currentWorkflow?.hasModelControl) {
+    modelField.classList.remove('hidden')
+    initModelControl(state.currentWorkflow.modelControl)
+  } else {
+    modelField.classList.add('hidden')
   }
 
   const loraField = el('lora-field')
@@ -576,6 +614,58 @@ function onWorkflowChange() {
   } else {
     resolutionField.classList.add('hidden')
   }
+
+  const upscalerField = el('upscaler-field')
+  if (state.currentWorkflow?.hasUpscalerControls) {
+    upscalerField.classList.remove('hidden')
+    initUpscalerControls(state.currentWorkflow.upscalerControls)
+  } else {
+    upscalerField.classList.add('hidden')
+  }
+}
+
+function getActionLabel() {
+  return state.currentWorkflow?.promptRequired === false ? 'Escalar' : 'Generar'
+}
+
+function updateActionCopy() {
+  if (!state.generating) el('btn-label').textContent = getActionLabel()
+}
+
+function initModelControl(control = {}) {
+  const select = el('model-select')
+  const options = Array.isArray(control.options) ? control.options : []
+  el('model-label').textContent = control.label || 'Modelo base'
+
+  select.innerHTML = options.length
+    ? options.map(name => {
+        const selected = name === control.defaultModel ? ' selected' : ''
+        return `<option value="${escAttr(name)}"${selected}>${escHtml(name)}</option>`
+      }).join('')
+    : '<option value="">Sin modelos compatibles</option>'
+
+  if (control.defaultModel && options.includes(control.defaultModel)) {
+    select.value = control.defaultModel
+  }
+}
+
+function initUpscalerControls(controls = {}) {
+  const resolution = Number(controls.defaultResolution) || 2560
+  const maxResolution = Number(controls.maxResolution) || 4096
+  const grain = Number(controls.defaultGrainIntensity ?? 0.01)
+  const finalGrain = Number(controls.defaultFinalGrainIntensity ?? 0.015)
+
+  const resolutionInput = el('upscaler-resolution')
+  resolutionInput.max = maxResolution
+  resolutionInput.value = resolution
+
+  const grainInput = el('upscaler-grain')
+  grainInput.value = grain
+  el('upscaler-grain-value').textContent = grain.toFixed(3)
+
+  const finalGrainInput = el('upscaler-final-grain')
+  finalGrainInput.value = finalGrain
+  el('upscaler-final-grain-value').textContent = finalGrain.toFixed(3)
 }
 
 function renderPowerLoras(loras) {
@@ -669,7 +759,7 @@ function handleRefFile(file) {
   reader.readAsDataURL(file)
 
   el('ref-file-name').textContent = file.name
-  setRefStatus('Subiendoâ€¦', '')
+  setRefStatus('Subiendo...', '')
   el('drop-placeholder').classList.add('hidden')
   el('drop-preview').classList.remove('hidden')
 
@@ -688,15 +778,15 @@ async function uploadRefImage(file) {
     const data = await res.json()
 
     if (!res.ok || data.error) {
-      setRefStatus(`âœ— ${data.error || 'Error al subir'}`, 'err')
+      setRefStatus(`Error: ${data.error || 'Error al subir'}`, 'err')
       state.uploadPending = false
       return
     }
 
     state.uploadedImageName = data.name
-    setRefStatus('âœ“ Lista', 'ok')
+    setRefStatus('Lista', 'ok')
   } catch (err) {
-    setRefStatus(`âœ— ${err.message}`, 'err')
+    setRefStatus(`Error: ${err.message}`, 'err')
   } finally {
     state.uploadPending = false
   }
@@ -726,14 +816,17 @@ async function generate() {
   const workflow = el('workflow-select').value
   const prompt = el('prompt').value.trim()
   const negativePrompt = el('negative-prompt').value.trim()
+  const promptRequired = state.currentWorkflow?.promptRequired !== false
 
   if (!workflow) return showStatus('Selecciona un workflow primero.', 'error')
-  if (!prompt)   return showStatus('Escribe un prompt antes de generar.', 'error')
+  if (promptRequired && !prompt) return showStatus('Escribe un prompt antes de generar.', 'error')
 
   // Check if reference image is required and ready
   if (state.currentWorkflow?.hasImageInput) {
     if (state.uploadPending) return showStatus('Espera a que termine la subida de la imagen.', 'error')
-    if (!state.uploadedImageName) return showStatus('Este workflow necesita una imagen de referencia.', 'error')
+    if (!state.uploadedImageName) {
+      return showStatus(promptRequired ? 'Este workflow necesita una imagen de referencia.' : 'Sube una imagen para escalarla.', 'error')
+    }
   }
 
   state.previewFrames = 0
@@ -751,15 +844,21 @@ async function generate() {
   showNoPreviewHint(false)
   showProgressPanel(true)
   setProgressIndeterminate(true)
-  setNode('Enviando a ComfyUIâ€¦')
+  setNode('Enviando a ComfyUI...')
   setStep(0, 0)
 
   try {
     const seedVal = el('seed-input').value.trim()
     const parsedSeed = seedVal !== '' ? parseInt(seedVal, 10) : null
-    const body = { workflow, prompt, negativePrompt }
+    const body = { workflow }
+    if (promptRequired || prompt) body.prompt = prompt
+    if (promptRequired || negativePrompt) body.negativePrompt = negativePrompt
     if (parsedSeed !== null && !isNaN(parsedSeed)) body.seed = parsedSeed
     if (state.uploadedImageName) body.referenceImageName = state.uploadedImageName
+    if (state.currentWorkflow?.hasModelControl) {
+      const selectedModel = el('model-select').value
+      if (selectedModel) body.baseModel = selectedModel
+    }
     if (state.currentWorkflow?.hasLora) {
       const loraName = el('lora-select').value
       const loraStrength = parseFloat(el('lora-strength').value) || 1.0
@@ -782,6 +881,15 @@ async function generate() {
       const ar = el('aspect-ratio-select').value
       if (mp) body.megapixel  = mp
       if (ar) body.aspectRatio = ar
+    }
+
+    if (state.currentWorkflow?.hasUpscalerControls) {
+      const upscalerResolution = parseInt(el('upscaler-resolution').value, 10)
+      const grainIntensity = parseFloat(el('upscaler-grain').value)
+      const finalGrainIntensity = parseFloat(el('upscaler-final-grain').value)
+      if (!isNaN(upscalerResolution)) body.upscalerResolution = upscalerResolution
+      if (!isNaN(grainIntensity)) body.grainIntensity = grainIntensity
+      if (!isNaN(finalGrainIntensity)) body.finalGrainIntensity = finalGrainIntensity
     }
 
     const res = await apiFetch('/api/generate', {
@@ -826,7 +934,7 @@ function connectSSE(promptId) {
     if (state.generating) {
       setGenerating(false)
       showProgressPanel(false)
-      showStatus('ConexiÃ³n SSE perdida.', 'error')
+      showStatus('Conexion SSE perdida.', 'error')
     }
     es.close()
   }
@@ -925,12 +1033,12 @@ function finishGeneration() {
 
 async function stopGeneration() {
   const btn = el('stop-btn')
-  btn.textContent = 'â³ Parandoâ€¦'
+  btn.textContent = 'Parando...'
   btn.disabled = true
   try {
     await apiFetch('/api/stop', { method: 'POST' })
   } finally {
-    btn.textContent = 'â¹ Parar'
+    btn.textContent = 'Parar'
     btn.disabled = false
   }
 }
@@ -939,8 +1047,9 @@ function setGenerating(value) {
   state.generating = value
   state.hasProgress = false
   const btn = el('generate-btn')
+  const label = getActionLabel()
   btn.disabled = value
-  el('btn-label').textContent = value ? 'Generandoâ€¦' : 'Generar'
+  el('btn-label').textContent = value ? (label === 'Escalar' ? 'Escalando...' : 'Generando...') : label
   el('btn-spinner').classList.toggle('hidden', !value)
   el('stop-btn').classList.toggle('hidden', !value)
 }
@@ -1022,7 +1131,7 @@ function setProgressIndeterminate(on) {
 }
 
 function setNode(title) {
-  el('node-name').textContent = title || 'â€”'
+  el('node-name').textContent = title || '-'
 }
 
 function setStep(step, total) {
@@ -1035,4 +1144,3 @@ function setStep(step, total) {
 }
 
 document.addEventListener('DOMContentLoaded', init)
-

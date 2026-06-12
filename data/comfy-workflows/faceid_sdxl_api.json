@@ -2,9 +2,9 @@
   "1": {
     "class_type": "CheckpointLoaderSimple",
     "inputs": {
-      "ckpt_name": "dreamshaperXL_lightningDPMSDE.safetensors"
+      "ckpt_name": "Juggernaut-XL_v9.safetensors"
     },
-    "_meta": { "title": "Load SDXL Checkpoint" }
+    "_meta": { "title": "Juggernaut XL v9" }
   },
   "2": {
     "class_type": "CLIPTextEncode",
@@ -18,7 +18,7 @@
     "class_type": "CLIPTextEncode",
     "inputs": {
       "clip": ["1", 1],
-      "text": "ugly, deformed, noisy, blurry, low quality, watermark, text, signature, extra limbs, bad anatomy"
+      "text": "ugly, deformed, noisy, blurry, low quality, watermark, text, signature, extra limbs, bad anatomy, monochrome, grayscale, black and white, desaturated, pencil sketch, charcoal drawing"
     },
     "_meta": { "title": "Negative Prompt" }
   },
@@ -30,28 +30,19 @@
     "_meta": { "title": "Character Reference Image" }
   },
   "5": {
-    "class_type": "IPAdapterUnifiedLoaderFaceID",
+    "class_type": "easy ipadapterApply",
     "inputs": {
       "model": ["1", 0],
-      "preset": "FACEID",
-      "lora_strength": 0.6,
-      "provider": "CPU"
-    },
-    "_meta": { "title": "FaceID Loader" }
-  },
-  "6": {
-    "class_type": "IPAdapterFaceID",
-    "inputs": {
-      "model": ["5", 0],
-      "ipadapter": ["5", 1],
       "image": ["4", 0],
-      "weight": 0.85,
-      "weight_faceidv2": 1.0,
-      "weight_type": "linear",
-      "combine_embeds": "concat",
+      "preset": "FACEID PORTRAIT UNNORM - SDXL only (strong)",
+      "lora_strength": 0.0,
+      "provider": "CUDA",
+      "weight": 0.55,
+      "weight_faceidv2": 0.75,
       "start_at": 0.0,
-      "end_at": 1.0,
-      "embeds_scaling": "V only"
+      "end_at": 0.75,
+      "cache_mode": "all",
+      "use_tiled": false
     },
     "_meta": { "title": "Apply FaceID" }
   },
@@ -67,14 +58,14 @@
   "8": {
     "class_type": "KSampler",
     "inputs": {
-      "model": ["6", 0],
+      "model": ["5", 0],
       "positive": ["2", 0],
       "negative": ["3", 0],
       "latent_image": ["7", 0],
       "seed": 42,
-      "steps": 6,
-      "cfg": 2.0,
-      "sampler_name": "dpmpp_sde",
+      "steps": 30,
+      "cfg": 7.5,
+      "sampler_name": "dpmpp_2m",
       "scheduler": "karras",
       "denoise": 1.0
     },
