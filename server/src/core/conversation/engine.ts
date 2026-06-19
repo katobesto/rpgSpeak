@@ -1,4 +1,4 @@
-import type { GenerateRequest, Character, Story, Message, Conversation, MemoryEntry } from '@rpgspeak/shared';
+import type { GenerateRequest, Character, Story, Message, Conversation, MemoryEntry, PartyState } from '@rpgspeak/shared';
 import { buildContext } from './context-builder.js';
 import { trimContext } from './context-trimmer.js';
 import { createProvider } from '../llm/provider.factory.js';
@@ -49,7 +49,9 @@ export interface AffinityUpdate {
 export interface StreamOptions extends GenerateOptions {
   signal?: AbortSignal;
   onToken: (token: string) => void;
-  onDone: (response: { messageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null }) => void;
+  /** Called for each token inside a &lt;think&gt;...&lt;/think&gt; block (reasoning models). */
+  onThinkToken?: (token: string) => void;
+  onDone: (response: { messageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null; thinkContent?: string }) => void;
   onError: (error: Error) => void;
 }
 
@@ -607,6 +609,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       embeddingModel:      settings.embeddingModel,
       narrationStylePrompt,
       currentLocation:     conversation.currentLocation,
+      partyState:          (conversation.metadata as { partyState?: PartyState } | null)?.partyState,
       occurredEventIds,
     });
 
@@ -718,10 +721,51 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     });
 
     let accumulated = '';
+    let thinkAccumulated = '';
     let finalTokens = 0;
     let tokenBreakdown = { prompt: 0, completion: 0, cached: 0 };
     const startTime = Date.now();
     const { signal } = opts;
+
+    // ── <think>…</think> router ───────────────────────────────────────────────
+    // Filters reasoning blocks emitted by models like Qwen3 (via <think> tags).
+    // Content tokens go to onToken/accumulated; think tokens go to onThinkToken/
+    // thinkAccumulated. Runs at the engine level so ALL providers benefit (Ollama,
+    // LM Studio, OpenAI-compatible) without each having to implement the filter.
+    let inThink = false;
+    let thinkBoundary = '';
+
+    const routeToken = (raw: string): void => {
+      thinkBoundary += raw;
+      while (thinkBoundary.length > 0) {
+        const tag = inThink ? '</think>' : '<think>';
+        const fullIdx = thinkBoundary.indexOf(tag);
+        if (fullIdx !== -1) {
+          const before = thinkBoundary.slice(0, fullIdx);
+          thinkBoundary = thinkBoundary.slice(fullIdx + tag.length);
+          if (!inThink && before) { accumulated += before; onToken(before); }
+          if (inThink && before)  { thinkAccumulated += before; opts.onThinkToken?.(before); }
+          inThink = !inThink;
+          continue;
+        }
+        // Partial tag at end — hold it back until we know if it's a full tag.
+        let holdFrom = thinkBoundary.length;
+        for (let i = 0; i < thinkBoundary.length; i++) {
+          if (thinkBoundary[i] === '<') {
+            const tail = thinkBoundary.slice(i);
+            if (tag.startsWith(tail)) { holdFrom = i; break; }
+          }
+        }
+        const safe = thinkBoundary.slice(0, holdFrom);
+        if (safe) {
+          if (inThink) { thinkAccumulated += safe; opts.onThinkToken?.(safe); }
+          else         { accumulated += safe; onToken(safe); }
+        }
+        thinkBoundary = thinkBoundary.slice(holdFrom);
+        break;
+      }
+    };
+    // ─────────────────────────────────────────────────────────────────────────
 
     const gen = llm.stream(request);
     let iterResult = await gen.next();
@@ -740,10 +784,14 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
         });
         break;
       }
-      const token = iterResult.value as string;
-      accumulated += token;
-      onToken(token);
+      routeToken(iterResult.value as string);
       iterResult = await gen.next();
+    }
+
+    // Flush any partial tag held in the boundary buffer
+    if (thinkBoundary) {
+      if (inThink) { thinkAccumulated += thinkBoundary; opts.onThinkToken?.(thinkBoundary); }
+      else         { accumulated += thinkBoundary; onToken(thinkBoundary); }
     }
 
     if (!aborted) {
@@ -860,13 +908,14 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
         cachedTokens: tokenBreakdown.cached,
         ...(aborted ? { aborted: true } : {}),
         ...(narratorMode ? { narrator: true } : {}),
+        ...(thinkAccumulated ? { thinkContent: thinkAccumulated } : {}),
         promptMessages: trimmedMessages,
       },
     });
 
     if (!aborted) {
       convRepo.incrementCounts(conversationId, finalTokens);
-      onDone({ messageId: assistantMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, locationUpdate });
+      onDone({ messageId: assistantMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, locationUpdate, thinkContent: thinkAccumulated || undefined });
       // Fire-and-forget background tasks (non-blocking)
       updateSummaryAsync(conversationId, provider, modelId, narratorMode);
       const updatedConv = convRepo.findById(conversationId);

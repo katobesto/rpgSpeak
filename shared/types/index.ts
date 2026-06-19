@@ -293,6 +293,31 @@ export interface ConversationBackground {
   opacity?: number;
 }
 
+// ─── Party State (combate persistente) ─────────────────────────────────────
+
+export interface PartyMemberState {
+  id: string;
+  name: string;
+  hp: number;
+  maxHp: number;
+  energy: number;
+  maxEnergy: number;
+}
+
+export interface PartyInventoryItemState {
+  id: string;
+  name: string;
+  quantity: number;
+}
+
+export interface PartyState {
+  members: PartyMemberState[];
+  inventory: PartyInventoryItemState[];
+  xp: number;
+  gold: number;
+  updatedAt: string;
+}
+
 export interface BackgroundAspectRatio {
   id: string;
   label: string;

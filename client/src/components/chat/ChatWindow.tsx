@@ -9,6 +9,7 @@ import { StatsModal } from './StatsModal.tsx';
 import { ChatSearchModal } from './ChatSearchModal.tsx';
 import { ImageGalleryModal } from './ImageGalleryModal.tsx';
 import { BackgroundGeneratorModal } from './BackgroundGeneratorModal.tsx';
+import { BattleModal } from './BattleModal.tsx';
 import { useChatStore } from '../../stores/chat.store.ts';
 import { useAuthStore } from '../../stores/auth.store.ts';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -44,14 +45,15 @@ import {
   ImagePlus,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar.tsx';
-import type { Character, Story, Conversation, User, ConversationBackground } from '@rpgspeak/shared';
+import type { Character, Story, Conversation, User, ConversationBackground, PartyState } from '@rpgspeak/shared';
 
 export function ChatWindow() {
   const {
     activeConversation, setMessages, messages, setActiveConversation,
-    addMessage, updateCurrentLocation,
+    addMessage, updateCurrentLocation, sendMessage,
   } = useChatStore();
   const isAdmin = useAuthStore((s) => s.isAdmin);
+  const user = useAuthStore((s) => s.user);
   const qc = useQueryClient();
   const [activeCharacterId, setActiveCharacterId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -70,13 +72,25 @@ export function ChatWindow() {
   const [locationsModalOpen, setLocationsModalOpen] = useState(false);
   const [backgroundModalOpen, setBackgroundModalOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [battleOpen, setBattleOpen] = useState(false);
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
+  // Narration prompt queued during onBattleEnd, fired once the modal is confirmed closed
+  const [pendingNarration, setPendingNarration] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!battleOpen && pendingNarration) {
+      const prompt = pendingNarration;
+      setPendingNarration(null);
+      sendMessage({ message: prompt, forceNarratorMode: true });
+    }
+  }, [battleOpen, pendingNarration]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Close topmost open modal/panel on mobile swipe-back
   const anyModalOpen = groupPanelOpen || summaryModalOpen || statsModalOpen ||
-    contextModalOpen || galleryOpen || anchorModalOpen || locationsModalOpen || searchOpen;
+    contextModalOpen || galleryOpen || anchorModalOpen || locationsModalOpen || searchOpen || battleOpen;
   const closeTopModal = useCallback(() => {
+    if (battleOpen)         { setBattleOpen(false);         return; }
     if (searchOpen)         { setSearchOpen(false);         return; }
     if (galleryOpen)        { setGalleryOpen(false);        return; }
     if (anchorModalOpen)    { setAnchorModalOpen(false);    return; }
@@ -85,7 +99,7 @@ export function ChatWindow() {
     if (summaryModalOpen)   { setSummaryModalOpen(false);   return; }
     if (statsModalOpen)     { setStatsModalOpen(false);     return; }
     if (contextModalOpen)   { setContextModalOpen(false);   return; }
-  }, [searchOpen, galleryOpen, anchorModalOpen, locationsModalOpen,
+  }, [battleOpen, searchOpen, galleryOpen, anchorModalOpen, locationsModalOpen,
       groupPanelOpen, summaryModalOpen, statsModalOpen, contextModalOpen]);
   useBackHandler(anyModalOpen, closeTopModal);
   const messageListRef = useRef<MessageListHandle>(null);
@@ -446,6 +460,7 @@ export function ChatWindow() {
         characters={characters.length > 0 ? characters : allCharacters}
         activeCharacterId={activeCharacterId}
         onCharacterChange={handleCharacterChange}
+        onGameCommand={() => setBattleOpen(true)}
         rightSlot={
           <ContinueStoryButton
             activeCharacterId={activeCharacterId}
@@ -532,6 +547,36 @@ export function ChatWindow() {
         <BackgroundGeneratorModal
           conversationId={convId!}
           onClose={() => setBackgroundModalOpen(false)}
+        />
+      )}
+
+      {battleOpen && (
+        <BattleModal
+          characters={characters}
+          user={user}
+          partyState={activeConversation.metadata?.partyState as PartyState | undefined}
+          onClose={() => setBattleOpen(false)}
+          onBattleEnd={async (narrationPrompt, outcome, rewards) => {
+            // 1. Compact system anchor visible in chat
+            const outcomeLabel =
+              outcome === 'victory' ? '⚔️ Victoria' :
+              outcome === 'defeat'  ? '☠️ Derrota'  : '🏃 Huida';
+            const anchorLines = [outcomeLabel];
+            if (rewards.xp > 0) anchorLines.push(`+${rewards.xp} PX · +${rewards.gold} ✦`);
+            const msg = await messagesApi.create({
+              conversationId: convId!,
+              role: 'system',
+              content: anchorLines.join('\n'),
+              metadata: { isAnchor: true },
+            });
+            addMessage(msg);
+            // 2. Queue prompt — useEffect fires sendMessage once the modal is fully closed
+            setPendingNarration(narrationPrompt);
+          }}
+          onPartyStateChange={async (newPartyState) => {
+            const updated = await conversationsApi.updatePartyState(convId!, newPartyState);
+            setActiveConversation(updated);
+          }}
         />
       )}
     </div>

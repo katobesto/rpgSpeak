@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { Copy, Edit2, RefreshCw, Trash2, Check, Bug, X, Pin, Volume2, VolumeX, Loader, Wand2, Image as ImageIcon, Zap, ChevronDown, RotateCcw, Play, Square, Pause, Download, Share2, Upload } from 'lucide-react';
+import { Copy, Edit2, RefreshCw, Trash2, Check, Bug, X, Pin, Volume2, VolumeX, Loader, Wand2, Image as ImageIcon, Zap, ChevronDown, RotateCcw, Play, Square, Pause, Download, Share2, Upload, Brain } from 'lucide-react';
 import type { Message, ChatMessage } from '@rpgspeak/shared';
 import { Avatar } from '../ui/Avatar.tsx';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -362,14 +362,22 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
             </div>
           ) : (
             <>
-              {isStreaming && !message.content ? (
-                <TypingIndicator />
-              ) : (
+              {/* ThinkBlock — shown when think content is arriving or was saved */}
+              {!isUser && message.metadata?.thinkContent && (
+                <ThinkBlock
+                  content={message.metadata.thinkContent as string}
+                  isThinking={Boolean(message.metadata?.isThinking)}
+                />
+              )}
+              {/* Loading state: show Brain indicator while waiting for first token (think or content) */}
+              {isStreaming && !isUser && !message.metadata?.thinkContent && !message.content ? (
+                <GeneratingIndicator />
+              ) : message.content ? (
                 <div
                   className={`prose${isNarrator ? ' narrator-content' : ''}`}
                   dangerouslySetInnerHTML={{ __html: html || message.content }}
                 />
-              )}
+              ) : null}
               {isStreaming && message.content && (
                 <span className="inline-block w-0.5 h-4 bg-current opacity-70 animate-pulse ml-0.5 align-middle" />
               )}
@@ -856,12 +864,65 @@ function ActionButton({ icon: Icon, onClick, title, danger = false, spin = false
   );
 }
 
-function TypingIndicator() {
+function GeneratingIndicator() {
   return (
-    <div className="flex gap-1 items-center py-1">
-      <span className="typing-dot" />
-      <span className="typing-dot" />
-      <span className="typing-dot" />
+    <div className="flex items-center gap-2 py-1.5">
+      <Brain size={15} className="text-accent animate-brain-spin opacity-80" />
+      <span className="flex gap-1">
+        <span className="think-dot" />
+        <span className="think-dot" />
+        <span className="think-dot" />
+      </span>
+    </div>
+  );
+}
+
+function ThinkBlock({ content, isThinking }: { content: string; isThinking: boolean }) {
+  const [open, setOpen] = useState(false);
+
+  React.useEffect(() => {
+    if (!isThinking) setOpen(false);
+  }, [isThinking]);
+
+  // ── Active streaming: full-width content, grows naturally, no scroll ──
+  if (isThinking) {
+    return (
+      <div className="mb-3 pl-3 border-l-2 border-accent text-xs">
+        <div className="flex items-center gap-1.5 mb-1.5">
+          <Brain size={11} className="text-accent animate-brain-spin flex-shrink-0" />
+          <span className="text-accent font-medium tracking-wide">Razonando</span>
+          <span className="flex gap-1 ml-0.5">
+            <span className="think-dot" style={{ width: 5, height: 5 }} />
+            <span className="think-dot" style={{ width: 5, height: 5 }} />
+            <span className="think-dot" style={{ width: 5, height: 5 }} />
+          </span>
+        </div>
+        <div className="text-text-muted leading-relaxed whitespace-pre-wrap opacity-70">
+          {content}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Done: just a subtle Brain icon, expand on click ──
+  return (
+    <div className="mb-2">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title={open ? 'Ocultar razonamiento' : 'Ver razonamiento'}
+        className="flex items-center gap-1 opacity-30 hover:opacity-60 transition-opacity"
+      >
+        <Brain size={12} className={open ? 'text-accent' : 'text-text-muted'} />
+        <ChevronDown
+          size={10}
+          className={`text-text-muted transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+      {open && (
+        <div className="mt-1.5 pl-3 border-l border-border text-xs text-text-muted leading-relaxed whitespace-pre-wrap opacity-70">
+          {content}
+        </div>
+      )}
     </div>
   );
 }

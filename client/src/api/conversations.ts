@@ -1,5 +1,5 @@
 import { api } from './client.ts';
-import type { Conversation, Message, CreateConversationDto, UpdateConversationDto, CreateMessageDto } from '@rpgspeak/shared';
+import type { Conversation, Message, CreateConversationDto, UpdateConversationDto, CreateMessageDto, PartyState } from '@rpgspeak/shared';
 
 // Extended update type that includes group management fields the server accepts
 type UpdateConversationExtended = UpdateConversationDto & {
@@ -33,6 +33,8 @@ export const conversationsApi = {
     api.patch<{ affinity: number }>(`/conversations/${convId}/characters/${charId}/affinity`, { affinity }),
   updateLocation: (convId: string, location: string | null) =>
     api.patch<{ location: string | null }>(`/conversations/${convId}/location`, { location }),
+  updatePartyState: (convId: string, partyState: PartyState) =>
+    api.patch<Conversation>(`/conversations/${convId}/party-state`, partyState),
 };
 
 export const messagesApi = {

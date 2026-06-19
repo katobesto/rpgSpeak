@@ -12,7 +12,7 @@
         0
       ],
       "positive": [
-        "105",
+        "175",
         0
       ],
       "negative": [
@@ -45,6 +45,29 @@
       "title": "🧬  VAE Decode"
     }
   },
+  "9": {
+    "inputs": {
+      "filename_prefix": "Z-Image",
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "SaveImage",
+    "_meta": {
+      "title": "💾  Save RAW  Image"
+    }
+  },
+  "16": {
+    "inputs": {
+      "unet_name": "z_image_turbo_bf16.safetensors",
+      "weight_dtype": "default"
+    },
+    "class_type": "UNETLoader",
+    "_meta": {
+      "title": "🗂️  Load Diffusion Model"
+    }
+  },
   "17": {
     "inputs": {
       "vae_name": "ae.safetensors"
@@ -68,7 +91,7 @@
   "28": {
     "inputs": {
       "megapixel": "2.0",
-      "aspect_ratio": "5:7 (Balanced Portrait)",
+      "aspect_ratio": "9:7 (Artful Horizon)",
       "divisible_by": "64",
       "custom_ratio": false,
       "custom_aspect_ratio": "1:1"
@@ -98,7 +121,7 @@
   "39": {
     "inputs": {
       "anything": [
-        "52",
+        "8",
         0
       ]
     },
@@ -125,17 +148,17 @@
         "type": "PowerLoraLoaderHeaderWidget"
       },
       "lora_1": {
-        "on": true,
+        "on": false,
         "lora": "Z-Image\\(ZIT)_CinematicShot.safetensors",
         "strength": 0.55
       },
       "lora_2": {
-        "on": true,
+        "on": false,
         "lora": "Z-Image\\(ZIT)_Asian2Caucasian_Slider.safetensors",
         "strength": 1
       },
       "lora_3": {
-        "on": true,
+        "on": false,
         "lora": "Z-Image\\(ZIT)_AfterDark_v2.safetensors",
         "strength": 0.7
       },
@@ -184,6 +207,36 @@
       "title": "↕️  Calculated Resolution"
     }
   },
+  "68": {
+    "inputs": {
+      "rgthree_comparer": {
+        "images": [
+          {
+            "name": "A",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_pqbzf_00017_.png&type=temp&subfolder=&rand=0.45782550353672913"
+          },
+          {
+            "name": "B",
+            "selected": true,
+            "url": "/api/view?filename=rgthree.compare._temp_pqbzf_00018_.png&type=temp&subfolder=&rand=0.6793445496688328"
+          }
+        ]
+      },
+      "image_a": [
+        "243:241",
+        0
+      ],
+      "image_b": [
+        "52",
+        0
+      ]
+    },
+    "class_type": "Image Comparer (rgthree)",
+    "_meta": {
+      "title": "🆚  Compare (Detailer Image vs. Pre-Defined Image)"
+    }
+  },
   "84": {
     "inputs": {
       "model_name": "sam_vit_b_01ec64.pth",
@@ -197,9 +250,9 @@
   "91": {
     "inputs": {
       "upscale_method": "lanczos",
-      "scale_by": 0.6,
+      "scale_by": 0.8,
       "image": [
-        "99",
+        "243:241",
         0
       ]
     },
@@ -211,11 +264,11 @@
   "92": {
     "inputs": {
       "model": "seedvr2_ema_7b-Q4_K_M.gguf",
-      "device": "cuda:0",
+      "device": "mps",
       "blocks_to_swap": 0,
       "swap_io_components": false,
-      "offload_device": "cpu",
-      "cache_model": false,
+      "offload_device": "mps",
+      "cache_model": true,
       "attention_mode": "sdpa"
     },
     "class_type": "SeedVR2LoadDiTModel",
@@ -226,7 +279,7 @@
   "93": {
     "inputs": {
       "model": "ema_vae_fp16.safetensors",
-      "device": "cuda:0",
+      "device": "mps",
       "encode_tiled": true,
       "encode_tile_size": 1024,
       "encode_tile_overlap": 128,
@@ -234,8 +287,8 @@
       "decode_tile_size": 1024,
       "decode_tile_overlap": 128,
       "tile_debug": "false",
-      "offload_device": "cpu",
-      "cache_model": false
+      "offload_device": "mps",
+      "cache_model": true
     },
     "class_type": "SeedVR2LoadVAEModel",
     "_meta": {
@@ -244,9 +297,9 @@
   },
   "94": {
     "inputs": {
-      "seed": 2135717241,
+      "seed": 3638370519,
       "resolution": 2560,
-      "max_resolution": 4096,
+      "max_resolution": 4080,
       "batch_size": 1,
       "uniform_batch_size": false,
       "color_correction": "lab",
@@ -254,7 +307,7 @@
       "prepend_frames": 0,
       "input_noise_scale": 0,
       "latent_noise_scale": 0,
-      "offload_device": "cpu",
+      "offload_device": "mps",
       "enable_debug": false,
       "image": [
         "91",
@@ -274,64 +327,11 @@
       "title": "⬆️  SeedVR2 Upscaler"
     }
   },
-  "96": {
-    "inputs": {
-      "strength": 0.5,
-      "use_gpu": false,
-      "images": [
-        "94",
-        0
-      ]
-    },
-    "class_type": "FastUnsharpSharpen",
-    "_meta": {
-      "title": "🎯 Fast Unsharp Sharpen"
-    }
-  },
-  "97": {
-    "inputs": {
-      "grain_intensity": 0.01,
-      "saturation_mix": 0.2,
-      "batch_size": 4,
-      "images": [
-        "96",
-        0
-      ]
-    },
-    "class_type": "FastFilmGrain",
-    "_meta": {
-      "title": "🎞️ Fast Film Grain"
-    }
-  },
-  "98": {
-    "inputs": {
-      "anything": [
-        "243:241",
-        0
-      ]
-    },
-    "class_type": "easy cleanGpuUsed",
-    "_meta": {
-      "title": "🧹  Clean VRAM"
-    }
-  },
-  "99": {
-    "inputs": {
-      "anything": [
-        "98",
-        0
-      ]
-    },
-    "class_type": "easy clearCacheAll",
-    "_meta": {
-      "title": "🧹  Clear Cache"
-    }
-  },
   "100": {
     "inputs": {
-      "filename_prefix": "final",
+      "filename_prefix": "Z-Image",
       "images": [
-        "97",
+        "94",
         0
       ]
     },
@@ -353,29 +353,9 @@
       "title": "➖  Negative Prompt (not used!)"
     }
   },
-  "105": {
-    "inputs": {
-      "randomize_percent": 35,
-      "strength": 20,
-      "noise_insert": "noise on beginning steps",
-      "steps_switchover_percent": 20,
-      "seed": 313940183571246,
-      "mask_starts_at": "beginning",
-      "mask_percent": 0,
-      "log_to_console": false,
-      "conditioning": [
-        "175",
-        0
-      ]
-    },
-    "class_type": "SeedVarianceEnhancer",
-    "_meta": {
-      "title": "🌱  Seed Variance Enhancer"
-    }
-  },
   "109": {
     "inputs": {
-      "Enable 🌱  Seed Variance Enhancer": true
+      "Enable 🌱  Seed Variance Enhancer": false
     },
     "class_type": "FastNodeBypasser",
     "_meta": {
@@ -384,7 +364,7 @@
   },
   "175": {
     "inputs": {
-      "text": "a in the center, Elara, a hauntingly beautiful vampire princess with ethereal pale complexion, high cheekbones, sharp aristocratic jawline, captivating violet eyes, full crimson lips with a hint of fangs, long flowing black hair interwoven with silver threads, tall and slender, wearing semi transparent nightgown, her vagina can be seen with some hair on it, high collar, a silver tiara on her brow, standing and extending her hand forward with a vulnerable yet regal expression, a faint, genuine smile, her other hand resting at her side, fingers slightly curled, warm candlelight casting dramatic chiaroscuro across her face and gown, ancient stone walls and a heavy wooden table in the background, dancing shadows from flickering candles, faint mist swirling at her feet, opulent yet melancholic atmosphere, cinematic composition, shallow depth of field, soft golden light illuminating her extended hand and eyes, dark corners receding into black, epic photographic realism. ",
+      "text": "cinematic photography, dimly lit rustic tavern interior, wooden beams, stone fireplace with dying embers, flickering candlelight on worn tables, a window showing distant crimson glow on horizon, tense atmosphere, | in the center, Meira, demihuman cat woman, nude, youthful sensual body, lithe feline figure, long silky hair, cat ears on head, green feline eyes with slit pupils, playful mischievous smirk, slender cat tail curling behind her, arms slightly raised as if sniffing the air, delighted expression, standing near the tavern door | on the left, Lala, slender elf archer, nude, small breasts, graceful lithe physique, blonde hair, large green eyes with hint of caution, light freckles on cheeks, pretty smile turned wary, both hands on her hips in a defiant stance, wooden longbow strapped across her back, one foot forward, alert pose | on the right, Elara, ancient vampire princess, nude, pale alabaster skin, luminous violet eyes with calculating gaze, long midnight silk hair flowing over shoulders, regal aristocratic features, faint enigmatic smile, standing tall with commanding presence, one hand resting on her hip, looking toward the window with predatory grace, shadows pooling around her | moody chiaroscuro lighting, warm firelight contrasting cool blue moonlight and crimson glow, soft shadows, high detail, intricate textures, hyper-realistic fantasy portrait, masterpiece, 8k resolution, ethereal yet tense nocturnal ambiance, sensual and eerie atmosphere",
       "clip": [
         "43",
         1
@@ -399,7 +379,7 @@
     "inputs": {
       "shift": 3,
       "model": [
-        "245",
+        "16",
         0
       ]
     },
@@ -430,12 +410,56 @@
   },
   "245": {
     "inputs": {
-      "unet_name": "z_image_turbo_bf16.safetensors",
-      "weight_dtype": "default"
+      "images": [
+        "94",
+        0
+      ]
     },
-    "class_type": "UNETLoader",
+    "class_type": "PreviewImage",
     "_meta": {
-      "title": "🗂️  Load Diffusion Model"
+      "title": "Vista previa de imagen"
+    }
+  },
+  "246": {
+    "inputs": {
+      "compare_view": {
+        "__value__": [
+          "",
+          ""
+        ]
+      },
+      "image_a": [
+        "94",
+        0
+      ]
+    },
+    "class_type": "ImageCompare",
+    "_meta": {
+      "title": "Comparar Imágenes"
+    }
+  },
+  "247": {
+    "inputs": {
+      "compare_view": {
+        "beforeImages": [
+          "/api/view?filename=comfy.compare.a_temp_yzbcp_00001_.png&subfolder=&type=temp&rand=0.8276781806457154"
+        ],
+        "afterImages": [
+          "/api/view?filename=comfy.compare.b_temp_yzbcp_00001_.png&subfolder=&type=temp&rand=0.8276781806457154"
+        ]
+      },
+      "image_a": [
+        "52",
+        0
+      ],
+      "image_b": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "ImageCompare",
+    "_meta": {
+      "title": "Comparar Imágenes"
     }
   },
   "240:238": {
@@ -452,7 +476,7 @@
       "guide_size": 512,
       "guide_size_for": false,
       "max_size": 1024,
-      "seed": 473513377779931,
+      "seed": 380476910734587,
       "steps": [
         "244",
         0
@@ -485,7 +509,7 @@
         0
       ],
       "model": [
-        "245",
+        "16",
         0
       ],
       "clip": [
@@ -532,7 +556,7 @@
       "guide_size": 512,
       "guide_size_for": false,
       "max_size": 1024,
-      "seed": 242391031090704,
+      "seed": 995187575453981,
       "steps": [
         "244",
         0
@@ -565,7 +589,7 @@
         0
       ],
       "model": [
-        "245",
+        "16",
         0
       ],
       "clip": [
@@ -603,7 +627,7 @@
       "guide_size": 512,
       "guide_size_for": false,
       "max_size": 1024,
-      "seed": 667418962489239,
+      "seed": 383813605319974,
       "steps": [
         "244",
         0
@@ -636,7 +660,7 @@
         0
       ],
       "model": [
-        "245",
+        "16",
         0
       ],
       "clip": [

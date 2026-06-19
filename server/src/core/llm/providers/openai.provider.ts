@@ -23,11 +23,33 @@ export class OpenAIProvider implements LLMProvider {
     return h;
   }
 
+  // LM Studio's Jinja chat templates only tolerate one 'system' message at
+  // position 0 followed by strict user/assistant alternation. Our context
+  // builder injects several 'system'-role footer blocks (scene coherence,
+  // memories, affinity…) as separate messages — those cause the template to
+  // throw "No user query found in messages."
+  //
+  // Fix: for lmstudio, merge all system messages into one at position 0.
+  // Non-system messages keep their original relative order; content is unchanged.
+  private normalizeMessages(messages: { role: string; content: string }[]): typeof messages {
+    if (this.type !== 'lmstudio') return messages;
+
+    const systemParts: string[] = [];
+    const nonSystem: typeof messages = [];
+    for (const msg of messages) {
+      if (msg.role === 'system') systemParts.push(msg.content);
+      else nonSystem.push(msg);
+    }
+
+    if (systemParts.length <= 1) return messages;
+    return [{ role: 'system', content: systemParts.join('\n\n---\n\n') }, ...nonSystem];
+  }
+
   private buildBody(request: GenerateRequest, stream: boolean) {
     const reasoning = request.reasoning?.enabled;
     return {
       model: request.model ?? '',
-      messages: request.messages,
+      messages: this.normalizeMessages(request.messages),
       stream,
       // Thinking mode (e.g. DeepSeek V4) ignores temperature/top_p/penalties anyway,
       // but omit them so the intent is explicit and providers don't warn about them.
@@ -144,110 +166,83 @@ export class OpenAIProvider implements LLMProvider {
     let totalContent = '';
     let usage = { prompt: 0, completion: 0, total: 0, cached: 0 };
 
-    // Filter <think>...</think> blocks emitted by reasoning models (e.g. Qwen3).
-    // Key insight: only hold back from a '<' that could still become '<think>' or
-    // '</think>'. Normal text with no '<' is always yielded immediately, so there
-    // is zero lag for non-thinking models.
-    let inThink = false;
-    let boundary = ''; // tiny buffer — only holds a partial tag candidate
+    // LM Studio (and some other providers) expose reasoning content via
+    // delta.reasoning_content instead of embedding <think> tags in delta.content.
+    // We wrap it in synthetic <think>…</think> so engine.ts routeToken can handle it
+    // identically to providers that do embed the tags (e.g. DeepSeek via Ollama).
+    let reasoningOpen = false;
 
-    const filterToken = (token: string): string => {
-      boundary += token;
-      let out = '';
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-      while (boundary.length > 0) {
-        const tag = inThink ? '</think>' : '<think>';
+      sseBuffer += decoder.decode(value, { stream: true });
+      const lines = sseBuffer.split('\n');
+      sseBuffer = lines.pop() ?? '';
 
-        const fullIdx = boundary.indexOf(tag);
-        if (fullIdx !== -1) {
-          // Complete tag found
-          if (!inThink) out += boundary.slice(0, fullIdx); // text before <think>
-          boundary = boundary.slice(fullIdx + tag.length);
-          inThink = !inThink;
-          continue; // re-process remainder
-        }
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') continue;
 
-        // No complete tag — find the leftmost '<' whose tail could still become
-        // the target tag. Everything before that '<' is safe to emit.
-        let holdFrom = boundary.length; // default: hold nothing back
-        for (let i = 0; i < boundary.length; i++) {
-          if (boundary[i] === '<') {
-            const tail = boundary.slice(i);
-            if (tag.startsWith(tail)) { // partial match — must wait
-              holdFrom = i;
-              break;
-            }
-          }
-        }
-
-        if (!inThink) out += boundary.slice(0, holdFrom);
-        boundary = boundary.slice(holdFrom);
-        break;
-      }
-
-      return out;
-    };
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        sseBuffer += decoder.decode(value, { stream: true });
-        const lines = sseBuffer.split('\n');
-        sseBuffer = lines.pop() ?? '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') continue;
-
-          try {
-            const chunk = JSON.parse(data) as {
-              choices: Array<{ delta: { content?: string }; finish_reason?: string }>;
-              usage?: {
-                prompt_tokens: number;
-                completion_tokens: number;
-                total_tokens: number;
-                prompt_tokens_details?: { cached_tokens?: number };
-                prompt_cache_hit_tokens?: number;
-              };
+        try {
+          const chunk = JSON.parse(data) as {
+            choices: Array<{ delta: { content?: string; reasoning_content?: string }; finish_reason?: string }>;
+            usage?: {
+              prompt_tokens: number;
+              completion_tokens: number;
+              total_tokens: number;
+              prompt_tokens_details?: { cached_tokens?: number };
+              prompt_cache_hit_tokens?: number;
             };
-            const token = chunk.choices?.[0]?.delta?.content;
-            if (token) {
-              totalContent += token;
-              const output = filterToken(token);
-              if (output) yield output;
+          };
+
+          const delta = chunk.choices?.[0]?.delta;
+
+          // Reasoning/thinking content (LM Studio, some OpenRouter models)
+          const reasoningToken = delta?.reasoning_content;
+          if (reasoningToken) {
+            if (!reasoningOpen) {
+              reasoningOpen = true;
+              yield '<think>';
             }
-            if (chunk.usage) {
-              const cu = chunk.usage;
-              usage = {
-                prompt: cu.prompt_tokens,
-                completion: cu.completion_tokens,
-                total: cu.total_tokens,
-                cached:
-                  cu.prompt_tokens_details?.cached_tokens ??
-                  cu.prompt_cache_hit_tokens ??
-                  0,
-              };
-            }
-          } catch {
-            // skip malformed chunk
+            yield reasoningToken;
           }
+
+          // Regular content — close any open <think> block first
+          const token = delta?.content;
+          if (token) {
+            if (reasoningOpen) {
+              reasoningOpen = false;
+              yield '</think>';
+            }
+            totalContent += token;
+            yield token;
+          }
+
+          if (chunk.usage) {
+            const cu = chunk.usage;
+            usage = {
+              prompt: cu.prompt_tokens,
+              completion: cu.completion_tokens,
+              total: cu.total_tokens,
+              cached:
+                cu.prompt_tokens_details?.cached_tokens ??
+                cu.prompt_cache_hit_tokens ??
+                0,
+            };
+          }
+        } catch {
+          // skip malformed chunk
         }
       }
-    } finally {
-      // nothing to clean up
     }
 
-    // Flush any remaining boundary buffer (only if not inside a think block)
-    if (!inThink && boundary) yield boundary;
-
-    // Strip any think blocks from the full accumulated content for the saved message
-    const cleanContent = totalContent.replace(/<think>[\s\S]*?<\/think>/g, '').trimStart();
+    // Flush unclosed reasoning block (model stopped mid-think)
+    if (reasoningOpen) yield '</think>';
 
     return {
-      content: cleanContent,
+      content: totalContent,
       model: request.model ?? '',
       tokens: { prompt: usage.prompt, completion: usage.completion, total: usage.total, cached: usage.cached },
       finishReason: 'stop',

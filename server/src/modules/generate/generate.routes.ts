@@ -184,8 +184,9 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       overrides,
       signal: abortController.signal,
       onToken: (token) => send({ type: 'token', token }),
-      onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate }) => {
-        send({ type: 'done', messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate });
+      onThinkToken: (token) => send({ type: 'think', token }),
+      onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent }) => {
+        send({ type: 'done', messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent });
         reply.raw.end();
       },
       onError: (error) => {

@@ -178,18 +178,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
         overrides: Object.keys(mergedOverrides).length > 0 ? mergedOverrides : undefined,
       },
       {
+        onThinkToken: (token) => {
+          set((s) => ({
+            messages: s.messages.map((m) =>
+              m.id === placeholderId
+                ? {
+                    ...m,
+                    metadata: {
+                      ...m.metadata,
+                      isThinking: true,
+                      thinkContent: ((m.metadata?.thinkContent as string) || '') + token,
+                    },
+                  }
+                : m
+            ),
+          }));
+        },
         onToken: (token) => {
           set((s) => {
             const newContent = s.streamingContent + token;
             return {
               streamingContent: newContent,
               messages: s.messages.map((m) =>
-                m.id === placeholderId ? { ...m, content: newContent } : m
+                m.id === placeholderId
+                  ? {
+                      ...m,
+                      content: newContent,
+                      metadata: { ...m.metadata, isThinking: false },
+                    }
+                  : m
               ),
             };
           });
         },
-        onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate }) => {
+        onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent }) => {
           set((s) => ({
             isStreaming: false,
             streamingContent: '',
@@ -208,6 +230,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     characterId: characterId !== undefined ? characterId : m.characterId,
                     metadata: {
                       isStreaming: false,
+                      isThinking: false,
                       // narrator flag — drives styling in MessageItem
                       ...(narrator ? { narrator: true } : {}),
                       ...(tokenBreakdown ? {
@@ -218,6 +241,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                       ...(promptMessages?.length ? { promptMessages } : {}),
                       ...(fastLlmDebug ? { fastLlmDebug } : {}),
                       ...(affinityUpdates?.length ? { affinityUpdates } : {}),
+                      ...(thinkContent ? { thinkContent } : {}),
                     },
                   }
                 : m

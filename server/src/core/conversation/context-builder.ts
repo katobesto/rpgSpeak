@@ -1,4 +1,4 @@
-import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem } from '@rpgspeak/shared';
+import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem, PartyState } from '@rpgspeak/shared';
 import { MemoryRepository } from '../memory/memory.repository.js';
 import { ContextRepository, type ContextItemWithEmbedding } from '../../modules/context/context.repository.js';
 import { ProviderRepository } from '../../modules/providers/provider.repository.js';
@@ -39,6 +39,8 @@ export interface BuildContextOptions {
   narrationStylePrompt?: string;
   /** Current scene location — injected as a spatial-coherence block with [UBICACION:...] instruction */
   currentLocation?: string | null;
+  /** Persisted party HP/energy + shared inventory from the battle minigame — informational only */
+  partyState?: PartyState;
   /** IDs de eventos de historia (persistentEvents) ya ocurridos en esta conversación.
    *  Los eventos con trigger no ocurridos se inyectan como "trama pendiente" (destinos). */
   occurredEventIds?: Set<string>;
@@ -47,6 +49,18 @@ export interface BuildContextOptions {
 // ── Aviso de aventura para modo personaje individual (sin narrador) ─────────
 const ADVENTURE_CONTEXT_NOTICE = `## Contexto de aventura activa
 Eres consciente de tu ficha RPG (stats, habilidades, inventario). Actúa de forma coherente con ellos en situaciones de combate, reto o tensión. Antes de hablar, describe brevemente entre paréntesis tu acción o gesto físico en tercera persona.`;
+
+// ── Formato de acciones y gestos ─────────────────────────────────────────────
+// Instrucción estática: garantiza que las descripciones de gestos y acciones
+// físicas vayan siempre en tercera persona, incluso en modo personaje (donde
+// el diálogo va en primera persona). Cacheada junto con el bloque de personaje.
+const GESTURE_FORMAT_INSTRUCTION =
+  `## Formato de acciones y gestos físicos\n` +
+  `Cuando incluyas descripciones de acciones o gestos (entre asteriscos, paréntesis o como narración entre turnos de diálogo), escríbelas siempre en TERCERA PERSONA, nunca en primera:\n` +
+  `- ✗ INCORRECTO: *me acaricio el pelo mirándote a los ojos y sonrío de forma pícara*\n` +
+  `- ✓ CORRECTO: *se acaricia el pelo mirándote a los ojos y sonríe de forma pícara*\n` +
+  `El diálogo hablado (lo que el personaje dice en voz alta) sí va en primera persona.\n` +
+  `Si el personaje describe acciones del jugador/usuario, también en tercera persona ("se acerca", "alza la vista", "te toma de la mano").`;
 
 // ── Bloque de coherencia de escena — inyectado en todos los modos ───────────
 // Consolida en UN solo mensaje de sistema las reglas de coherencia espacial
@@ -81,6 +95,35 @@ function buildSceneCoherenceBlock(currentLocation: string | null | undefined): s
     `reutiliza lo último que se dijo.`;
 
   return `## COHERENCIA DE ESCENA — REGLAS ABSOLUTAS\n\n${locationPart}\n\n${objectsPart}`;
+}
+
+// ── Estado del grupo (combate) — persistido desde el minijuego de combate ───
+//
+// Informa al modelo del HP/energía actuales del grupo y del inventario
+// compartido tras el último combate. Es un bloque puramente informativo:
+// el modelo NO debe gestionarlo ni mutarlo — la única fuente de verdad es
+// el BattleModal, que persiste los cambios vía API.
+function buildPartyStateBlock(partyState: PartyState | undefined): string | null {
+  if (!partyState || partyState.members.length === 0) return null;
+
+  const memberLines = partyState.members.map((m) => {
+    const status = m.hp <= 0 ? ' (caído)' : '';
+    return `- ${m.name}: ${Math.max(0, m.hp)}/${m.maxHp} PV, ${Math.max(0, m.energy)}/${m.maxEnergy} EN${status}`;
+  });
+
+  const availableItems = partyState.inventory.filter((i) => i.quantity > 0);
+  const inventoryLine = availableItems.length > 0
+    ? availableItems.map((i) => `${i.name} x${i.quantity}`).join(', ')
+    : 'vacío';
+
+  return (
+    `## Estado del grupo (combate)\n\n` +
+    `${memberLines.join('\n')}\n\n` +
+    `Inventario compartido: ${inventoryLine}\n\n` +
+    `Esta información es de referencia: refleja el resultado del último combate y se actualiza ` +
+    `automáticamente desde el minijuego. No la modifiques ni la gestiones — úsala solo para mantener ` +
+    `la coherencia narrativa (heridas, cansancio, objetos disponibles).`
+  );
 }
 
 /**
@@ -128,6 +171,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     embeddingModel,
     narrationStylePrompt,
     currentLocation,
+    partyState,
     occurredEventIds = new Set<string>(),
   } = opts;
 
@@ -200,6 +244,10 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     if (responseFormatPrompt?.trim()) {
       systemParts.push(responseFormatPrompt.trim());
     }
+
+    // Instrucción estática de formato de gestos — siempre al final del bloque
+    // de personaje para máxima autoridad sobre la descripción base del char.
+    systemParts.push(GESTURE_FORMAT_INSTRUCTION);
   }
 
   // ── Affinity + consent directive — built here, injected LATE (see below) ────
@@ -254,9 +302,11 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   }
   // ─────────────────────────────────────────────────────────────────────────────
 
-  // Active story contexts (sorted by priority)
+  // Active story contexts (sorted by priority).
+  // buildStoryBlock is purely static — no dynamic params — so the system message
+  // remains cacheable across turns even as events occur or location changes.
   for (const story of stories) {
-    const storyBlock = buildStoryBlock(story, occurredEventIds, currentLocation);
+    const storyBlock = buildStoryBlock(story);
     if (storyBlock) systemParts.push(storyBlock);
   }
 
@@ -273,11 +323,6 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     ? memRepo.findByConversation(conversationId)
     : memRepo.findByConversation(conversationId, character?.id);
   const allMemories = rawMemories.slice(0, MAX_MEMORIES);
-
-  // If no configurable injection prompt, fall back to appending a basic block to the system prompt
-  if (allMemories.length > 0 && !memoryInjectionPrompt?.trim()) {
-    systemParts.push(buildMemoryBlock(allMemories, charNameMap));
-  }
 
   // Example dialogue (injected as few-shot examples if present, single-char mode only)
   const fewShot: ChatMessage[] = [];
@@ -359,26 +404,32 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // Injection order (furthest → closest to the generation point):
   //   1. Context index      — world-state background knowledge
   //   2. Pending plot events — script destinations (changes only when an event fires)
-  //   3. Memories           — character-specific past events, may include emotional coloring
-  //   4. Scene coherence    — location + established objects (one consolidated block)
-  //   5. Affinity block     — current relationship state + consent rules (changes often)
-  //   6. Narration style    — user preference for verbosity
-  //   7. Summary            — "Historia hasta ahora" (rolling, changes every ~6 messages)
-  //   8. [Last user msg]    ← generation starts here
+  //   3. Party state        — combat HP/energy/inventory snapshot (changes only after battles)
+  //   4. Occurred story events — triggered events that already happened in this conv
+  //   5. Memories           — character-specific past events, may include emotional coloring
+  //   6. Scene coherence    — location + established objects (one consolidated block)
+  //   7. Affinity block     — current relationship state + consent rules (changes often)
+  //   8. Narration style    — user preference for verbosity
+  //   9. Summary            — "Historia hasta ahora" (rolling, changes every ~6 messages)
+  //  10. [Last user msg]    ← generation starts here
   //
   // Ordered so that the blocks most likely to change between consecutive turns
   // (affinity, summary, last message) sit closest to the end. This keeps the
   // longest possible common prefix stable across turns, maximizing KV-cache reuse.
-  // Keeping these OUT of the first SYSTEM message means the large static prefix
-  // (character prompt + stories) can be fully reused by the KV cache across turns,
-  // even when affinity values or memory sets change.
+  //
+  // IMPORTANT: The first SYSTEM message (character prompt + stories) MUST be fully
+  // static — no per-conversation dynamic data. This is the only part that benefits
+  // from the LLM's prefix KV-cache across turns. Occurred events, current location,
+  // and memories are all injected HERE (footer) so they never pollute that static
+  // prefix and cause needless cache misses.
 
   // Scene coherence (location + objects) is injected in all modes — the narrator
   // needs the current location just as much as a single character.
-  const sceneCoherenceBlock = buildSceneCoherenceBlock(currentLocation);
-  const pendingEventsBlock  = buildPendingEventsBlock(stories, occurredEventIds);
+  const sceneCoherenceBlock   = buildSceneCoherenceBlock(currentLocation);
+  const pendingEventsBlock    = buildPendingEventsBlock(stories, occurredEventIds);
+  const occurredEventsBlock   = buildOccurredEventsBlock(stories, occurredEventIds);
+  const partyStateBlock       = buildPartyStateBlock(partyState);
 
-  const shouldInjectMemories = allMemories.length > 0 && memoryInjectionPrompt?.trim();
   const needsSplit = true; // sceneCoherenceBlock is always injected, so the split always applies
   const historyBody = needsSplit ? trimmedMessages.slice(0, -1) : trimmedMessages;
   const lastMessage = needsSplit ? trimmedMessages[trimmedMessages.length - 1] : null;
@@ -402,21 +453,36 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     footerCount++;
   }
 
-  // 3. Memories (character-specific state)
-  if (shouldInjectMemories && lastMessage) {
-    const injectionBlock = buildMemoryInjectionBlock(allMemories, charNameMap, memoryInjectionPrompt!);
-    console.log(`[memory] Injecting ${allMemories.length} memories for conv ${conversationId} (${charNameMap.size} chars)`);
-    history.push({ role: 'system', content: injectionBlock });
+  // 3. Party state (combat HP/energy/inventory) — changes only after a battle resolves.
+  if (partyStateBlock) {
+    history.push({ role: 'system', content: partyStateBlock });
     footerCount++;
-  } else if (allMemories.length > 0) {
-    console.log(`[memory] Skipped injection — memories: ${allMemories.length}, prompt set: ${Boolean(memoryInjectionPrompt?.trim())}`);
   }
 
-  // 4. Scene coherence anchor — location + established objects in one block.
+  // 4. Occurred story events — triggered events that have already happened in this
+  // conversation. Moved OUT of the static system message (where they invalidated
+  // the prefix cache every time an event fired) into the footer.
+  if (occurredEventsBlock) {
+    history.push({ role: 'system', content: occurredEventsBlock });
+    footerCount++;
+  }
+
+  // 5. Memories — always injected in footer (never in system message) to keep the
+  // static prefix cache-stable. Uses template if configured, plain block otherwise.
+  if (allMemories.length > 0) {
+    const memBlock = memoryInjectionPrompt?.trim()
+      ? buildMemoryInjectionBlock(allMemories, charNameMap, memoryInjectionPrompt!)
+      : buildMemoryBlock(allMemories, charNameMap);
+    console.log(`[memory] Injecting ${allMemories.length} memories for conv ${conversationId} (${charNameMap.size} chars, template: ${Boolean(memoryInjectionPrompt?.trim())})`);
+    history.push({ role: 'system', content: memBlock });
+    footerCount++;
+  }
+
+  // 6. Scene coherence anchor — location + established objects in one block.
   history.push({ role: 'system', content: sceneCoherenceBlock });
   footerCount++;
 
-  // 5. Affinity + consent directive — placed AFTER scene coherence because
+  // 7. Affinity + consent directive — placed AFTER scene coherence because
   // affinity values can change every turn; keeping the more static coherence
   // block earlier preserves more of the cacheable prefix.
   if (affinityBlock && needsSplit) {
@@ -424,13 +490,13 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     footerCount++;
   }
 
-  // 6. Narration style directive (user preference — overrides default verbosity)
+  // 8. Narration style directive (user preference — overrides default verbosity)
   if (narrationStylePrompt?.trim() && needsSplit) {
     history.push({ role: 'system', content: narrationStylePrompt.trim() });
     footerCount++;
   }
 
-  // 7. Rolling summary ("Historia hasta ahora") — changes every ~6 messages, kept
+  // 9. Rolling summary ("Historia hasta ahora") — changes every ~6 messages, kept
   // close to the generation point so its periodic changes don't invalidate the
   // cache for the conversation history and earlier directive blocks.
   if (summary?.trim()) {
@@ -438,7 +504,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     footerCount++;
   }
 
-  // 8. Last user message (generation point)
+  // 10. Last user message (generation point)
   if (needsSplit && lastMessage) {
     history.push({ role: lastMessage.role, content: lastMessage.content });
     footerCount++;
@@ -502,11 +568,16 @@ function buildCharacterBlock(char: Character): string {
   return parts.join('\n\n');
 }
 
-function buildStoryBlock(
-  story: Story,
-  occurredEventIds: Set<string>,
-  currentLocation?: string | null,
-): string {
+// Purely static — no per-conversation dynamic data (no occurredEventIds, no
+// currentLocation). This lets the KV-cache reuse this block across ALL turns of
+// the same conversation without ever invalidating it.
+//   · Events WITHOUT trigger → background world facts, shown here as "Key Events"
+//   · Events WITH trigger    → handled dynamically in the footer:
+//       - pending  → buildPendingEventsBlock
+//       - occurred → buildOccurredEventsBlock
+//   · Locations → shown in full (no proximity filtering); current-location context
+//     is provided by the sceneCoherenceBlock footer block.
+function buildStoryBlock(story: Story): string {
   const hasContent =
     story.globalContext.trim() || story.worldLore.trim() || story.narrativeRules.trim() ||
     story.persistentEvents.length > 0 || (story.locations?.length ?? 0) > 0;
@@ -530,13 +601,9 @@ function buildStoryBlock(
     parts.push(`## Restrictions\n${story.behaviorRestrictions.map((r) => `- ${r}`).join('\n')}`);
   }
 
-  // Eventos: tres categorías según trigger + estado por conversación.
-  //   · Sin trigger              → hechos de trasfondo, van aquí como "Key Events" (comportamiento clásico)
-  //   · Con trigger, ya ocurrido → hechos del pasado de ESTA conversación, van aquí en pasado
-  //   · Con trigger, pendiente   → destino narrativo, va en el bloque "Trama pendiente" del footer (no aquí)
-  const factEvents = story.persistentEvents.filter(
-    (e) => !e.trigger.trim() && !occurredEventIds.has(e.id),
-  );
+  // Background facts: events WITHOUT a trigger. Always shown as world truths.
+  // Events WITH a trigger are handled in the footer (pending or occurred blocks).
+  const factEvents = story.persistentEvents.filter((e) => !e.trigger.trim());
   if (factEvents.length > 0) {
     const events = factEvents
       .sort((a, b) => b.importance - a.importance)
@@ -546,20 +613,8 @@ function buildStoryBlock(
     parts.push(`## Key Events\n${events}`);
   }
 
-  const occurredEvents = story.persistentEvents.filter((e) => occurredEventIds.has(e.id));
-  if (occurredEvents.length > 0) {
-    const events = occurredEvents
-      .map((e) => `- [${e.title}]: ${e.description}`)
-      .join('\n');
-    parts.push(
-      `## Eventos del guión ya ocurridos en esta conversación\n` +
-      `Estos eventos YA SUCEDIERON narrativamente. Son hechos del pasado: trátalos como ` +
-      `parte de la historia vivida, no los repitas ni los narres de nuevo como novedad.\n${events}`,
-    );
-  }
-
   if (story.locations && story.locations.length > 0) {
-    parts.push(buildLocationsSection(story, currentLocation));
+    parts.push(buildLocationsSection(story));
   }
 
   if (Object.keys(story.stateVariables).length > 0) {
@@ -572,31 +627,20 @@ function buildStoryBlock(
   return parts.join('\n\n');
 }
 
-// ── Ubicaciones de historia: proximidad + mundo abierto/cerrado ──────────────
+// ── Ubicaciones de historia — lista completa (estática) ──────────────────────
 //
-// Si conocemos la ubicación actual y coincide con una del mapa, se detallan solo
-// la actual y sus adyacentes (conectadas por "exits"); el resto aparece como
-// lista de nombres. Esto ahorra tokens y concentra la atención del modelo en
-// donde está la escena. Si no hay coincidencia, se detallan todas (fallback).
+// Muestra TODAS las ubicaciones con detalle completo. La ubicación actual se
+// comunica por el sceneCoherenceBlock del footer (dinámico), no aquí. Esto
+// mantiene el sistema de ubicaciones completamente estático para el caché KV.
 //
 // story.openWorld controla la regla: mapa cerrado (el narrador no inventa
 // lugares) vs mundo abierto (puede crear lugares nuevos coherentes y debe
 // registrarlos con [UBICACION:...]).
-function buildLocationsSection(story: Story, currentLocation?: string | null): string {
+function buildLocationsSection(story: Story): string {
   const locs = story.locations;
-  const norm = (s: string) => s.trim().toLowerCase();
 
-  let current: (typeof locs)[number] | null = null;
-  if (currentLocation?.trim()) {
-    const cur = norm(currentLocation);
-    current =
-      locs.find((l) => norm(l.name) === cur) ??
-      locs.find((l) => cur.includes(norm(l.name)) || norm(l.name).includes(cur)) ??
-      null;
-  }
-
-  const renderLoc = (loc: (typeof locs)[number], marker = '') => {
-    const locParts = [`### ${loc.name}${marker}`];
+  const renderLoc = (loc: (typeof locs)[number]) => {
+    const locParts = [`### ${loc.name}`];
     if (loc.description.trim()) locParts.push(loc.description.trim());
     if (loc.contents.trim())    locParts.push(`**Contenido:** ${loc.contents.trim()}`);
     if (loc.exits.trim())       locParts.push(`**Salidas:** ${loc.exits.trim()}`);
@@ -604,28 +648,7 @@ function buildLocationsSection(story: Story, currentLocation?: string | null): s
     return locParts.join('\n');
   };
 
-  let body: string;
-  if (current) {
-    // Adyacentes: aparecen en las salidas de la actual, o sus salidas mencionan la actual
-    const adjacent = locs.filter(
-      (l) =>
-        l.id !== current!.id &&
-        (norm(current!.exits).includes(norm(l.name)) || norm(l.exits).includes(norm(current!.name))),
-    );
-    const detailedIds = new Set([current.id, ...adjacent.map((l) => l.id)]);
-    const others = locs.filter((l) => !detailedIds.has(l.id));
-
-    const sections = [
-      renderLoc(current, ' ← UBICACIÓN ACTUAL'),
-      ...adjacent.map((l) => renderLoc(l, ' (conectada)')),
-    ];
-    if (others.length > 0) {
-      sections.push(`### Otros lugares de esta historia\n${others.map((l) => `- ${l.name}`).join('\n')}`);
-    }
-    body = sections.join('\n\n');
-  } else {
-    body = locs.map((l) => renderLoc(l)).join('\n\n');
-  }
+  const body = locs.map((l) => renderLoc(l)).join('\n\n');
 
   const rule = story.openWorld
     ? `Las siguientes ubicaciones existen en esta historia. Prefiérelas al narrar. ` +
@@ -671,6 +694,28 @@ function buildPendingEventsBlock(stories: Story[], occurredEventIds: Set<string>
     `- Cuando narres efectivamente uno de estos eventos, añade al final de tu respuesta (línea separada):\n` +
     `[EVENTO_OCURRIDO:título exacto del evento]\n` +
     `- No emitas esa etiqueta si el evento aún no ha sucedido en tu narración`
+  );
+}
+
+// ── Eventos de guión ya ocurridos — bloque dinámico del footer ───────────────
+//
+// Eventos CON trigger que ya se dispararon en esta conversación. Se inyectan en
+// el footer (no en el mensaje de sistema estático) para que su aparición
+// progresiva no invalide el caché KV del prefijo estático.
+function buildOccurredEventsBlock(stories: Story[], occurredEventIds: Set<string>): string | null {
+  const occurred = stories.flatMap((s) =>
+    s.persistentEvents.filter((e) => e.trigger.trim() && occurredEventIds.has(e.id)),
+  );
+  if (occurred.length === 0) return null;
+
+  const lines = occurred
+    .map((e) => `- [${e.title}]: ${e.description}`)
+    .join('\n');
+
+  return (
+    `## Eventos del guión ya ocurridos en esta conversación\n` +
+    `Estos eventos YA SUCEDIERON narrativamente. Son hechos del pasado: trátalos como ` +
+    `parte de la historia vivida, no los repitas ni los narres de nuevo como novedad.\n${lines}`
   );
 }
 
