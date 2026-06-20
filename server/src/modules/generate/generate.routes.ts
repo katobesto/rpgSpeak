@@ -1025,6 +1025,49 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
     }
   });
 
+  // POST /generate/upload-background-image — sube una imagen externa a la galería de fondos
+  // Mismo flujo que la generación por IA pero sin prompt: guarda el archivo en disco y
+  // añade una entrada BackgroundImage a conversation.metadata.backgroundGallery.
+  app.post('/upload-background-image', async (req, reply) => {
+    const { conversationId } = req.query as { conversationId?: string };
+    if (!conversationId) throw new ValidationError('conversationId es requerido como query param');
+
+    const fileData = await req.file();
+    if (!fileData) throw new ValidationError('No se recibió ningún archivo');
+
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowed.includes(fileData.mimetype)) {
+      throw new ValidationError('Tipo de archivo no permitido. Usa JPG, PNG, WebP o GIF.');
+    }
+
+    const buffer = await fileData.toBuffer();
+    if (buffer.length > 20 * 1024 * 1024) {
+      throw new ValidationError('La imagen no puede superar 20 MB.');
+    }
+
+    const convRepo = new ConversationRepository();
+    const conversation = convRepo.findById(conversationId);
+    if (!conversation) throw new NotFoundError('Conversation', conversationId);
+
+    const bgDir = path.join(PROJECT_ROOT, 'data', 'images', 'backgrounds', conversationId);
+    fs.mkdirSync(bgDir, { recursive: true });
+
+    const ext = path.extname(fileData.filename).toLowerCase() || '.png';
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const savedFilename = `bg_upload_${id}${ext}`;
+    fs.writeFileSync(path.join(bgDir, savedFilename), buffer);
+    const url = `/images/backgrounds/${conversationId}/${savedFilename}`;
+
+    // width/height desconocidos en subidas manuales (informativos; la galería usa CSS).
+    const entry: BackgroundImage = { id, url, prompt: '', width: 0, height: 0, createdAt: new Date().toISOString() };
+
+    const meta = (conversation.metadata ?? {}) as Record<string, unknown>;
+    const gallery = Array.isArray(meta.backgroundGallery) ? meta.backgroundGallery as BackgroundImage[] : [];
+    const updated = convRepo.update(conversationId, { metadata: { ...meta, backgroundGallery: [...gallery, entry] } });
+
+    return reply.send({ success: true, data: updated });
+  });
+
   // DELETE /generate/background-image — removes an image from the gallery (and disk)
   app.delete('/background-image', async (req, reply) => {
     const { conversationId, id } = z.object({

@@ -207,6 +207,22 @@ export const generateApi = {
       { messageId },
     ),
 
+  /** Sube una imagen externa a la galería de fondos de la conversación. */
+  uploadBackgroundImage: async (conversationId: string, file: File): Promise<Conversation> => {
+    const form = new FormData();
+    form.append('image', file);
+    const resp = await fetch(
+      `/api/generate/upload-background-image?conversationId=${encodeURIComponent(conversationId)}`,
+      { method: 'POST', headers: { ...getAuthHeader() }, body: form },
+    );
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({})) as Record<string, unknown>;
+      throw new Error(String(err.error ?? err.message ?? 'Error al subir el fondo'));
+    }
+    const data = await resp.json() as { success: boolean; data: Conversation };
+    return data.data;
+  },
+
   /** Removes a background from the conversation's gallery (and disk). */
   deleteBackgroundImage: (conversationId: string, id: string) =>
     api.deleteWithBody<Conversation>('/generate/background-image', { conversationId, id }),

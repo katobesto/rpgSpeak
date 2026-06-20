@@ -1,9 +1,9 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, type ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   X, Wand2, Loader, Image as ImageIcon, Trash2, Check, ImagePlus,
-  SlidersHorizontal, EyeOff,
+  SlidersHorizontal, EyeOff, Upload,
 } from 'lucide-react';
 import { generateApi, streamBackgroundImage } from '../../api/generate.ts';
 import { settingsApi } from '../../api/settings.ts';
@@ -84,6 +84,27 @@ export function BackgroundGeneratorModal({ conversationId, onClose }: Background
 
   // ── Gallery / active background actions ──────────────────────────────────
   const [galleryBusyId, setGalleryBusyId] = useState<string | null>(null);
+
+  // ── Subida manual de fondos ───────────────────────────────────────────────
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement>(null);
+
+  async function handleUpload(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permite re-subir el mismo archivo
+    if (!file) return;
+    setUploading(true);
+    setUploadError(null);
+    try {
+      const updated = await generateApi.uploadBackgroundImage(conversationId, file);
+      setActiveConversation(updated);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Error al subir la imagen');
+    } finally {
+      setUploading(false);
+    }
+  }
 
   const finalPrompt = (enhancedPrompt || rawPrompt).trim();
 
@@ -401,11 +422,31 @@ export function BackgroundGeneratorModal({ conversationId, onClose }: Background
 
           {/* Gallery */}
           <section className="space-y-2 border-t border-border pt-4">
-            <p className="text-xs font-semibold text-text-secondary">
-              Galería de fondos{gallery.length > 0 ? ` (${gallery.length})` : ''}
-            </p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold text-text-secondary">
+                Galería de fondos{gallery.length > 0 ? ` (${gallery.length})` : ''}
+              </p>
+              <button
+                onClick={() => uploadInputRef.current?.click()}
+                disabled={uploading}
+                className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[11px] border border-border text-text-secondary hover:text-text-primary hover:bg-white/5 transition-colors disabled:opacity-50"
+                title="Subir una imagen desde tu dispositivo"
+              >
+                {uploading
+                  ? <><Loader size={12} className="animate-spin" /> Subiendo…</>
+                  : <><Upload size={12} /> Subir fondo</>}
+              </button>
+              <input
+                ref={uploadInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                className="hidden"
+                onChange={handleUpload}
+              />
+            </div>
+            {uploadError && <p className="text-[11px] text-red-400">{uploadError}</p>}
             {gallery.length === 0 ? (
-              <p className="text-xs text-text-muted italic">Aún no hay fondos generados.</p>
+              <p className="text-xs text-text-muted italic">Aún no hay fondos. Genera uno con IA o sube el tuyo.</p>
             ) : (
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {gallery.map((img) => {
