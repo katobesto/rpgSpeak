@@ -49,6 +49,46 @@ export interface BuildContextOptions {
 const ADVENTURE_CONTEXT_NOTICE = `## Contexto de aventura activa
 Eres consciente de tu ficha RPG (stats, habilidades, inventario). Actúa de forma coherente con ellos en situaciones de combate, reto o tensión. Antes de hablar, describe brevemente entre paréntesis tu acción o gesto físico en tercera persona.`;
 
+// ── Identidad del jugador — candado anti-confusión ───────────────────────────
+// El nombre del usuario pertenece EXCLUSIVAMENTE al jugador (la persona real).
+// Bloquea dos fallos observados: (1) un personaje apropiándose del nombre del
+// jugador ("me llamaste Javier"), y (2) confundir quién dijo o hizo algo entre
+// jugador y personaje. Estático por conversación → cache-safe.
+function buildUserIdentityBlock(name: string): string {
+  return (
+    `## IDENTIDAD DEL JUGADOR — REGLA ABSOLUTA E INVIOLABLE\n` +
+    `El usuario (la persona real que juega) se llama **${name}**. Ese nombre pertenece EXCLUSIVAMENTE al jugador.\n` +
+    `- Ningún personaje, PNJ ni el propio narrador lleva, adopta ni comparte el nombre ${name}: es solo del jugador.\n` +
+    `- Dirígete SIEMPRE al jugador en segunda persona ("tú", "te", "tu"). Los personajes pueden llamarlo ${name} cuando le hablan, pero NUNCA se aplican ese nombre a sí mismos.\n` +
+    `- PROHIBIDO atribuir al jugador palabras, gestos o decisiones de un personaje, o viceversa. El jugador es "tú"; cada personaje se nombra por su propio nombre. No confundas quién es quién.`
+  );
+}
+
+// ── Identidad de personajes — candado anti-mezcla (modo narrador) ─────────────
+// Impide que el modelo transfiera atributos (nombre, raza/especie, oficio,
+// apariencia, voz, historia) de un personaje a otro cuando hay varios en escena.
+// Se inyecta SIEMPRE, junto a los bloques de ficha, blindando también las
+// conversaciones cuyo narratorPrompt en BD es antiguo y no incluye estas reglas.
+const CHARACTER_IDENTITY_LOCK =
+  `### IDENTIDAD DE CADA PERSONAJE — REGLA ABSOLUTA E INVIOLABLE\n` +
+  `Cada personaje presente en la escena es una identidad CERRADA e INDEPENDIENTE. Su nombre, raza o especie, oficio o profesión, apariencia, forma de hablar, habilidades, historia y relaciones le pertenecen SOLO a él.\n` +
+  `- PROHIBIDO mezclar, intercambiar, heredar o transferir rasgos de un personaje a otro. Ejemplo: si una es cazarrecompensas humana y otra es arquera elfa, la primera JAMÁS se describe ni se refiere a sí misma como elfa ni como arquera, y viceversa.\n` +
+  `- Antes de hacer hablar o actuar a un personaje, localiza SU bloque de ficha y confirma quién es, qué es y a qué se dedica. Usa únicamente los datos de ESE bloque.\n` +
+  `- Un personaje nunca asume el oficio, la raza, las habilidades ni el pasado de otro, ni por error ni para encajar mejor en la escena.\n` +
+  `- Cada voz se mantiene separada: el vocabulario y el tono de un personaje son su firma y no se contagian a los demás.`;
+
+// ── Identidad del personaje activo — candado anti-mezcla (modo personaje) ─────
+// En modo personaje individual, blinda al personaje que habla para que no absorba
+// rasgos de los "otros personajes presentes" listados como contexto.
+function buildSingleIdentityLock(activeName: string): string {
+  return (
+    `### TU IDENTIDAD ES SOLO TUYA — REGLA ABSOLUTA\n` +
+    `Eres **${activeName}** y nadie más. Los demás personajes que aparezcan en el contexto son OTRAS personas: su nombre, raza, oficio, apariencia, voz e historia les pertenecen a ELLOS, no a ti.\n` +
+    `- PROHIBIDO adoptar, mezclar o atribuirte rasgos de otro personaje. No te describas con la profesión, la raza ni las habilidades de otro.\n` +
+    `- Si dudas de quién eres, vuelve a tu propia ficha: solo esos datos te definen.`
+  );
+}
+
 // ── Formato de acciones y gestos ─────────────────────────────────────────────
 // Instrucción estática: garantiza que las descripciones de gestos y acciones
 // físicas vayan siempre en tercera persona, incluso en modo personaje (donde
@@ -179,9 +219,10 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     systemParts.push(globalSystemPrompt.trim());
   }
 
-  // Inyectar nombre del usuario para que el personaje lo use en sus respuestas
+  // Identidad del jugador — candado anti-confusión. El nombre del usuario es SOLO
+  // suyo: ningún personaje puede apropiárselo ni intercambiar su rol con el jugador.
   if (userDisplayName?.trim()) {
-    systemParts.push(`Recuerda que el usuario se llama ${userDisplayName.trim()}, y que es uno más en la interacción.`);
+    systemParts.push(buildUserIdentityBlock(userDisplayName.trim()));
   }
 
   // NOTE: affinity directive is injected AFTER the character block (see below),
@@ -195,14 +236,22 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     // cierre con "¿Qué haces?" — que se puede añadir directamente al narratorPrompt.
     const allChars = character ? [character, ...groupCharacters] : groupCharacters;
     const charBlocks = allChars.map((c) => buildCharacterBlock(c)).filter(Boolean);
+    // Delimitador visual fuerte entre fichas para que el modelo no funda
+    // identidades cuando hay varios personajes en escena.
+    const CHAR_DELIM = '═══════════════════════════════';
     const charSection = charBlocks.length > 0
-      ? `## Personajes presentes en la escena:\n\n${charBlocks.join('\n\n')}`
+      ? `## Personajes presentes en la escena\n\n` +
+        charBlocks.map((b) => `${CHAR_DELIM}\n${b}`).join('\n\n') +
+        `\n${CHAR_DELIM}`
       : '';
     const basePrompt = narratorPrompt?.trim() ?? '';
     const fullNarrPrompt = basePrompt.includes('{{PERSONAJES}}')
       ? basePrompt.replace('{{PERSONAJES}}', charSection)
       : [basePrompt, charSection].filter(Boolean).join('\n\n');
     if (fullNarrPrompt.trim()) systemParts.push(fullNarrPrompt);
+    // Candado de identidad como parte separada → máxima autoridad (pegado a las
+    // fichas, cerca del punto de generación) y visible/localizable en el debug.
+    if (charBlocks.length > 0) systemParts.push(CHARACTER_IDENTITY_LOCK);
 
   } else {
     // Single character definition
@@ -215,7 +264,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
 
     // Other group characters
     if (groupCharacters.length > 0) {
-      const otherParts: string[] = ['## Otros personajes presentes en la escena:'];
+      const otherParts: string[] = ['## Otros personajes presentes en la escena (NO eres tú):'];
       for (const c of groupCharacters) {
         // Include full description — truncating to 120 chars loses too much character context
         const desc = c.description.trim();
@@ -226,6 +275,8 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
         otherParts.push(block);
       }
       systemParts.push(otherParts.join('\n\n'));
+      // Candado: el personaje activo no debe absorber rasgos de los anteriores.
+      systemParts.push(buildSingleIdentityLock(character.name));
     }
 
     if (responseFormatPrompt?.trim()) {

@@ -936,39 +936,63 @@ const ROLE_STYLES: Record<string, { label: string; badge: string; border: string
 interface PromptGroup {
   title: string;
   hint?: string;
+  /** Procedencia del bloque: ruta de la constante en código (inyectado fijo) o
+   *  el ajuste editable que lo genera. Se muestra como badge en la cabecera. */
+  source?: string;
   items: ChatMessage[];
   defaultOpen?: boolean;
 }
 
-function classifyHeaderPart(content: string): { title: string; hint?: string } {
+// Etiquetas de procedencia. Los bloques "en código" son constantes fijas que NO
+// se pueden editar desde Ajustes; el badge indica el archivo y la constante.
+const SRC_CODE = 'core/conversation/context-builder.ts';
+
+function classifyHeaderPart(content: string): { title: string; hint?: string; source?: string } {
   const c = content.trim();
+
+  // ── Blindajes inyectados en código (no editables en Ajustes) ───────────────
+  if (/^## IDENTIDAD DEL JUGADOR/.test(c))
+    return { title: 'Identidad del jugador', hint: 'Blinda el nombre del jugador y el trato en 2ª persona', source: `${SRC_CODE} › buildUserIdentityBlock()` };
+  if (/^### IDENTIDAD DE CADA PERSONAJE/.test(c))
+    return { title: 'Candado de identidad de personajes', hint: 'Impide mezclar rasgos entre personajes (narrador)', source: `${SRC_CODE} › CHARACTER_IDENTITY_LOCK` };
+  if (/^### TU IDENTIDAD ES SOLO TUYA/.test(c))
+    return { title: 'Candado de identidad (personaje activo)', hint: 'Evita que el personaje absorba rasgos de otros', source: `${SRC_CODE} › buildSingleIdentityLock()` };
+  if (/^## Formato de acciones y gestos/.test(c))
+    return { title: 'Formato de gestos (3ª persona)', source: `${SRC_CODE} › GESTURE_FORMAT_INSTRUCTION` };
+  if (/^## Contexto de aventura activa/.test(c))
+    return { title: 'Aviso de aventura', source: `${SRC_CODE} › ADVENTURE_CONTEXT_NOTICE` };
+
+  // ── Personajes y lore ──────────────────────────────────────────────────────
   if (/^# Character:/.test(c)) {
     const m = c.match(/^# Character:\s*(.+)/);
     return { title: `Personaje${m ? `: ${m[1]}` : ''}` };
   }
   if (/^## Personajes en la aventura/.test(c)) return { title: 'Personajes (Game Master)' };
+  if (/^# Narrador/.test(c)) return { title: 'Prompt de Narrador (+ personajes en escena)', source: 'Ajustes › Generación › narratorPrompt' };
   if (/^## Personajes presentes en la escena/.test(c)) return { title: 'Personajes (Narrador)' };
   if (/^## Otros personajes presentes/.test(c)) return { title: 'Otros personajes del grupo' };
-  if (/^## Contexto de aventura activa/.test(c)) return { title: 'Aviso de aventura' };
   if (/^# Story Context:/.test(c)) {
     const m = c.match(/^# Story Context:\s*(.+)/);
     return { title: `Lore / Historia${m ? `: ${m[1]}` : ''}` };
   }
   if (/^## Memorias activas/.test(c)) return { title: 'Memorias activas (bloque básico)' };
-  if (/^Recuerda que el usuario se llama/.test(c)) return { title: 'Nombre del usuario' };
   if (c.startsWith('[Example conversations:]')) return { title: 'Ejemplos de diálogo (few-shot)' };
+
+  // ── Prompts editables en Ajustes ───────────────────────────────────────────
+  if (/^## Principios narrativos fundamentales/.test(c)) return { title: 'Principios narrativos (global)', source: 'Ajustes › Generación › globalSystemPrompt' };
+  if (/^## Profundidad y credibilidad/.test(c)) return { title: 'Formato de respuesta (personaje)', source: 'Ajustes › Generación › responseFormatPrompt' };
   return { title: 'Prompt de sistema global / personaje', hint: 'Incluye el prompt global, formato de respuesta y/o instrucciones del personaje' };
 }
 
-function classifyFooterPart(content: string): string {
+function classifyFooterPart(content: string): { title: string; source?: string } {
   const c = content.trim();
-  if (/^## Historia hasta ahora/.test(c)) return 'Resumen de sucesos';
-  if (/^## Índice de contexto/.test(c)) return 'Índice de Contexto';
-  if (/^## UBICACIÓN/.test(c)) return 'Coherencia espacial (ubicación)';
-  if (/^## COHERENCIA DE OBJETOS/.test(c)) return 'Coherencia de objetos';
-  if (/ESTADO EMOCIONAL ACTUAL/.test(c)) return 'Afinidad / estado emocional';
-  if (/^## Hechos establecidos|memoria/i.test(c)) return 'Memorias inyectadas';
-  return 'Estilo de narración / directiva adicional';
+  if (/^## Historia hasta ahora/.test(c)) return { title: 'Resumen de sucesos' };
+  if (/^## Índice de contexto/.test(c)) return { title: 'Índice de Contexto', source: 'Ajustes › Generación › contextIndexInjectionPrompt' };
+  if (/^## UBICACIÓN/.test(c)) return { title: 'Coherencia espacial (ubicación)', source: `${SRC_CODE} › buildSceneCoherenceBlock()` };
+  if (/^## COHERENCIA DE OBJETOS/.test(c)) return { title: 'Coherencia de objetos', source: SRC_CODE };
+  if (/ESTADO EMOCIONAL ACTUAL/.test(c)) return { title: 'Afinidad / estado emocional', source: `${SRC_CODE} (+ Ajustes › affinitySystemPrompt)` };
+  if (/^## Hechos establecidos|memoria/i.test(c)) return { title: 'Memorias inyectadas', source: 'Ajustes › Generación › memoryInjectionPrompt' };
+  return { title: 'Estilo de narración / directiva adicional' };
 }
 
 function groupPromptMessages(messages: ChatMessage[]): PromptGroup[] {
@@ -982,8 +1006,8 @@ function groupPromptMessages(messages: ChatMessage[]): PromptGroup[] {
     const parts = messages[0].content.split('\n\n---\n\n');
     for (const part of parts) {
       if (!part.trim()) continue;
-      const { title, hint } = classifyHeaderPart(part);
-      groups.push({ title, hint, items: [{ role: 'system', content: part }] });
+      const { title, hint, source } = classifyHeaderPart(part);
+      groups.push({ title, hint, source, items: [{ role: 'system', content: part }] });
     }
     i = 1;
   }
@@ -1003,7 +1027,8 @@ function groupPromptMessages(messages: ChatMessage[]): PromptGroup[] {
     const m = messages[i];
     if (m.role === 'system') {
       flushConv();
-      groups.push({ title: classifyFooterPart(m.content), items: [m] });
+      const { title, source } = classifyFooterPart(m.content);
+      groups.push({ title, source, items: [m] });
     } else {
       convBuffer.push(m);
     }
@@ -1016,18 +1041,34 @@ function PromptAccordionGroup({ group, defaultOpen }: { group: PromptGroup; defa
   const [open, setOpen] = useState(defaultOpen);
   const chars = group.items.reduce((sum, m) => sum + m.content.length, 0);
 
+  const isCode = group.source?.includes('context-builder.ts');
+
   return (
     <div className="rounded-lg border border-border overflow-hidden">
       <button
         onClick={() => setOpen((o) => !o)}
-        className="w-full flex items-center gap-2 px-3 py-2 bg-surface-2 hover:bg-white/5 transition-colors text-left"
+        className="w-full flex flex-col gap-1 px-3 py-2 bg-surface-2 hover:bg-white/5 transition-colors text-left"
       >
-        <ChevronDown size={13} className={`text-text-muted shrink-0 transition-transform ${open ? '' : '-rotate-90'}`} />
-        <span className="text-xs font-medium text-text-primary">{group.title}</span>
-        {group.hint && <span className="text-[10px] text-text-muted hidden sm:inline">— {group.hint}</span>}
-        <span className="text-[11px] text-text-muted ml-auto shrink-0">
-          {group.items.length > 1 ? `${group.items.length} msgs · ` : ''}{chars.toLocaleString()} chars
-        </span>
+        <div className="w-full flex items-center gap-2">
+          <ChevronDown size={13} className={`text-text-muted shrink-0 transition-transform ${open ? '' : '-rotate-90'}`} />
+          <span className="text-xs font-medium text-text-primary">{group.title}</span>
+          {group.hint && <span className="text-[10px] text-text-muted hidden sm:inline">— {group.hint}</span>}
+          <span className="text-[11px] text-text-muted ml-auto shrink-0">
+            {group.items.length > 1 ? `${group.items.length} msgs · ` : ''}{chars.toLocaleString()} chars
+          </span>
+        </div>
+        {group.source && (
+          <span
+            className={`ml-5 inline-flex items-center gap-1 self-start text-[9px] font-mono px-1.5 py-0.5 rounded border max-w-full truncate ${
+              isCode
+                ? 'text-amber-300/90 bg-amber-500/10 border-amber-500/20'
+                : 'text-sky-300/90 bg-sky-500/10 border-sky-500/20'
+            }`}
+            title={group.source}
+          >
+            {isCode ? '⟨código⟩' : '⚙ ajustes'} {group.source}
+          </span>
+        )}
       </button>
       {open && (
         <div className="p-2 space-y-2">
