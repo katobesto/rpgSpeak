@@ -598,7 +598,6 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       affinitySystemPrompt: settings.affinitySystemPrompt,
       responseFormatPrompt: settings.responseFormatPrompt,
       narratorPrompt: settings.narratorPrompt,
-      adventurePrompt: settings.adventurePrompt,
       fastLlmEnabled: useFastLlm,
       memoryInjectionPrompt: settings.memoryInjectionPrompt,
       contextIndexInjectionEnabled:  settings.contextIndexInjectionEnabled,

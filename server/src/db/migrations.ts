@@ -473,6 +473,9 @@ export function runMigrations(db: Db): void {
     ],
   };
 
+  // adventurePrompt was removed — the RPG mechanics it described had no real backing system
+  db.run(sql`DELETE FROM settings WHERE key = 'adventurePrompt'`);
+
   for (const [key, pairs] of Object.entries(PROMPT_FIXES)) {
     const row = db.get<{ value: string }>(sql`SELECT value FROM settings WHERE key = ${key}`);
     if (!row?.value) continue;

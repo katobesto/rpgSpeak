@@ -381,7 +381,6 @@ export interface AppSettings {
   globalSystemPrompt: string;
   responseFormatPrompt: string;
   narratorPrompt: string;
-  adventurePrompt: string;
   affinitySystemPrompt: string;
   contextStrategy: 'rolling' | 'summary' | 'hybrid';
   maxContextMessages: number;

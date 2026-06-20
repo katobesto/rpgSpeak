@@ -64,6 +64,7 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
   const activeConversation = useChatStore((s) => s.activeConversation);
   const removeMessage = useChatStore((s) => s.removeMessage);
   const updateMessage = useChatStore((s) => s.updateMessage);
+  const regenerate = useChatStore((s) => s.regenerate);
 
   // Poll while any image in the array is pending (waiting for 4K final)
   React.useEffect(() => {
@@ -419,7 +420,12 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
               <ActionButton icon={Bug} onClick={() => setShowPrompt(true)} title="Debug prompt" />
             )}
             {!isUser && (
-              <ActionButton icon={RefreshCw} onClick={() => {}} title="Regenerate" />
+              <ActionButton
+                icon={RefreshCw}
+                onClick={() => regenerate(message.id, message.characterId)}
+                title="Regenerar respuesta"
+                disabled={isStreaming}
+              />
             )}
             {!isUser && !isError && (
               <>
@@ -846,14 +852,15 @@ function TtsPlayerBar({ messageId, text, voiceId, speed, temperature, replacemen
   );
 }
 
-function ActionButton({ icon: Icon, onClick, title, danger = false, spin = false }: {
-  icon: React.ElementType; onClick: () => void; title: string; danger?: boolean; spin?: boolean;
+function ActionButton({ icon: Icon, onClick, title, danger = false, spin = false, disabled = false }: {
+  icon: React.ElementType; onClick: () => void; title: string; danger?: boolean; spin?: boolean; disabled?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
       title={title}
-      className={`p-1 rounded transition-colors ${
+      disabled={disabled}
+      className={`p-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
         danger
           ? 'hover:bg-red-500/10 text-text-muted hover:text-red-400'
           : 'hover:bg-white/8 text-text-muted hover:text-text-primary'
@@ -880,39 +887,30 @@ function GeneratingIndicator() {
 function ThinkBlock({ content, isThinking }: { content: string; isThinking: boolean }) {
   const [open, setOpen] = useState(false);
 
+  // Always collapsed by default — never auto-expand, even during streaming.
+  // When thinking finishes, collapse in case the user had opened it mid-stream.
   React.useEffect(() => {
     if (!isThinking) setOpen(false);
   }, [isThinking]);
 
-  // ── Active streaming: full-width content, grows naturally, no scroll ──
-  if (isThinking) {
-    return (
-      <div className="mb-3 pl-3 border-l-2 border-accent text-xs">
-        <div className="flex items-center gap-1.5 mb-1.5">
-          <Brain size={11} className="text-accent animate-brain-spin flex-shrink-0" />
-          <span className="text-accent font-medium tracking-wide">Razonando</span>
-          <span className="flex gap-1 ml-0.5">
-            <span className="think-dot" style={{ width: 5, height: 5 }} />
-            <span className="think-dot" style={{ width: 5, height: 5 }} />
-            <span className="think-dot" style={{ width: 5, height: 5 }} />
-          </span>
-        </div>
-        <div className="text-text-muted leading-relaxed whitespace-pre-wrap opacity-70">
-          {content}
-        </div>
-      </div>
-    );
-  }
-
-  // ── Done: just a subtle Brain icon, expand on click ──
   return (
     <div className="mb-2">
       <button
         onClick={() => setOpen((v) => !v)}
         title={open ? 'Ocultar razonamiento' : 'Ver razonamiento'}
-        className="flex items-center gap-1 opacity-30 hover:opacity-60 transition-opacity"
+        className="flex items-center gap-1.5 opacity-40 hover:opacity-70 transition-opacity"
       >
-        <Brain size={12} className={open ? 'text-accent' : 'text-text-muted'} />
+        <Brain
+          size={11}
+          className={isThinking ? 'text-accent animate-brain-spin' : (open ? 'text-accent' : 'text-text-muted')}
+        />
+        {isThinking && (
+          <span className="flex gap-1">
+            <span className="think-dot" style={{ width: 4, height: 4 }} />
+            <span className="think-dot" style={{ width: 4, height: 4 }} />
+            <span className="think-dot" style={{ width: 4, height: 4 }} />
+          </span>
+        )}
         <ChevronDown
           size={10}
           className={`text-text-muted transition-transform duration-150 ${open ? 'rotate-180' : ''}`}

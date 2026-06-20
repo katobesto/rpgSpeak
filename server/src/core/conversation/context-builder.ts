@@ -23,8 +23,7 @@ export interface BuildContextOptions {
   characterAffinities?: Array<{ characterId: string; name: string; affinity: number }>;
   affinitySystemPrompt?: string;
   responseFormatPrompt?: string;  // character mode: response format instruction
-  narratorPrompt?: string;        // narrator mode (no adventure): full narrator instructions; use {{PERSONAJES}}
-  adventurePrompt?: string;       // narrator mode + adventure: GM instructions; use {{PERSONAJES}}
+  narratorPrompt?: string;        // narrator mode: full narrator instructions; use {{PERSONAJES}}
   fastLlmEnabled?: boolean;   // when true, skip affinity tag instructions (fast LLM handles it)
   memoryInjectionPrompt?: string; // template with {{MEMORIAS}} — injected just before last user message
   // Context index injection
@@ -160,7 +159,6 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     affinitySystemPrompt,
     responseFormatPrompt,
     narratorPrompt,
-    adventurePrompt,
     fastLlmEnabled = false,
     memoryInjectionPrompt,
     contextIndexInjectionEnabled = false,
@@ -190,32 +188,21 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // so it overrides—rather than gets overridden by—the character's base description.
 
   if (narratorMode) {
+    // En modo narrador siempre se usa narratorPrompt, independientemente de si hay
+    // historia con adventureMode. El antiguo adventurePrompt (GM con mecánicas RPG)
+    // resultó letra muerta: el LLM interpretaba stats y combate a su aire porque
+    // no había ningún sistema real detrás. La única diferencia observable era el
+    // cierre con "¿Qué haces?" — que se puede añadir directamente al narratorPrompt.
     const allChars = character ? [character, ...groupCharacters] : groupCharacters;
-
-    if (adventureMode) {
-      // ── Game Master con mecánicas RPG ────────────────────────────────────
-      const charBlocksText = allChars.map((c) => buildCharacterBlock(c)).filter(Boolean).join('\n\n---\n\n');
-      const charSection = charBlocksText
-        ? `## Personajes en la aventura:\n\n${charBlocksText}`
-        : '';
-      const basePrompt = adventurePrompt?.trim() ?? '';
-      const gmPrompt = basePrompt.includes('{{PERSONAJES}}')
-        ? basePrompt.replace('{{PERSONAJES}}', charSection)
-        : [basePrompt, charSection].filter(Boolean).join('\n\n');
-      if (gmPrompt.trim()) systemParts.push(gmPrompt);
-
-    } else {
-      // ── Narrador básico (sin aventura) ────────────────────────────────────
-      const charBlocks = allChars.map((c) => buildCharacterBlock(c)).filter(Boolean);
-      const charSection = charBlocks.length > 0
-        ? `## Personajes presentes en la escena:\n\n${charBlocks.join('\n\n')}`
-        : '';
-      const basePrompt = narratorPrompt?.trim() ?? '';
-      const fullNarrPrompt = basePrompt.includes('{{PERSONAJES}}')
-        ? basePrompt.replace('{{PERSONAJES}}', charSection)
-        : [basePrompt, charSection].filter(Boolean).join('\n\n');
-      if (fullNarrPrompt.trim()) systemParts.push(fullNarrPrompt);
-    }
+    const charBlocks = allChars.map((c) => buildCharacterBlock(c)).filter(Boolean);
+    const charSection = charBlocks.length > 0
+      ? `## Personajes presentes en la escena:\n\n${charBlocks.join('\n\n')}`
+      : '';
+    const basePrompt = narratorPrompt?.trim() ?? '';
+    const fullNarrPrompt = basePrompt.includes('{{PERSONAJES}}')
+      ? basePrompt.replace('{{PERSONAJES}}', charSection)
+      : [basePrompt, charSection].filter(Boolean).join('\n\n');
+    if (fullNarrPrompt.trim()) systemParts.push(fullNarrPrompt);
 
   } else {
     // Single character definition
