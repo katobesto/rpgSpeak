@@ -96,4 +96,23 @@ export class MessageRepository {
     this.db.run(sql`DELETE FROM messages WHERE id = ${id}`);
     return true;
   }
+
+  /**
+   * Borra todos los mensajes posteriores a `id` dentro de su misma conversación
+   * y rama, dejando intacto el propio mensaje ancla. Usa `rowid` (orden de
+   * inserción) para un corte fiable independiente de timestamps coincidentes.
+   * No deja huérfanos: elimina la cola contigua de la rama completa (usuario +
+   * asistente). Devuelve cuántos se eliminaron.
+   */
+  deleteAfter(id: string): number {
+    const target = this.db.select().from(messages).where(eq(messages.id, id)).get();
+    if (!target) return 0;
+    const res = this.db.run(sql`
+      DELETE FROM messages
+      WHERE conversation_id = ${target.conversationId}
+        AND branch_id = ${target.branchId}
+        AND rowid > (SELECT rowid FROM messages WHERE id = ${id})
+    `);
+    return Number(res.changes ?? 0);
+  }
 }

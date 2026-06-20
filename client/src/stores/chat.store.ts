@@ -51,6 +51,10 @@ interface ChatState extends StreamingState {
    *  ephemeral error messages (id starts with "error-"). */
   regenerate: (assistantMessageId: string, characterId?: string | null) => Promise<void>;
 
+  /** Rebobinar: elimina del servidor y del store todos los mensajes posteriores
+   *  a `messageId` (el propio mensaje ancla se conserva). */
+  rewind: (messageId: string) => Promise<void>;
+
   stopStreaming: (() => void) | null;
   abort: () => void;
 }
@@ -446,6 +450,47 @@ export const useChatStore = create<ChatState>((set, get) => ({
     );
 
     set({ stopStreaming: abort });
+  },
+
+  rewind: async (messageId) => {
+    const { messages, isStreaming } = get();
+    if (isStreaming) return;
+
+    const idx = messages.findIndex((m) => m.id === messageId);
+    if (idx === -1) return;
+
+    // No hay nada posterior que borrar.
+    if (idx === messages.length - 1) return;
+
+    const idsAfter = messages.slice(idx + 1).map((m) => m.id);
+
+    // Optimista: recorta el store de inmediato. El ancla (idx) se conserva.
+    set((s) => ({ messages: s.messages.slice(0, s.messages.findIndex((m) => m.id === messageId) + 1) }));
+
+    try {
+      // El ancla puede ser un id temporal/efímero si la conversación no se ha
+      // recargado; en ese caso no existe en BD y no hay cola persistida que cortar.
+      const isPersisted = !messageId.startsWith('temp-') && !messageId.startsWith('streaming-') && !messageId.startsWith('error-');
+      if (isPersisted) {
+        await messagesApi.deleteAfter(messageId);
+      } else {
+        // Ancla no persistida: borra uno a uno los posteriores que sí lo estén.
+        for (const id of idsAfter) {
+          if (!id.startsWith('temp-') && !id.startsWith('streaming-') && !id.startsWith('error-')) {
+            try { await messagesApi.delete(id); } catch { /* ignore */ }
+          }
+        }
+      }
+    } catch {
+      // Si el borrado en servidor falla, recargamos para resincronizar el store.
+      const { activeConversationId, activeBranchId } = get();
+      if (activeConversationId) {
+        try {
+          const fresh = await messagesApi.list(activeConversationId, activeBranchId);
+          set({ messages: fresh });
+        } catch { /* ignore */ }
+      }
+    }
   },
 
   abort: () => {

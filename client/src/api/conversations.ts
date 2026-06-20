@@ -46,5 +46,7 @@ export const messagesApi = {
   update: (id: string, content: string) =>
     api.patch<Message>(`/messages/${id}`, { content }),
   delete: (id: string) => api.delete(`/messages/${id}`),
+  /** Rebobinar: borra todos los mensajes posteriores a `id` (el ancla se conserva). */
+  deleteAfter: (id: string) => api.delete<{ deleted: number }>(`/messages/${id}/after`),
   branch: (id: string) => api.post<{ branchId: string }>(`/messages/${id}/branch`, {}),
 };

@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { Copy, Edit2, RefreshCw, Trash2, Check, Bug, X, Pin, Volume2, VolumeX, Loader, Wand2, Image as ImageIcon, Zap, ChevronDown, RotateCcw, Play, Square, Pause, Download, Share2, Upload, Brain } from 'lucide-react';
+import { Copy, Edit2, RefreshCw, Trash2, Check, Bug, X, Pin, Volume2, VolumeX, Loader, Wand2, Image as ImageIcon, Zap, ChevronDown, RotateCcw, Rewind, Play, Square, Pause, Download, Share2, Upload, Brain, AlertTriangle } from 'lucide-react';
 import type { Message, ChatMessage } from '@rpgspeak/shared';
 import { Avatar } from '../ui/Avatar.tsx';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -65,6 +65,15 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
   const removeMessage = useChatStore((s) => s.removeMessage);
   const updateMessage = useChatStore((s) => s.updateMessage);
   const regenerate = useChatStore((s) => s.regenerate);
+  const rewind = useChatStore((s) => s.rewind);
+
+  // Nº de mensajes posteriores a éste (para el botón "Rebobinar" y su confirmación)
+  const messagesAfterCount = useChatStore((s) => {
+    const idx = s.messages.findIndex((m) => m.id === message.id);
+    return idx === -1 ? 0 : s.messages.length - 1 - idx;
+  });
+  const [showRewindConfirm, setShowRewindConfirm] = useState(false);
+  const [rewinding, setRewinding] = useState(false);
 
   // Poll while any image in the array is pending (waiting for 4K final)
   React.useEffect(() => {
@@ -427,6 +436,14 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
                 disabled={isStreaming}
               />
             )}
+            {!isUser && !isError && messagesAfterCount > 0 && (
+              <ActionButton
+                icon={Rewind}
+                onClick={() => setShowRewindConfirm(true)}
+                title="Rebobinar — eliminar todos los mensajes posteriores"
+                disabled={isStreaming}
+              />
+            )}
             {!isUser && !isError && (
               <>
                 <ActionButton
@@ -553,6 +570,24 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
             messages={message.metadata.promptMessages as ChatMessage[]}
             model={message.metadata.model as string | undefined}
             onClose={() => setShowPrompt(false)}
+          />
+        )}
+
+        {/* Rewind confirmation modal */}
+        {showRewindConfirm && (
+          <RewindConfirmModal
+            count={messagesAfterCount}
+            busy={rewinding}
+            onCancel={() => setShowRewindConfirm(false)}
+            onConfirm={async () => {
+              setRewinding(true);
+              try {
+                await rewind(message.id);
+                setShowRewindConfirm(false);
+              } finally {
+                setRewinding(false);
+              }
+            }}
           />
         )}
 
@@ -1149,6 +1184,60 @@ function PromptModal({ messages, model, onClose }: { messages: ChatMessage[]; mo
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary hover:bg-white/8 transition-colors"
           >
             <Copy size={12} /> Copiar todo
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Rewind Confirmation Modal ────────────────────────────────────────────────
+function RewindConfirmModal({
+  count, busy, onCancel, onConfirm,
+}: { count: number; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.75)' }}
+      onClick={(e) => { if (e.target === e.currentTarget && !busy) onCancel(); }}
+    >
+      <div
+        className="relative w-full max-w-md rounded-xl border border-border flex flex-col animate-slide-up"
+        style={{ background: 'var(--surface-1)' }}
+      >
+        <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-border">
+          <Rewind size={15} className="text-amber-400" />
+          <span className="font-semibold text-sm">Rebobinar la conversación</span>
+        </div>
+
+        <div className="px-5 py-4 space-y-3">
+          <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2.5">
+            <AlertTriangle size={15} className="text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-xs text-text-secondary leading-relaxed">
+              Se eliminarán <strong className="text-text-primary">{count} mensaje{count === 1 ? '' : 's'}</strong> posteriores a éste
+              (tanto tus mensajes como las respuestas de la IA). Este mensaje se conserva como nuevo final de la conversación.
+            </p>
+          </div>
+          <p className="text-[11px] text-text-muted leading-relaxed">
+            Esta acción es <strong className="text-text-secondary">permanente</strong> y no se puede deshacer: los mensajes se borran de la base de datos.
+          </p>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border">
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary hover:bg-white/8 transition-colors disabled:opacity-40"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={busy}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/15 text-red-300 border border-red-500/30 hover:bg-red-500/25 transition-colors disabled:opacity-50"
+          >
+            {busy ? <Loader size={12} className="animate-spin" /> : <Rewind size={12} />}
+            {busy ? 'Eliminando…' : `Eliminar ${count} mensaje${count === 1 ? '' : 's'}`}
           </button>
         </div>
       </div>
