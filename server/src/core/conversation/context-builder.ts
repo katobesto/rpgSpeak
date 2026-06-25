@@ -89,6 +89,28 @@ function buildSingleIdentityLock(activeName: string): string {
   );
 }
 
+// ── Conocimiento limitado a lo presenciado ───────────────────────────────────
+// Evita que un personaje (sobre todo recién incorporado) "lea" en el historial
+// compartido eventos privados del jugador con otros personajes y los dé por
+// sabidos. El historial es uno solo para toda la conversación, así que esta regla
+// instruye al modelo a respetar lo que cada personaje pudo presenciar de verdad.
+function buildKnowledgeScopingSingle(activeName: string): string {
+  return (
+    `### CONOCIMIENTO LIMITADO A TU EXPERIENCIA\n` +
+    `Eres ${activeName}. Solo conoces lo que TÚ has vivido o presenciado en primera persona.\n` +
+    `- NO sabes lo que ocurrió cuando no estabas presente, ni los momentos o conversaciones privadas del jugador con otros personajes. Aunque aparezcan en el historial, para ti no existen.\n` +
+    `- Si acabas de incorporarte a la escena, ignoras todo lo anterior a tu llegada: no lo menciones, no reacciones a ello, no lo des por sabido.\n` +
+    `- Tu relación con el jugador es solo tuya: no la mezcles ni la compares con la que él tenga con otros personajes.`
+  );
+}
+
+const KNOWLEDGE_SCOPING_NARRATOR =
+  `### CONOCIMIENTO POR PERSONAJE\n` +
+  `Cada personaje solo conoce lo que ha presenciado en primera persona. No le hagas referirse ni reaccionar a algo que no vivió.\n` +
+  `- Un personaje recién incorporado a la escena NO sabe lo ocurrido antes de su llegada — trátalo como ajeno a todo el historial previo a su entrada.\n` +
+  `- Los momentos privados entre el jugador y un personaje no son conocidos por los demás, salvo que los hayan presenciado de verdad.\n` +
+  `- No traslades la dinámica, los sentimientos ni la afinidad de un personaje a otro: cada vínculo con el jugador es independiente.`;
+
 // ── Formato de acciones y gestos ─────────────────────────────────────────────
 // Instrucción estática: garantiza que las descripciones de gestos y acciones
 // físicas vayan siempre en tercera persona, incluso en modo personaje (donde
@@ -100,6 +122,23 @@ const GESTURE_FORMAT_INSTRUCTION =
   `- ✓ CORRECTO: *se acaricia el pelo mirándote a los ojos y sonríe de forma pícara*\n` +
   `El diálogo hablado (lo que el personaje dice en voz alta) sí va en primera persona.\n` +
   `Si el personaje describe acciones del jugador/usuario, también en tercera persona ("se acerca", "alza la vista", "te toma de la mano").`;
+
+// ── Auto-reporte de afinidad (solo sin LLM rápido) ───────────────────────────
+// Cuando no hay analizador externo, el LLM principal debe emitir las etiquetas
+// [AFINIDAD:...]. Instrucción concreta, obligatoria y colocada al final del
+// bloque de afinidad (máxima autoridad) para que de verdad la dispare — la
+// versión anterior ("cuando algo cambie significativamente… N entre 1 y 15")
+// era demasiado vaga y el modelo casi nunca la emitía. Magnitudes contenidas
+// para que el vínculo suba despacio y el romance no sea prematuro.
+const AFFINITY_SELF_REPORT_INSTRUCTION =
+  `## ACTUALIZACIÓN DE AFINIDAD — OBLIGATORIO\n` +
+  `No hay analizador externo: ERES TÚ quien registra los cambios de afinidad. Al FINAL de tu respuesta visible (NUNCA dentro de tu razonamiento interno), si este intercambio ha movido de verdad cómo se siente el personaje hacia el jugador, añade en una línea propia:\n` +
+  `[AFINIDAD:NombreExacto:+N]   (usa -N si empeora)\n` +
+  `Reglas:\n` +
+  `- Nombre EXACTO del personaje; una etiqueta por personaje afectado.\n` +
+  `- Magnitudes CONTENIDAS, el afecto sube DESPACIO: +1 o +2 para un gesto amable o una charla que acerca; +3 a +5 para un momento significativo (confianza real, ayuda genuina); +6 a +10 SOLO para hechos excepcionales (salvar la vida, sacrificio, confesión sincera y correspondida). Negativos simétricos para frialdad, ofensas, traición o avances no deseados.\n` +
+  `- Prioriza incrementos pequeños (+1/+2): subir mucho de golpe rompe la naturalidad de la relación.\n` +
+  `- Si nada relevante cambió, NO pongas etiqueta. No la menciones ni la expliques en la narrativa.`;
 
 // ── Bloque de coherencia de escena — inyectado en todos los modos ───────────
 // Consolida en UN solo mensaje de sistema las reglas de coherencia espacial
@@ -252,6 +291,8 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     // Candado de identidad como parte separada → máxima autoridad (pegado a las
     // fichas, cerca del punto de generación) y visible/localizable en el debug.
     if (charBlocks.length > 0) systemParts.push(CHARACTER_IDENTITY_LOCK);
+    // Conocimiento por personaje — solo relevante con varios en escena.
+    if (charBlocks.length > 1) systemParts.push(KNOWLEDGE_SCOPING_NARRATOR);
 
   } else {
     // Single character definition
@@ -277,6 +318,9 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       systemParts.push(otherParts.join('\n\n'));
       // Candado: el personaje activo no debe absorber rasgos de los anteriores.
       systemParts.push(buildSingleIdentityLock(character.name));
+      // Conocimiento limitado: no "lee" en el historial lo privado del jugador
+      // con otros personajes ni lo previo a su llegada a la escena.
+      systemParts.push(buildKnowledgeScopingSingle(character.name));
     }
 
     if (responseFormatPrompt?.trim()) {
@@ -299,17 +343,24 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // its authority: LLMs weight content closer to the generation point more heavily,
   // so it overrides the character's base description even more effectively than before.
   let affinityBlock: string | null = null;
-  if (characterAffinities?.length) {
-    const consentLines = characterAffinities.map(({ name, affinity }) => {
-      if (affinity >= 80) {
-        return `- ${name}: afinidad ${affinity}/100 — ha dado su consentimiento emocional para interacciones íntimas`;
-      }
-      const tier =
-        affinity >= 61 ? 'confianza y cercanía' :
-        affinity >= 41 ? 'neutralidad' :
-        affinity >= 21 ? 'frialdad y desconfianza' :
+  // En modo personaje, el estado emocional inyectado es SOLO el del personaje que
+  // habla — no el de todo el reparto — para que no "lea" su relación con los demás.
+  // En modo narrador (omnisciente) sí se muestran todas las afinidades.
+  const affinitiesForBlock = narratorMode
+    ? (characterAffinities ?? [])
+    : (characterAffinities ?? []).filter((a) => a.characterId === character?.id);
+  if (affinitiesForBlock.length) {
+    const consentLines = affinitiesForBlock.map(({ name, affinity }) => {
+      const romance =
+        affinity >= 80 ? 'vínculo profundo — abierto/a al romance y la intimidad si la situación lo acompaña' :
+        affinity >= 60 ? 'aprecio y confianza — el romance sería como mucho una semilla incipiente y cautelosa, nunca dado por hecho' :
+        affinity >= 41 ? 'cordial pero SIN interés romántico — desvía los avances con naturalidad' :
+        affinity >= 21 ? 'frialdad y desconfianza — ni cercanía ni romance' :
                          'hostilidad activa';
-      return `- ${name}: afinidad ${affinity}/100 (${tier}) — NO ha dado consentimiento para contacto íntimo`;
+      const intimacy = affinity >= 80
+        ? 'ha dado su consentimiento emocional para interacciones íntimas'
+        : 'NO ha dado consentimiento para contacto íntimo';
+      return `- ${name}: afinidad ${affinity}/100 — ${romance}; ${intimacy}`;
     });
 
     const consentDirective =
@@ -320,6 +371,15 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       `o sentimiento descrito en la ficha del personaje. ` +
       `Si la descripción dice que el personaje siente algo por el jugador, eso es su POTENCIAL — ` +
       `no su realidad actual dado lo ocurrido.\n\n` +
+      `PROGRESIÓN ROMÁNTICA — REGLA DE NATURALIDAD:\n` +
+      `El enamoramiento es fruto de MUCHO tiempo compartido y de varios momentos significativos, no de unas pocas interacciones agradables. La afinidad mide esa historia acumulada y sube despacio.\n` +
+      `• Afinidad < 60: el personaje NO siente atracción romántica por el jugador. Responde a insinuaciones, coqueteos o declaraciones con cortesía distante, humor, evasión o incomodidad — NUNCA las corresponde. No se sonroja por él, no fantasea, no busca cercanía romántica.\n` +
+      `• Afinidad 60-79: hay aprecio y confianza, pero el romance es como mucho una semilla incipiente y CAUTELOSA: dudas, contención, miedo a malinterpretar. El personaje NO declara sentimientos ni da por hecha una relación; necesita más tiempo y más momentos compartidos.\n` +
+      `• Afinidad ≥ 80: el vínculo es lo bastante profundo como para abrirse al romance o la intimidad si la situación lo acompaña.\n` +
+      `• PROHIBIDO acelerar el romance: por encantador que sea el jugador, el personaje no pasa de neutral a enamorado en unos pocos turnos. Que dude, que cueste, que el jugador se lo gane.\n` +
+      `• Esto rige AUNQUE la ficha describa al personaje como sensual, coqueto, provocador, cariñoso, "atrevido" o propenso a situaciones subidas de tono. Con afinidad < 60 esos rasgos NO se dirigen al jugador como interés romántico: se expresan con ligereza, torpeza involuntaria, humor o hacia el mundo en general — jamás como atracción declarada ni reciprocada hacia el jugador. Un personaje coqueto por naturaleza coquetea con todos por igual y con nadie en serio mientras la afinidad sea baja.\n` +
+      `• Si turnos anteriores se desviaron hacia el romance por encima de lo que la afinidad permite, NO lo perpetúes: corrige el rumbo con naturalidad (el personaje se contiene, se da cuenta de que va demasiado rápido, recula). El estado de afinidad manda sobre la inercia de la conversación.\n` +
+      `• NUNCA verbalices que "es pronto", "aún no nos conocemos lo suficiente" o "quizás más adelante": insinuar que el romance llegará a su debido tiempo YA pone el romance sobre la mesa y alimenta una falsa sensación de cercanía o esperanza. A baja afinidad el personaje simplemente NO trata el romance como un tema vivo — no lo nombra, no lo niega "para luego", lo deja fuera. Redirige hacia lo práctico, lo cotidiano o lo que de verdad le ocupa, como haría con cualquier conocido reciente. No todo encuentro gira en torno a conocerse o a un posible vínculo sentimental: las interacciones son racionales y sobre el mundo, no sobre la relación.\n\n` +
       `REGLA ABSOLUTA SOBRE CONTACTO FÍSICO ÍNTIMO:\n` +
       `Si el jugador intenta tocar partes íntimas (pechos, trasero, entrepierna, genitales) sin afinidad ≥ 80:\n` +
       `• Rechazo CLARO e INEQUÍVOCO — retrocede, aparta la mano, crea distancia\n` +
@@ -328,15 +388,17 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       `• PROHIBIDO mostrar curiosidad o atracción ante ese contacto\n` +
       `• afinidad < 40 = enfado explícito o rechazo duro; 40-60 = rechazo firme; 61-79 = rechazo claro con herida`;
 
-    // consentDirective (current state) always first so the LLM knows the real
-    // emotional state before anything else.
-    // affinitySystemPrompt (tier guide + [AFINIDAD:...] tag instruction) only
-    // when fast LLM is OFF — it's meaningless (and wastes tokens) when the fast
-    // LLM handles affinity analysis. Placed AFTER consentDirective so the tag
-    // emission instruction is as close as possible to the generation point.
-    affinityBlock = (!fastLlmEnabled && affinitySystemPrompt?.trim())
-      ? `${consentDirective}\n\n---\n\n${affinitySystemPrompt.trim()}`
-      : consentDirective;
+    // consentDirective (estado + gradación romántica + contacto físico) SIEMPRE.
+    // Cuando el LLM rápido está OFF añadimos, al final (máxima autoridad):
+    //   · la guía de tramos editable (affinitySystemPrompt), y
+    //   · la instrucción concreta de auto-reporte de etiquetas [AFINIDAD:...].
+    // Cuando está ON, el analizador externo gestiona la afinidad → no pedimos tags.
+    if (!fastLlmEnabled) {
+      const tierGuide = affinitySystemPrompt?.trim() ? `${affinitySystemPrompt.trim()}\n\n---\n\n` : '';
+      affinityBlock = `${consentDirective}\n\n---\n\n${tierGuide}${AFFINITY_SELF_REPORT_INSTRUCTION}`;
+    } else {
+      affinityBlock = consentDirective;
+    }
   }
   // ─────────────────────────────────────────────────────────────────────────────
 

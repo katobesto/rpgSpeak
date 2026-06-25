@@ -470,6 +470,41 @@ export function runMigrations(db: Db): void {
         '(Solo cuando el LLM Rápido no está activo) Cuando algo cambie significativamente la afinidad',
         'Cuando algo cambie significativamente la afinidad',
       ],
+      // Gradación romántica: el afecto/romance ya no debe brotar a media afinidad.
+      [
+        '▸ 41-60 | Neutralidad\nTrato correcto pero sin calidez. Coopera si hay razón clara. No busca ni evita la compañía del jugador. Postura reservada.',
+        '▸ 41-60 | Neutralidad\nTrato correcto pero sin calidez NI interés romántico. Coopera si hay razón clara. Desvía con naturalidad cualquier insinuación o coqueteo — no los corresponde. No busca ni evita la compañía del jugador. Postura reservada.',
+      ],
+      [
+        '▸ 61-79 | Confianza y cercanía\nAbierto y amistoso. Comparte más de sí mismo. Afecto genuino posible, sin ser romántico.',
+        '▸ 61-79 | Confianza y cercanía\nAbierto y amistoso. Comparte más de sí mismo. Afecto genuino posible. El romance, si surge, es apenas una semilla incipiente y cautelosa: dudas y contención, nunca declarado ni dado por hecho. Aún necesita más tiempo y momentos compartidos.',
+      ],
+      [
+        'IMPORTANTE: La afinidad es el estado emocional real de cada personaje. Si un personaje ha sido maltratado, actúa como alguien herido o que desconfía — no como si nada hubiera pasado.',
+        'IMPORTANTE: La afinidad es el estado emocional real de cada personaje, fruto de la historia compartida. Sube despacio: unos pocos encuentros agradables no convierten la neutralidad en romance. Si un personaje ha sido maltratado, actúa como alguien herido o que desconfía — no como si nada hubiera pasado.',
+      ],
+      // La emisión de etiquetas [AFINIDAD:...] pasa a estar gestionada por código
+      // (AFFINITY_SELF_REPORT_INSTRUCTION, concreta y obligatoria). Se elimina la
+      // instrucción vaga del prompt editable para evitar números contradictorios.
+      [
+        '\n\nCuando algo cambie significativamente la afinidad, incluye AL FINAL de tu respuesta:\n[AFINIDAD:NombrePersonaje:+N] o [AFINIDAD:NombrePersonaje:-N]\nN entre 1 y 15 según la magnitud. No lo menciones en la narrativa.',
+        '',
+      ],
+    ],
+    // Afinidad por LLM rápido: positivos más contenidos → el vínculo sube despacio.
+    fastLlmAnalysisPrompt: [
+      [
+        'Solo cambia si ocurrió algo de la lista anterior. Delta MÍNIMO ±8 — valores menores son ruido y no deben registrarse.',
+        'Solo cambia si ocurrió algo de la lista anterior. Delta MÍNIMO ±5 — valores menores son ruido y no deben registrarse.',
+      ],
+      [
+        '• Salvar la vida directamente / lealtad bajo presión: +10 a +15\n• Regalo de alto valor emocional / confesión de gran confianza: +8 a +12',
+        '• Salvar la vida directamente / lealtad bajo presión extrema: +6 a +10\n• Regalo de altísimo valor emocional / confesión de gran confianza correspondida: +5 a +8',
+      ],
+      [
+        'La reacción externa del personaje NO importa — el impacto interno es real aunque lo disimule.',
+        'El afecto y el romance suben DESPACIO: reserva los valores altos para hechos verdaderamente excepcionales. Un vínculo se construye con muchos momentos, no con uno — ante la duda, tira a la baja en los positivos.\nLa reacción externa del personaje NO importa — el impacto interno es real aunque lo disimule.',
+      ],
     ],
   };
 

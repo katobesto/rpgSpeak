@@ -564,8 +564,11 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
           </div>
         )}
 
-        {/* Prompt debug modal */}
-        {showPrompt && (
+        {/* Prompt debug modal — only when promptMessages still exist. If the
+            message was replaced (regenerate/rewind) while the modal was open,
+            metadata.promptMessages becomes undefined; guarding here avoids
+            crashing PromptModal with undefined messages. */}
+        {showPrompt && Array.isArray(message.metadata?.promptMessages) && (
           <PromptModal
             messages={message.metadata.promptMessages as ChatMessage[]}
             model={message.metadata.model as string | undefined}
@@ -992,6 +995,10 @@ function classifyHeaderPart(content: string): { title: string; hint?: string; so
     return { title: 'Candado de identidad de personajes', hint: 'Impide mezclar rasgos entre personajes (narrador)', source: `${SRC_CODE} › CHARACTER_IDENTITY_LOCK` };
   if (/^### TU IDENTIDAD ES SOLO TUYA/.test(c))
     return { title: 'Candado de identidad (personaje activo)', hint: 'Evita que el personaje absorba rasgos de otros', source: `${SRC_CODE} › buildSingleIdentityLock()` };
+  if (/^### CONOCIMIENTO LIMITADO A TU EXPERIENCIA/.test(c))
+    return { title: 'Conocimiento limitado (personaje)', hint: 'No conoce lo privado de otros ni lo previo a su llegada', source: `${SRC_CODE} › buildKnowledgeScopingSingle()` };
+  if (/^### CONOCIMIENTO POR PERSONAJE/.test(c))
+    return { title: 'Conocimiento por personaje (narrador)', hint: 'Cada personaje solo sabe lo que presenció', source: `${SRC_CODE} › KNOWLEDGE_SCOPING_NARRATOR` };
   if (/^## Formato de acciones y gestos/.test(c))
     return { title: 'Formato de gestos (3ª persona)', source: `${SRC_CODE} › GESTURE_FORMAT_INSTRUCTION` };
   if (/^## Contexto de aventura activa/.test(c))
@@ -1130,8 +1137,9 @@ function PromptAccordionGroup({ group, defaultOpen }: { group: PromptGroup; defa
 }
 
 function PromptModal({ messages, model, onClose }: { messages: ChatMessage[]; model?: string; onClose: () => void }) {
-  const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
-  const groups = useMemo(() => groupPromptMessages(messages), [messages]);
+  const safeMessages = Array.isArray(messages) ? messages : [];
+  const totalChars = safeMessages.reduce((sum, m) => sum + m.content.length, 0);
+  const groups = useMemo(() => groupPromptMessages(safeMessages), [safeMessages]);
 
   return (
     <div
@@ -1156,7 +1164,7 @@ function PromptModal({ messages, model, onClose }: { messages: ChatMessage[]; mo
           </div>
           <div className="flex items-center gap-3">
             <span className="text-[11px] text-text-muted">
-              {messages.length} mensajes · {totalChars.toLocaleString()} chars
+              {safeMessages.length} mensajes · {totalChars.toLocaleString()} chars
             </span>
             <button
               onClick={onClose}
@@ -1178,7 +1186,7 @@ function PromptModal({ messages, model, onClose }: { messages: ChatMessage[]; mo
         <div className="flex items-center justify-end px-5 py-3 border-t border-border flex-shrink-0">
           <button
             onClick={() => {
-              const text = messages.map(m => `[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n---\n\n');
+              const text = safeMessages.map(m => `[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n---\n\n');
               navigator.clipboard.writeText(text);
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary hover:bg-white/8 transition-colors"

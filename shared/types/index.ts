@@ -434,6 +434,8 @@ export interface AppSettings {
   storyEventGenerationPrompt: string;
   // Generación de ubicaciones de historia
   storyLocationGenerationPrompt: string;
+  // Asistente de historias — genera historia completa + personajes a partir de un briefing
+  storyAssistantPrompt: string;
   // Estilo de narración — prompts inyectados cuando el usuario elige Medium o Short
   narrationMediumPrompt: string;
   narrationShortPrompt:  string;
@@ -578,6 +580,55 @@ export type UpdateCharacterDto = Partial<CreateCharacterDto>;
 
 export type CreateStoryDto = Omit<Story, 'id' | 'userId' | 'ownerName' | 'createdAt' | 'updatedAt'>;
 export type UpdateStoryDto = Partial<CreateStoryDto>;
+
+// ─── Story Assistant Types ────────────────────────────────────────────────────
+
+/** Una pista de personaje proporcionada por el usuario en el cuestionario.
+ *  Cualquier campo vacío lo completa el LLM. */
+export interface StoryAssistantCharacterHint {
+  name: string;   // sugerencia de nombre ('' = que lo invente la IA)
+  notes: string;  // características aproximadas / rol deseado
+}
+
+/** Briefing que el usuario rellena en el wizard antes de generar la historia. */
+export interface StoryAssistantBriefing {
+  theme: string;          // temática / premisa (obligatorio)
+  genre: string;          // género (opcional)
+  tone: string;           // tono (opcional)
+  /** Ritmo de la historia: 1 = muy pausado/contemplativo … 5 = muy rápido/frenético. */
+  pacing: number;
+  numCharacters: number;  // cuántos personajes generar
+  numEvents: number;      // cuántos eventos persistentes generar
+  numLocations: number;   // cuántas ubicaciones generar
+  adventureMode: boolean;
+  openWorld: boolean;
+  characterHints: StoryAssistantCharacterHint[];
+  extra: string;          // notas libres adicionales
+}
+
+/** Borrador de personaje devuelto por el asistente (antes de crearlo en la BD). */
+export interface StoryAssistantCharacterDraft {
+  name: string;
+  role: string;        // rol dentro de la historia (se guarda en el vínculo)
+  description: string;
+  personality: string;
+  lore: string;
+  tags: string[];
+}
+
+/** Resultado de la generación del asistente: borradores listos para previsualizar. */
+export interface StoryAssistantResult {
+  story: {
+    name: string;
+    description: string;
+    globalContext: string;
+    worldLore: string;
+    narrativeRules: string;
+    events: Omit<StoryEvent, 'id' | 'timestamp'>[];
+    locations: Omit<StoryLocation, 'id'>[];
+  };
+  characters: StoryAssistantCharacterDraft[];
+}
 
 export type CreateConversationDto = {
   title?: string;

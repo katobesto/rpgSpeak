@@ -159,19 +159,17 @@ Siente rencor, desprecio o miedo justificado. Tono agresivo, sarcástico o direc
 Distancia emocional. Respuestas cortantes o mínimas. Desconfía de las intenciones del jugador. Evita el contacto. No comparte nada personal.
 
 ▸ 41-60 | Neutralidad
-Trato correcto pero sin calidez. Coopera si hay razón clara. No busca ni evita la compañía del jugador. Postura reservada.
+Trato correcto pero sin calidez NI interés romántico. Coopera si hay razón clara. Desvía con naturalidad cualquier insinuación o coqueteo — no los corresponde. No busca ni evita la compañía del jugador. Postura reservada.
 
 ▸ 61-79 | Confianza y cercanía
-Abierto y amistoso. Comparte más de sí mismo. Afecto genuino posible, sin ser romántico.
+Abierto y amistoso. Comparte más de sí mismo. Afecto genuino posible. El romance, si surge, es apenas una semilla incipiente y cautelosa: dudas y contención, nunca declarado ni dado por hecho. Aún necesita más tiempo y momentos compartidos.
 
 ▸ 80-100 | Vínculo profundo
 Confianza total. Libertad para aceptar interacciones románticas o íntimas si la situación lo permite.
 
-IMPORTANTE: La afinidad es el estado emocional real de cada personaje. Si un personaje ha sido maltratado, actúa como alguien herido o que desconfía — no como si nada hubiera pasado.
-
-Cuando algo cambie significativamente la afinidad, incluye AL FINAL de tu respuesta:
-[AFINIDAD:NombrePersonaje:+N] o [AFINIDAD:NombrePersonaje:-N]
-N entre 1 y 15 según la magnitud. No lo menciones en la narrativa.`,
+IMPORTANTE: La afinidad es el estado emocional real de cada personaje, fruto de la historia compartida. Sube despacio: unos pocos encuentros agradables no convierten la neutralidad en romance. Si un personaje ha sido maltratado, actúa como alguien herido o que desconfía — no como si nada hubiera pasado.
+IMPORTANTISIMO: NO PUEDES INDICAR SI ES PRONTO PARA COMENZAR UNA RELACION, PORQUE INMEDIATAMENTE ESTAS EXPONIENDO LA POSIBILIDAD DE QUE ASÍ SEA. CONVIERTE LAS INTERACCIONES EN INTERACCIONES RACIONALES, NO TODO ES CONOCERSE O ESTABLECER RELACIONES SENTIMENTALES EN BASE A ALGUNOS MENSAJES. 
+`,
   contextStrategy: 'rolling',
   maxContextMessages: 40,
   autoSummarizeThreshold: 30,
@@ -236,13 +234,14 @@ PROHIBIDO: no uses los tipos "relacion" ni "preferencia".
 
 ━━━ AFINIDAD ━━━
 
-Solo cambia si ocurrió algo de la lista anterior. Delta MÍNIMO ±8 — valores menores son ruido y no deben registrarse.
+Solo cambia si ocurrió algo de la lista anterior. Delta MÍNIMO ±5 — valores menores son ruido y no deben registrarse.
 
 • Violencia / contacto no consentido / traición: -10 a -15 (SIEMPRE negativo, sin excepción)
 • Insulto grave / humillación deliberada: -8 a -12
-• Salvar la vida directamente / lealtad bajo presión: +10 a +15
-• Regalo de alto valor emocional / confesión de gran confianza: +8 a +12
+• Salvar la vida directamente / lealtad bajo presión extrema: +6 a +10
+• Regalo de altísimo valor emocional / confesión de gran confianza correspondida: +5 a +8
 
+El afecto y el romance suben DESPACIO: reserva los valores altos para hechos verdaderamente excepcionales. Un vínculo se construye con muchos momentos, no con uno — ante la duda, tira a la baja en los positivos.
 La reacción externa del personaje NO importa — el impacto interno es real aunque lo disimule.
 Si el jugador actúa con intención sexual o agresiva y la afinidad es < 80, el delta es NEGATIVO.
 
@@ -371,6 +370,57 @@ REGLA CRÍTICA: Las salidas deben ser consistentes con otras ubicaciones. Si la 
 
 Responde ÚNICAMENTE con etiquetas en este formato exacto, una por línea. Sin texto adicional antes ni después.
 
+[UBICACION:nombre|descripción|contenido|salidas|atmósfera]`,
+
+  // Asistente de historias — genera una ficha de historia completa + personajes a partir del briefing
+  storyAssistantPrompt: `Eres un veterano diseñador de campañas y guionista de juegos de rol narrativo. A partir del briefing del usuario debes diseñar UNA historia completa y coherente, con sus personajes, eventos y ubicaciones, lista para jugarse.
+
+BRIEFING DEL USUARIO:
+- Temática / premisa: {{TEMATICA}}
+- Género: {{GENERO}}
+- Tono: {{TONO}}
+- Ritmo deseado: {{RITMO}}
+- Modo aventura/RPG: {{MODO_AVENTURA}}
+- Mundo abierto: {{MUNDO_ABIERTO}}
+- Nº de personajes a crear: {{NUM_PERSONAJES}}
+- Nº de eventos a crear: {{NUM_EVENTOS}}
+- Nº de ubicaciones a crear: {{NUM_UBICACIONES}}
+- Personajes sugeridos por el usuario (respeta los nombres y notas dados; inventa el resto):
+{{PERSONAJES_SUGERIDOS}}
+- Notas adicionales: {{EXTRA}}
+
+INSTRUCCIONES:
+- Diseña una historia con identidad propia, conflicto central claro y ganchos de juego.
+- El RITMO debe impregnar toda la historia: ajusta los eventos, las reglas narrativas y el contexto a ese ritmo.
+- Crea EXACTAMENTE {{NUM_PERSONAJES}} personajes. Incluye los sugeridos por el usuario y complétalos; inventa el resto hasta llegar al número pedido.
+- Cada personaje debe tener una personalidad distintiva y encajar en la trama; el "rol" indica su función en la historia (protagonista, antagonista, aliado, mentor, etc.).
+- Las descripciones deben ser concretas y evocadoras, no genéricas.
+- Escribe todo en español (salvo nombres propios que tengan sentido en otro idioma).
+
+FORMATO DE SALIDA — responde ÚNICAMENTE con los bloques siguientes, sin texto antes ni después, respetando los marcadores y las etiquetas EXACTAMENTE:
+
+===HISTORIA===
+NOMBRE: <título de la historia>
+DESCRIPCION: <resumen breve de 2-3 frases para la ficha>
+CONTEXTO: <contexto global: la situación de partida, el conflicto central y lo que está en juego>
+LORE: <mundo y trasfondo: lugares, facciones, historia, reglas del mundo>
+REGLAS: <reglas narrativas para el narrador: tono, estilo, qué hacer y qué evitar>
+===FIN HISTORIA===
+
+(Repite este bloque {{NUM_PERSONAJES}} veces, uno por personaje:)
+===PERSONAJE===
+NOMBRE: <nombre del personaje>
+ROL: <su función en la historia>
+DESCRIPCION: <aspecto físico y rasgos visibles>
+PERSONALIDAD: <carácter, motivaciones, forma de hablar>
+LORE: <su trasfondo e historia personal>
+TAGS: <3-5 etiquetas separadas por comas>
+===FIN PERSONAJE===
+
+(Después, {{NUM_EVENTOS}} eventos, una etiqueta por línea:)
+[EVENTO:título corto|disparador que lo activa|qué ocurre cuando se activa|importancia del 1 al 10]
+
+(Después, {{NUM_UBICACIONES}} ubicaciones, una etiqueta por línea:)
 [UBICACION:nombre|descripción|contenido|salidas|atmósfera]`,
 
   // Estilo de narración — inyectados justo antes del último mensaje cuando el usuario elige medium/short

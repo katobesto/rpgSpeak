@@ -1,5 +1,8 @@
 import { api } from './client.ts';
-import type { Story, CreateStoryDto, UpdateStoryDto, StoryEvent, StoryLocation } from '@rpgspeak/shared';
+import type {
+  Story, CreateStoryDto, UpdateStoryDto, StoryEvent, StoryLocation,
+  StoryAssistantBriefing, StoryAssistantResult,
+} from '@rpgspeak/shared';
 
 export const storiesApi = {
   list: (filters: { search?: string; text?: string; characterId?: string; filterUserId?: string } = {}) => {
@@ -19,4 +22,6 @@ export const storiesApi = {
     api.post<{ events: StoryEvent[] }>('/stories/generate-events', { storyId, numEvents }),
   generateLocations: (storyId: string, numLocations = 5) =>
     api.post<{ locations: StoryLocation[] }>('/stories/generate-locations', { storyId, numLocations }),
+  runAssistant: (briefing: StoryAssistantBriefing) =>
+    api.post<StoryAssistantResult>('/stories/assistant', briefing),
 };
