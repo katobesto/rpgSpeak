@@ -47,6 +47,11 @@ export const messageRoutes: FastifyPluginAsync = async (app) => {
     return reply.status(204).send();
   });
 
+  // DELETE /messages/:id/after — rebobinar: borra todo lo posterior al ancla
+  app.delete<{ Params: { id: string } }>('/:id/after', async (req) => {
+    return { success: true, data: service.deleteAfter(req.params.id) };
+  });
+
   // POST /messages/:id/branch
   app.post<{ Params: { id: string } }>('/:id/branch', async (req) => {
     return { success: true, data: service.branch(req.params.id) };

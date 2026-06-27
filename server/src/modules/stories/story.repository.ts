@@ -1,8 +1,24 @@
 import { eq, like, sql, and } from 'drizzle-orm';
 import { getDb } from '../../db/index.js';
 import { stories, storyCharacters, type DbStory } from '../../db/schema.js';
-import type { Story, StoryCharacterLink } from '@rpgspeak/shared';
+import type { Story, StoryCharacterLink, StoryEvent, StoryLocation } from '@rpgspeak/shared';
 import { v4 as uuidv4 } from 'uuid';
+
+/** Normaliza eventos persistidos antes de añadir el campo trigger (evita undefined.trim()). */
+function normalizeEvents(events: StoryEvent[]): StoryEvent[] {
+  return events.map((e) => ({ ...e, trigger: e.trigger ?? '' }));
+}
+
+/** Normaliza ubicaciones persistidas con campos antiguos/incompletos. */
+function normalizeLocations(locations: StoryLocation[]): StoryLocation[] {
+  return locations.map((l) => ({
+    ...l,
+    description: l.description ?? '',
+    contents: l.contents ?? '',
+    exits: l.exits ?? '',
+    atmosphere: l.atmosphere ?? '',
+  }));
+}
 
 function resolveOwnerName(userId: string | null | undefined): string | null {
   if (!userId) return null;
@@ -28,13 +44,13 @@ function dbToStory(row: DbStory, chars: StoryCharacterLink[] = []): Story {
     globalContext: row.globalContext,
     narrativeRules: row.narrativeRules,
     worldLore: row.worldLore,
-    persistentEvents: JSON.parse(row.persistentEvents),
-    locations: JSON.parse((row as unknown as { locations?: string }).locations ?? '[]'),
+    persistentEvents: normalizeEvents(JSON.parse(row.persistentEvents)),
+    locations: normalizeLocations(JSON.parse((row as unknown as { locations?: string }).locations ?? '[]')),
     stateVariables: JSON.parse(row.stateVariables),
-    timeline: JSON.parse(row.timeline),
     behaviorRestrictions: JSON.parse(row.behaviorRestrictions),
     isActive: Boolean(row.isActive),
     adventureMode: Boolean(row.adventureMode),
+    openWorld: Boolean(row.openWorld),
     characters: chars,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -118,15 +134,16 @@ export class StoryRepository {
     this.db.run(sql`
       INSERT INTO stories (
         id, name, description, global_context, narrative_rules, world_lore,
-        persistent_events, locations, state_variables, timeline, behavior_restrictions,
-        is_active, adventure_mode, user_id, created_at, updated_at
+        persistent_events, locations, state_variables, behavior_restrictions,
+        is_active, adventure_mode, open_world, user_id, created_at, updated_at
       ) VALUES (
         ${id}, ${data.name}, ${data.description}, ${data.globalContext},
         ${data.narrativeRules}, ${data.worldLore},
         ${JSON.stringify(data.persistentEvents)}, ${JSON.stringify(data.locations ?? [])},
         ${JSON.stringify(data.stateVariables)},
-        ${JSON.stringify(data.timeline)}, ${JSON.stringify(data.behaviorRestrictions)},
-        ${data.isActive ? 1 : 0}, ${data.adventureMode ? 1 : 0}, ${userId ?? null}, ${ts}, ${ts}
+        ${JSON.stringify(data.behaviorRestrictions)},
+        ${data.isActive ? 1 : 0}, ${data.adventureMode ? 1 : 0}, ${data.openWorld ? 1 : 0},
+        ${userId ?? null}, ${ts}, ${ts}
       )
     `);
 
@@ -156,10 +173,10 @@ export class StoryRepository {
         persistent_events    = ${JSON.stringify(merged.persistentEvents)},
         locations            = ${JSON.stringify(merged.locations ?? [])},
         state_variables      = ${JSON.stringify(merged.stateVariables)},
-        timeline             = ${JSON.stringify(merged.timeline)},
         behavior_restrictions= ${JSON.stringify(merged.behaviorRestrictions)},
         is_active            = ${merged.isActive ? 1 : 0},
         adventure_mode       = ${merged.adventureMode ? 1 : 0},
+        open_world           = ${merged.openWorld ? 1 : 0},
         updated_at           = ${ts}
       WHERE id = ${id}
     `);

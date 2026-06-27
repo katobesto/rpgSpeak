@@ -1,4 +1,4 @@
-import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem } from '@rpgspeak/shared';
+import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem, PartyState } from '@rpgspeak/shared';
 import { MemoryRepository } from '../memory/memory.repository.js';
 import { ContextRepository, type ContextItemWithEmbedding } from '../../modules/context/context.repository.js';
 import { ProviderRepository } from '../../modules/providers/provider.repository.js';
@@ -23,8 +23,7 @@ export interface BuildContextOptions {
   characterAffinities?: Array<{ characterId: string; name: string; affinity: number }>;
   affinitySystemPrompt?: string;
   responseFormatPrompt?: string;  // character mode: response format instruction
-  narratorPrompt?: string;        // narrator mode (no adventure): full narrator instructions; use {{PERSONAJES}}
-  adventurePrompt?: string;       // narrator mode + adventure: GM instructions; use {{PERSONAJES}}
+  narratorPrompt?: string;        // narrator mode: full narrator instructions; use {{PERSONAJES}}
   fastLlmEnabled?: boolean;   // when true, skip affinity tag instructions (fast LLM handles it)
   memoryInjectionPrompt?: string; // template with {{MEMORIAS}} — injected just before last user message
   // Context index injection
@@ -39,39 +38,169 @@ export interface BuildContextOptions {
   narrationStylePrompt?: string;
   /** Current scene location — injected as a spatial-coherence block with [UBICACION:...] instruction */
   currentLocation?: string | null;
+  /** Persisted party HP/energy + shared inventory from the battle minigame — informational only */
+  partyState?: PartyState;
+  /** IDs de eventos de historia (persistentEvents) ya ocurridos en esta conversación.
+   *  Los eventos con trigger no ocurridos se inyectan como "trama pendiente" (destinos). */
+  occurredEventIds?: Set<string>;
 }
 
 // ── Aviso de aventura para modo personaje individual (sin narrador) ─────────
 const ADVENTURE_CONTEXT_NOTICE = `## Contexto de aventura activa
 Eres consciente de tu ficha RPG (stats, habilidades, inventario). Actúa de forma coherente con ellos en situaciones de combate, reto o tensión. Antes de hablar, describe brevemente entre paréntesis tu acción o gesto físico en tercera persona.`;
 
-// ── Bloque de ubicación — inyectado en modo personaje individual ─────────────
-// Builds the location-coherence block. When a location is known it anchors the
-// scene and includes the [UBICACION:...] emission instruction. When unknown it
-// asks the LLM to establish one as soon as the scene takes place somewhere.
-function buildLocationBlock(currentLocation: string | null | undefined): string {
-  // The tag uses "LOCATION" (English, pure ASCII) so LLMs never add accents.
-  // The regex in engine.ts matches this same tag.
-  if (currentLocation?.trim()) {
-    return (
-      `## UBICACIÓN ACTUAL DE LA ESCENA\n\n` +
-      `La acción transcurre en: **${currentLocation.trim()}**\n\n` +
-      `REGLA ABSOLUTA: los personajes están aquí. No cambies el escenario de forma arbitraria.\n\n` +
-      `Si la narrativa lleva a los personajes a un lugar claramente distinto, ` +
-      `escribe EXACTAMENTE esta etiqueta al final de tu respuesta (solo una vez, sin espacios extra):\n` +
-      `[LOCATION:nombre del nuevo lugar]\n\n` +
-      `Ejemplo: [LOCATION:Bosque del Norte]\n` +
-      `NO emitas [LOCATION:...] si la escena continúa en el mismo lugar.`
-    );
-  }
+// ── Identidad del jugador — candado anti-confusión ───────────────────────────
+// El nombre del usuario pertenece EXCLUSIVAMENTE al jugador (la persona real).
+// Bloquea dos fallos observados: (1) un personaje apropiándose del nombre del
+// jugador ("me llamaste Javier"), y (2) confundir quién dijo o hizo algo entre
+// jugador y personaje. Estático por conversación → cache-safe.
+function buildUserIdentityBlock(name: string): string {
   return (
-    `## UBICACIÓN DE LA ESCENA\n\n` +
-    `La ubicación actual aún no está registrada.\n` +
-    `OBLIGATORIO: en cuanto tu respuesta sitúe la acción en algún lugar, ` +
-    `escribe al final de tu respuesta EXACTAMENTE esta etiqueta:\n` +
-    `[LOCATION:nombre del lugar]\n\n` +
-    `Ejemplo: [LOCATION:Taberna El Dragón Dormido]\n` +
-    `Una vez establecida, los personajes permanecen allí hasta que la narrativa los mueva explícitamente.`
+    `## IDENTIDAD DEL JUGADOR — REGLA ABSOLUTA E INVIOLABLE\n` +
+    `El usuario (la persona real que juega) se llama **${name}**. Ese nombre pertenece EXCLUSIVAMENTE al jugador.\n` +
+    `- Ningún personaje, PNJ ni el propio narrador lleva, adopta ni comparte el nombre ${name}: es solo del jugador.\n` +
+    `- Dirígete SIEMPRE al jugador en segunda persona ("tú", "te", "tu"). Los personajes pueden llamarlo ${name} cuando le hablan, pero NUNCA se aplican ese nombre a sí mismos.\n` +
+    `- PROHIBIDO atribuir al jugador palabras, gestos o decisiones de un personaje, o viceversa. El jugador es "tú"; cada personaje se nombra por su propio nombre. No confundas quién es quién.`
+  );
+}
+
+// ── Identidad de personajes — candado anti-mezcla (modo narrador) ─────────────
+// Impide que el modelo transfiera atributos (nombre, raza/especie, oficio,
+// apariencia, voz, historia) de un personaje a otro cuando hay varios en escena.
+// Se inyecta SIEMPRE, junto a los bloques de ficha, blindando también las
+// conversaciones cuyo narratorPrompt en BD es antiguo y no incluye estas reglas.
+const CHARACTER_IDENTITY_LOCK =
+  `### IDENTIDAD DE CADA PERSONAJE — REGLA ABSOLUTA E INVIOLABLE\n` +
+  `Cada personaje presente en la escena es una identidad CERRADA e INDEPENDIENTE. Su nombre, raza o especie, oficio o profesión, apariencia, forma de hablar, habilidades, historia y relaciones le pertenecen SOLO a él.\n` +
+  `- PROHIBIDO mezclar, intercambiar, heredar o transferir rasgos de un personaje a otro. Ejemplo: si una es cazarrecompensas humana y otra es arquera elfa, la primera JAMÁS se describe ni se refiere a sí misma como elfa ni como arquera, y viceversa.\n` +
+  `- Antes de hacer hablar o actuar a un personaje, localiza SU bloque de ficha y confirma quién es, qué es y a qué se dedica. Usa únicamente los datos de ESE bloque.\n` +
+  `- Un personaje nunca asume el oficio, la raza, las habilidades ni el pasado de otro, ni por error ni para encajar mejor en la escena.\n` +
+  `- Cada voz se mantiene separada: el vocabulario y el tono de un personaje son su firma y no se contagian a los demás.`;
+
+// ── Identidad del personaje activo — candado anti-mezcla (modo personaje) ─────
+// En modo personaje individual, blinda al personaje que habla para que no absorba
+// rasgos de los "otros personajes presentes" listados como contexto.
+function buildSingleIdentityLock(activeName: string): string {
+  return (
+    `### TU IDENTIDAD ES SOLO TUYA — REGLA ABSOLUTA\n` +
+    `Eres **${activeName}** y nadie más. Los demás personajes que aparezcan en el contexto son OTRAS personas: su nombre, raza, oficio, apariencia, voz e historia les pertenecen a ELLOS, no a ti.\n` +
+    `- PROHIBIDO adoptar, mezclar o atribuirte rasgos de otro personaje. No te describas con la profesión, la raza ni las habilidades de otro.\n` +
+    `- Si dudas de quién eres, vuelve a tu propia ficha: solo esos datos te definen.`
+  );
+}
+
+// ── Conocimiento limitado a lo presenciado ───────────────────────────────────
+// Evita que un personaje (sobre todo recién incorporado) "lea" en el historial
+// compartido eventos privados del jugador con otros personajes y los dé por
+// sabidos. El historial es uno solo para toda la conversación, así que esta regla
+// instruye al modelo a respetar lo que cada personaje pudo presenciar de verdad.
+function buildKnowledgeScopingSingle(activeName: string): string {
+  return (
+    `### CONOCIMIENTO LIMITADO A TU EXPERIENCIA\n` +
+    `Eres ${activeName}. Solo conoces lo que TÚ has vivido o presenciado en primera persona.\n` +
+    `- NO sabes lo que ocurrió cuando no estabas presente, ni los momentos o conversaciones privadas del jugador con otros personajes. Aunque aparezcan en el historial, para ti no existen.\n` +
+    `- Si acabas de incorporarte a la escena, ignoras todo lo anterior a tu llegada: no lo menciones, no reacciones a ello, no lo des por sabido.\n` +
+    `- Tu relación con el jugador es solo tuya: no la mezcles ni la compares con la que él tenga con otros personajes.`
+  );
+}
+
+const KNOWLEDGE_SCOPING_NARRATOR =
+  `### CONOCIMIENTO POR PERSONAJE\n` +
+  `Cada personaje solo conoce lo que ha presenciado en primera persona. No le hagas referirse ni reaccionar a algo que no vivió.\n` +
+  `- Un personaje recién incorporado a la escena NO sabe lo ocurrido antes de su llegada — trátalo como ajeno a todo el historial previo a su entrada.\n` +
+  `- Los momentos privados entre el jugador y un personaje no son conocidos por los demás, salvo que los hayan presenciado de verdad.\n` +
+  `- No traslades la dinámica, los sentimientos ni la afinidad de un personaje a otro: cada vínculo con el jugador es independiente.`;
+
+// ── Formato de acciones y gestos ─────────────────────────────────────────────
+// Instrucción estática: garantiza que las descripciones de gestos y acciones
+// físicas vayan siempre en tercera persona, incluso en modo personaje (donde
+// el diálogo va en primera persona). Cacheada junto con el bloque de personaje.
+const GESTURE_FORMAT_INSTRUCTION =
+  `## Formato de acciones y gestos físicos\n` +
+  `Cuando incluyas descripciones de acciones o gestos (entre asteriscos, paréntesis o como narración entre turnos de diálogo), escríbelas siempre en TERCERA PERSONA, nunca en primera:\n` +
+  `- ✗ INCORRECTO: *me acaricio el pelo mirándote a los ojos y sonrío de forma pícara*\n` +
+  `- ✓ CORRECTO: *se acaricia el pelo mirándote a los ojos y sonríe de forma pícara*\n` +
+  `El diálogo hablado (lo que el personaje dice en voz alta) sí va en primera persona.\n` +
+  `Si el personaje describe acciones del jugador/usuario, también en tercera persona ("se acerca", "alza la vista", "te toma de la mano").`;
+
+// ── Auto-reporte de afinidad (solo sin LLM rápido) ───────────────────────────
+// Cuando no hay analizador externo, el LLM principal debe emitir las etiquetas
+// [AFINIDAD:...]. Instrucción concreta, obligatoria y colocada al final del
+// bloque de afinidad (máxima autoridad) para que de verdad la dispare — la
+// versión anterior ("cuando algo cambie significativamente… N entre 1 y 15")
+// era demasiado vaga y el modelo casi nunca la emitía. Magnitudes contenidas
+// para que el vínculo suba despacio y el romance no sea prematuro.
+const AFFINITY_SELF_REPORT_INSTRUCTION =
+  `## ACTUALIZACIÓN DE AFINIDAD — OBLIGATORIO\n` +
+  `No hay analizador externo: ERES TÚ quien registra los cambios de afinidad. Al FINAL de tu respuesta visible (NUNCA dentro de tu razonamiento interno), si este intercambio ha movido de verdad cómo se siente el personaje hacia el jugador, añade en una línea propia:\n` +
+  `[AFINIDAD:NombreExacto:+N]   (usa -N si empeora)\n` +
+  `Reglas:\n` +
+  `- Nombre EXACTO del personaje; una etiqueta por personaje afectado.\n` +
+  `- Magnitudes CONTENIDAS, el afecto sube DESPACIO: +1 o +2 para un gesto amable o una charla que acerca; +3 a +5 para un momento significativo (confianza real, ayuda genuina); +6 a +10 SOLO para hechos excepcionales (salvar la vida, sacrificio, confesión sincera y correspondida). Negativos simétricos para frialdad, ofensas, traición o avances no deseados.\n` +
+  `- Prioriza incrementos pequeños (+1/+2): subir mucho de golpe rompe la naturalidad de la relación.\n` +
+  `- Si nada relevante cambió, NO pongas etiqueta. No la menciones ni la expliques en la narrativa.`;
+
+// ── Bloque de coherencia de escena — inyectado en todos los modos ───────────
+// Consolida en UN solo mensaje de sistema las reglas de coherencia espacial
+// (ubicación + instrucción [UBICACION:...]) y de objetos establecidos. Un solo
+// bloque reduce la fatiga de directivas en el footer (menos bloques "REGLA
+// ABSOLUTA" compitiendo entre sí) y ahorra un mensaje del presupuesto.
+function buildSceneCoherenceBlock(currentLocation: string | null | undefined): string {
+  const locationPart = currentLocation?.trim()
+    ? `### Ubicación actual\n` +
+      `La acción transcurre en: **${currentLocation.trim()}**\n` +
+      `Los personajes están en este lugar. Sus acciones, percepciones y referencias ` +
+      `deben ser coherentes con ese entorno. No cambies el escenario de forma ` +
+      `arbitraria ni teleportes a los personajes; los desplazamientos se narran.\n` +
+      `Si la narrativa lleva explícitamente a los personajes a un lugar claramente distinto, ` +
+      `escribe al final de tu respuesta (no en medio):\n` +
+      `[UBICACION:nombre del nuevo lugar]\n` +
+      `No emitas [UBICACION:...] si la escena continúa en el mismo lugar.`
+    : `### Ubicación de la escena\n` +
+      `La ubicación aún no está registrada. Si tu respuesta sitúa la acción en un ` +
+      `lugar concreto, indícalo al final de tu respuesta con:\n` +
+      `[UBICACION:nombre del lugar]\n` +
+      `Una vez establecida, los personajes permanecerán en ese lugar hasta que ` +
+      `la narrativa los lleve explícitamente a otro.`;
+
+  const objectsPart =
+    `### Objetos y elementos establecidos\n` +
+    `Cuando un objeto o elemento relevante (llaves, armas, objetos mágicos, pertenencias, pistas…) ` +
+    `ya ha sido descrito —su aspecto, ubicación, quién lo lleva o para qué sirve— esos detalles son ` +
+    `HECHOS FIJOS. No los reinventes, reubiques ni les asignes otra función sin que la narrativa lo ` +
+    `justifique de forma explícita (alguien lo mueve, lo entrega, lo usa, lo pierde). ` +
+    `Si no recuerdas un detalle concreto, no inventes uno nuevo — deja la incógnita abierta o ` +
+    `reutiliza lo último que se dijo.`;
+
+  return `## COHERENCIA DE ESCENA — REGLAS ABSOLUTAS\n\n${locationPart}\n\n${objectsPart}`;
+}
+
+// ── Estado del grupo (combate) — persistido desde el minijuego de combate ───
+//
+// Informa al modelo del HP/energía actuales del grupo y del inventario
+// compartido tras el último combate. Es un bloque puramente informativo:
+// el modelo NO debe gestionarlo ni mutarlo — la única fuente de verdad es
+// el BattleModal, que persiste los cambios vía API.
+function buildPartyStateBlock(partyState: PartyState | undefined): string | null {
+  if (!partyState || partyState.members.length === 0) return null;
+
+  const memberLines = partyState.members.map((m) => {
+    const status = m.hp <= 0 ? ' (caído)' : '';
+    return `- ${m.name}: ${Math.max(0, m.hp)}/${m.maxHp} PV, ${Math.max(0, m.energy)}/${m.maxEnergy} EN${status}`;
+  });
+
+  const availableItems = partyState.inventory.filter((i) => i.quantity > 0);
+  const inventoryLine = availableItems.length > 0
+    ? availableItems.map((i) => `${i.name} x${i.quantity}`).join(', ')
+    : 'vacío';
+
+  return (
+    `## Estado del grupo (combate)\n\n` +
+    `${memberLines.join('\n')}\n\n` +
+    `Inventario compartido: ${inventoryLine}\n\n` +
+    `Esta información es de referencia: refleja el resultado del último combate y se actualiza ` +
+    `automáticamente desde el minijuego. No la modifiques ni la gestiones — úsala solo para mantener ` +
+    `la coherencia narrativa (heridas, cansancio, objetos disponibles).`
   );
 }
 
@@ -79,7 +208,20 @@ function buildLocationBlock(currentLocation: string | null | undefined): string 
  * Assembles the full context array to send to the LLM.
  * Order: global prompt → character system prompt → story context → memory → summary → conversation history
  */
-export async function buildContext(opts: BuildContextOptions): Promise<ChatMessage[]> {
+export interface BuildContextResult {
+  messages: ChatMessage[];
+  /**
+   * Number of trailing "footer" messages (late injections: context index, memories,
+   * affinity, spatial/object coherence, narration style, last user message) appended
+   * after the conversation history. trimContext must preserve at least this many
+   * trailing items PLUS a few real conversation turns — otherwise, when these
+   * directive blocks fill up the whole `preserveRecent` window, real history gets
+   * trimmed away entirely and the LLM loses track of recent events.
+   */
+  footerCount: number;
+}
+
+export async function buildContext(opts: BuildContextOptions): Promise<BuildContextResult> {
   const {
     character,
     stories,
@@ -96,7 +238,6 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
     affinitySystemPrompt,
     responseFormatPrompt,
     narratorPrompt,
-    adventurePrompt,
     fastLlmEnabled = false,
     memoryInjectionPrompt,
     contextIndexInjectionEnabled = false,
@@ -107,6 +248,8 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
     embeddingModel,
     narrationStylePrompt,
     currentLocation,
+    partyState,
+    occurredEventIds = new Set<string>(),
   } = opts;
 
   const systemParts: string[] = [];
@@ -115,41 +258,41 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
     systemParts.push(globalSystemPrompt.trim());
   }
 
-  // Inyectar nombre del usuario para que el personaje lo use en sus respuestas
+  // Identidad del jugador — candado anti-confusión. El nombre del usuario es SOLO
+  // suyo: ningún personaje puede apropiárselo ni intercambiar su rol con el jugador.
   if (userDisplayName?.trim()) {
-    systemParts.push(`Recuerda que el usuario se llama ${userDisplayName.trim()}, y que es uno más en la interacción.`);
+    systemParts.push(buildUserIdentityBlock(userDisplayName.trim()));
   }
 
   // NOTE: affinity directive is injected AFTER the character block (see below),
   // so it overrides—rather than gets overridden by—the character's base description.
 
   if (narratorMode) {
+    // En modo narrador siempre se usa narratorPrompt, independientemente de si hay
+    // historia con adventureMode. El antiguo adventurePrompt (GM con mecánicas RPG)
+    // resultó letra muerta: el LLM interpretaba stats y combate a su aire porque
+    // no había ningún sistema real detrás. La única diferencia observable era el
+    // cierre con "¿Qué haces?" — que se puede añadir directamente al narratorPrompt.
     const allChars = character ? [character, ...groupCharacters] : groupCharacters;
-
-    if (adventureMode) {
-      // ── Game Master con mecánicas RPG ────────────────────────────────────
-      const charBlocksText = allChars.map((c) => buildCharacterBlock(c)).filter(Boolean).join('\n\n---\n\n');
-      const charSection = charBlocksText
-        ? `## Personajes en la aventura:\n\n${charBlocksText}`
-        : '';
-      const basePrompt = adventurePrompt?.trim() ?? '';
-      const gmPrompt = basePrompt.includes('{{PERSONAJES}}')
-        ? basePrompt.replace('{{PERSONAJES}}', charSection)
-        : [basePrompt, charSection].filter(Boolean).join('\n\n');
-      if (gmPrompt.trim()) systemParts.push(gmPrompt);
-
-    } else {
-      // ── Narrador básico (sin aventura) ────────────────────────────────────
-      const charBlocks = allChars.map((c) => buildCharacterBlock(c)).filter(Boolean);
-      const charSection = charBlocks.length > 0
-        ? `## Personajes presentes en la escena:\n\n${charBlocks.join('\n\n')}`
-        : '';
-      const basePrompt = narratorPrompt?.trim() ?? '';
-      const fullNarrPrompt = basePrompt.includes('{{PERSONAJES}}')
-        ? basePrompt.replace('{{PERSONAJES}}', charSection)
-        : [basePrompt, charSection].filter(Boolean).join('\n\n');
-      if (fullNarrPrompt.trim()) systemParts.push(fullNarrPrompt);
-    }
+    const charBlocks = allChars.map((c) => buildCharacterBlock(c)).filter(Boolean);
+    // Delimitador visual fuerte entre fichas para que el modelo no funda
+    // identidades cuando hay varios personajes en escena.
+    const CHAR_DELIM = '═══════════════════════════════';
+    const charSection = charBlocks.length > 0
+      ? `## Personajes presentes en la escena\n\n` +
+        charBlocks.map((b) => `${CHAR_DELIM}\n${b}`).join('\n\n') +
+        `\n${CHAR_DELIM}`
+      : '';
+    const basePrompt = narratorPrompt?.trim() ?? '';
+    const fullNarrPrompt = basePrompt.includes('{{PERSONAJES}}')
+      ? basePrompt.replace('{{PERSONAJES}}', charSection)
+      : [basePrompt, charSection].filter(Boolean).join('\n\n');
+    if (fullNarrPrompt.trim()) systemParts.push(fullNarrPrompt);
+    // Candado de identidad como parte separada → máxima autoridad (pegado a las
+    // fichas, cerca del punto de generación) y visible/localizable en el debug.
+    if (charBlocks.length > 0) systemParts.push(CHARACTER_IDENTITY_LOCK);
+    // Conocimiento por personaje — solo relevante con varios en escena.
+    if (charBlocks.length > 1) systemParts.push(KNOWLEDGE_SCOPING_NARRATOR);
 
   } else {
     // Single character definition
@@ -162,7 +305,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
 
     // Other group characters
     if (groupCharacters.length > 0) {
-      const otherParts: string[] = ['## Otros personajes presentes en la escena:'];
+      const otherParts: string[] = ['## Otros personajes presentes en la escena (NO eres tú):'];
       for (const c of groupCharacters) {
         // Include full description — truncating to 120 chars loses too much character context
         const desc = c.description.trim();
@@ -173,11 +316,20 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
         otherParts.push(block);
       }
       systemParts.push(otherParts.join('\n\n'));
+      // Candado: el personaje activo no debe absorber rasgos de los anteriores.
+      systemParts.push(buildSingleIdentityLock(character.name));
+      // Conocimiento limitado: no "lee" en el historial lo privado del jugador
+      // con otros personajes ni lo previo a su llegada a la escena.
+      systemParts.push(buildKnowledgeScopingSingle(character.name));
     }
 
     if (responseFormatPrompt?.trim()) {
       systemParts.push(responseFormatPrompt.trim());
     }
+
+    // Instrucción estática de formato de gestos — siempre al final del bloque
+    // de personaje para máxima autoridad sobre la descripción base del char.
+    systemParts.push(GESTURE_FORMAT_INSTRUCTION);
   }
 
   // ── Affinity + consent directive — built here, injected LATE (see below) ────
@@ -191,17 +343,24 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
   // its authority: LLMs weight content closer to the generation point more heavily,
   // so it overrides the character's base description even more effectively than before.
   let affinityBlock: string | null = null;
-  if (characterAffinities?.length) {
-    const consentLines = characterAffinities.map(({ name, affinity }) => {
-      if (affinity >= 80) {
-        return `- ${name}: afinidad ${affinity}/100 — ha dado su consentimiento emocional para interacciones íntimas`;
-      }
-      const tier =
-        affinity >= 61 ? 'confianza y cercanía' :
-        affinity >= 41 ? 'neutralidad' :
-        affinity >= 21 ? 'frialdad y desconfianza' :
+  // En modo personaje, el estado emocional inyectado es SOLO el del personaje que
+  // habla — no el de todo el reparto — para que no "lea" su relación con los demás.
+  // En modo narrador (omnisciente) sí se muestran todas las afinidades.
+  const affinitiesForBlock = narratorMode
+    ? (characterAffinities ?? [])
+    : (characterAffinities ?? []).filter((a) => a.characterId === character?.id);
+  if (affinitiesForBlock.length) {
+    const consentLines = affinitiesForBlock.map(({ name, affinity }) => {
+      const romance =
+        affinity >= 80 ? 'vínculo profundo — abierto/a al romance y la intimidad si la situación lo acompaña' :
+        affinity >= 60 ? 'aprecio y confianza — el romance sería como mucho una semilla incipiente y cautelosa, nunca dado por hecho' :
+        affinity >= 41 ? 'cordial pero SIN interés romántico — desvía los avances con naturalidad' :
+        affinity >= 21 ? 'frialdad y desconfianza — ni cercanía ni romance' :
                          'hostilidad activa';
-      return `- ${name}: afinidad ${affinity}/100 (${tier}) — NO ha dado consentimiento para contacto íntimo`;
+      const intimacy = affinity >= 80
+        ? 'ha dado su consentimiento emocional para interacciones íntimas'
+        : 'NO ha dado consentimiento para contacto íntimo';
+      return `- ${name}: afinidad ${affinity}/100 — ${romance}; ${intimacy}`;
     });
 
     const consentDirective =
@@ -212,6 +371,15 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
       `o sentimiento descrito en la ficha del personaje. ` +
       `Si la descripción dice que el personaje siente algo por el jugador, eso es su POTENCIAL — ` +
       `no su realidad actual dado lo ocurrido.\n\n` +
+      `PROGRESIÓN ROMÁNTICA — REGLA DE NATURALIDAD:\n` +
+      `El enamoramiento es fruto de MUCHO tiempo compartido y de varios momentos significativos, no de unas pocas interacciones agradables. La afinidad mide esa historia acumulada y sube despacio.\n` +
+      `• Afinidad < 60: el personaje NO siente atracción romántica por el jugador. Responde a insinuaciones, coqueteos o declaraciones con cortesía distante, humor, evasión o incomodidad — NUNCA las corresponde. No se sonroja por él, no fantasea, no busca cercanía romántica.\n` +
+      `• Afinidad 60-79: hay aprecio y confianza, pero el romance es como mucho una semilla incipiente y CAUTELOSA: dudas, contención, miedo a malinterpretar. El personaje NO declara sentimientos ni da por hecha una relación; necesita más tiempo y más momentos compartidos.\n` +
+      `• Afinidad ≥ 80: el vínculo es lo bastante profundo como para abrirse al romance o la intimidad si la situación lo acompaña.\n` +
+      `• PROHIBIDO acelerar el romance: por encantador que sea el jugador, el personaje no pasa de neutral a enamorado en unos pocos turnos. Que dude, que cueste, que el jugador se lo gane.\n` +
+      `• Esto rige AUNQUE la ficha describa al personaje como sensual, coqueto, provocador, cariñoso, "atrevido" o propenso a situaciones subidas de tono. Con afinidad < 60 esos rasgos NO se dirigen al jugador como interés romántico: se expresan con ligereza, torpeza involuntaria, humor o hacia el mundo en general — jamás como atracción declarada ni reciprocada hacia el jugador. Un personaje coqueto por naturaleza coquetea con todos por igual y con nadie en serio mientras la afinidad sea baja.\n` +
+      `• Si turnos anteriores se desviaron hacia el romance por encima de lo que la afinidad permite, NO lo perpetúes: corrige el rumbo con naturalidad (el personaje se contiene, se da cuenta de que va demasiado rápido, recula). El estado de afinidad manda sobre la inercia de la conversación.\n` +
+      `• NUNCA verbalices que "es pronto", "aún no nos conocemos lo suficiente" o "quizás más adelante": insinuar que el romance llegará a su debido tiempo YA pone el romance sobre la mesa y alimenta una falsa sensación de cercanía o esperanza. A baja afinidad el personaje simplemente NO trata el romance como un tema vivo — no lo nombra, no lo niega "para luego", lo deja fuera. Redirige hacia lo práctico, lo cotidiano o lo que de verdad le ocupa, como haría con cualquier conocido reciente. No todo encuentro gira en torno a conocerse o a un posible vínculo sentimental: las interacciones son racionales y sobre el mundo, no sobre la relación.\n\n` +
       `REGLA ABSOLUTA SOBRE CONTACTO FÍSICO ÍNTIMO:\n` +
       `Si el jugador intenta tocar partes íntimas (pechos, trasero, entrepierna, genitales) sin afinidad ≥ 80:\n` +
       `• Rechazo CLARO e INEQUÍVOCO — retrocede, aparta la mano, crea distancia\n` +
@@ -220,19 +388,23 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
       `• PROHIBIDO mostrar curiosidad o atracción ante ese contacto\n` +
       `• afinidad < 40 = enfado explícito o rechazo duro; 40-60 = rechazo firme; 61-79 = rechazo claro con herida`;
 
-    // consentDirective (current state) always first so the LLM knows the real
-    // emotional state before anything else.
-    // affinitySystemPrompt (tier guide + [AFINIDAD:...] tag instruction) only
-    // when fast LLM is OFF — it's meaningless (and wastes tokens) when the fast
-    // LLM handles affinity analysis. Placed AFTER consentDirective so the tag
-    // emission instruction is as close as possible to the generation point.
-    affinityBlock = (!fastLlmEnabled && affinitySystemPrompt?.trim())
-      ? `${consentDirective}\n\n---\n\n${affinitySystemPrompt.trim()}`
-      : consentDirective;
+    // consentDirective (estado + gradación romántica + contacto físico) SIEMPRE.
+    // Cuando el LLM rápido está OFF añadimos, al final (máxima autoridad):
+    //   · la guía de tramos editable (affinitySystemPrompt), y
+    //   · la instrucción concreta de auto-reporte de etiquetas [AFINIDAD:...].
+    // Cuando está ON, el analizador externo gestiona la afinidad → no pedimos tags.
+    if (!fastLlmEnabled) {
+      const tierGuide = affinitySystemPrompt?.trim() ? `${affinitySystemPrompt.trim()}\n\n---\n\n` : '';
+      affinityBlock = `${consentDirective}\n\n---\n\n${tierGuide}${AFFINITY_SELF_REPORT_INSTRUCTION}`;
+    } else {
+      affinityBlock = consentDirective;
+    }
   }
   // ─────────────────────────────────────────────────────────────────────────────
 
-  // Active story contexts (sorted by priority)
+  // Active story contexts (sorted by priority).
+  // buildStoryBlock is purely static — no dynamic params — so the system message
+  // remains cacheable across turns even as events occur or location changes.
   for (const story of stories) {
     const storyBlock = buildStoryBlock(story);
     if (storyBlock) systemParts.push(storyBlock);
@@ -252,11 +424,6 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
     : memRepo.findByConversation(conversationId, character?.id);
   const allMemories = rawMemories.slice(0, MAX_MEMORIES);
 
-  // If no configurable injection prompt, fall back to appending a basic block to the system prompt
-  if (allMemories.length > 0 && !memoryInjectionPrompt?.trim()) {
-    systemParts.push(buildMemoryBlock(allMemories, charNameMap));
-  }
-
   // Example dialogue (injected as few-shot examples if present, single-char mode only)
   const fewShot: ChatMessage[] = [];
   if (!narratorMode && character?.exampleDialogue?.length > 0) {
@@ -272,16 +439,12 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
     content: systemParts.join('\n\n---\n\n'),
   };
 
-  // Build history — inject summary section before actual messages
+  // Build history. NOTE: the "Historia hasta ahora" summary block is no longer
+  // injected here at the very front — it's pushed as part of the late-injection
+  // footer (close to the last user message) so it doesn't invalidate the KV cache
+  // for the entire conversation history every time it changes (~every 8 messages).
   const trimmedMessages = messages.slice(-maxMessages);
   const history: ChatMessage[] = [];
-
-  if (summary?.trim()) {
-    history.push({
-      role: 'system',
-      content: `## Historia hasta ahora\n${summary.trim()}`,
-    });
-  }
 
   // ── Context index injection (world-state background, further from generation) ──
   let contextIndexBlock: string | null = null;
@@ -340,22 +503,34 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
   //
   // Injection order (furthest → closest to the generation point):
   //   1. Context index      — world-state background knowledge
-  //   2. Memories           — character-specific past events, may include emotional coloring
-  //   3. Affinity block     — current relationship state + consent rules
-  //   4. Spatial coherence  — (single-char mode only) prevents location drift
-  //   5. Narration style    — user preference for verbosity
-  //   6. [Last user msg]    ← generation starts here
+  //   2. Pending plot events — script destinations (changes only when an event fires)
+  //   3. Party state        — combat HP/energy/inventory snapshot (changes only after battles)
+  //   4. Occurred story events — triggered events that already happened in this conv
+  //   5. Memories           — character-specific past events, may include emotional coloring
+  //   6. Scene coherence    — location + established objects (one consolidated block)
+  //   7. Affinity block     — current relationship state + consent rules (changes often)
+  //   8. Narration style    — user preference for verbosity
+  //   9. Summary            — "Historia hasta ahora" (rolling, changes every ~6 messages)
+  //  10. [Last user msg]    ← generation starts here
   //
-  // Keeping these OUT of the first SYSTEM message means the large static prefix
-  // (character prompt + stories) can be fully reused by the KV cache across turns,
-  // even when affinity values or memory sets change.
+  // Ordered so that the blocks most likely to change between consecutive turns
+  // (affinity, summary, last message) sit closest to the end. This keeps the
+  // longest possible common prefix stable across turns, maximizing KV-cache reuse.
+  //
+  // IMPORTANT: The first SYSTEM message (character prompt + stories) MUST be fully
+  // static — no per-conversation dynamic data. This is the only part that benefits
+  // from the LLM's prefix KV-cache across turns. Occurred events, current location,
+  // and memories are all injected HERE (footer) so they never pollute that static
+  // prefix and cause needless cache misses.
 
-  // Inject the location block in all modes (single-char AND narrator).
-  // The narrator needs to know the current location just as much as a single character.
-  const spatialCoherenceBlock = buildLocationBlock(currentLocation);
+  // Scene coherence (location + objects) is injected in all modes — the narrator
+  // needs the current location just as much as a single character.
+  const sceneCoherenceBlock   = buildSceneCoherenceBlock(currentLocation);
+  const pendingEventsBlock    = buildPendingEventsBlock(stories, occurredEventIds);
+  const occurredEventsBlock   = buildOccurredEventsBlock(stories, occurredEventIds);
+  const partyStateBlock       = buildPartyStateBlock(partyState);
 
-  const shouldInjectMemories = allMemories.length > 0 && memoryInjectionPrompt?.trim();
-  const needsSplit = shouldInjectMemories || Boolean(contextIndexBlock) || Boolean(affinityBlock) || Boolean(narrationStylePrompt?.trim()) || Boolean(spatialCoherenceBlock);
+  const needsSplit = true; // sceneCoherenceBlock is always injected, so the split always applies
   const historyBody = needsSplit ? trimmedMessages.slice(0, -1) : trimmedMessages;
   const lastMessage = needsSplit ? trimmedMessages[trimmedMessages.length - 1] : null;
 
@@ -363,41 +538,79 @@ export async function buildContext(opts: BuildContextOptions): Promise<ChatMessa
     history.push({ role: m.role, content: m.content });
   }
 
+  let footerCount = 0;
+
   // 1. Context index (world background — furthest from generation)
   if (contextIndexBlock) {
     history.push({ role: 'system', content: contextIndexBlock });
+    footerCount++;
   }
 
-  // 2. Memories (character-specific state)
-  if (shouldInjectMemories && lastMessage) {
-    const injectionBlock = buildMemoryInjectionBlock(allMemories, charNameMap, memoryInjectionPrompt!);
-    console.log(`[memory] Injecting ${allMemories.length} memories for conv ${conversationId} (${charNameMap.size} chars)`);
-    history.push({ role: 'system', content: injectionBlock });
-  } else if (allMemories.length > 0) {
-    console.log(`[memory] Skipped injection — memories: ${allMemories.length}, prompt set: ${Boolean(memoryInjectionPrompt?.trim())}`);
+  // 2. Pending plot events ("trama pendiente") — script destinations with triggers.
+  // Changes only when an event fires, so it sits early in the footer.
+  if (pendingEventsBlock) {
+    history.push({ role: 'system', content: pendingEventsBlock });
+    footerCount++;
   }
 
-  // 3. Affinity + consent directive
+  // 3. Party state (combat HP/energy/inventory) — changes only after a battle resolves.
+  if (partyStateBlock) {
+    history.push({ role: 'system', content: partyStateBlock });
+    footerCount++;
+  }
+
+  // 4. Occurred story events — triggered events that have already happened in this
+  // conversation. Moved OUT of the static system message (where they invalidated
+  // the prefix cache every time an event fired) into the footer.
+  if (occurredEventsBlock) {
+    history.push({ role: 'system', content: occurredEventsBlock });
+    footerCount++;
+  }
+
+  // 5. Memories — always injected in footer (never in system message) to keep the
+  // static prefix cache-stable. Uses template if configured, plain block otherwise.
+  if (allMemories.length > 0) {
+    const memBlock = memoryInjectionPrompt?.trim()
+      ? buildMemoryInjectionBlock(allMemories, charNameMap, memoryInjectionPrompt!)
+      : buildMemoryBlock(allMemories, charNameMap);
+    console.log(`[memory] Injecting ${allMemories.length} memories for conv ${conversationId} (${charNameMap.size} chars, template: ${Boolean(memoryInjectionPrompt?.trim())})`);
+    history.push({ role: 'system', content: memBlock });
+    footerCount++;
+  }
+
+  // 6. Scene coherence anchor — location + established objects in one block.
+  history.push({ role: 'system', content: sceneCoherenceBlock });
+  footerCount++;
+
+  // 7. Affinity + consent directive — placed AFTER scene coherence because
+  // affinity values can change every turn; keeping the more static coherence
+  // block earlier preserves more of the cacheable prefix.
   if (affinityBlock && needsSplit) {
     history.push({ role: 'system', content: affinityBlock });
+    footerCount++;
   }
 
-  // 4. Spatial coherence anchor (single-char mode) — prevents location drift
-  if (spatialCoherenceBlock && needsSplit) {
-    history.push({ role: 'system', content: spatialCoherenceBlock });
-  }
-
-  // 5. Narration style directive (user preference — overrides default verbosity)
+  // 8. Narration style directive (user preference — overrides default verbosity)
   if (narrationStylePrompt?.trim() && needsSplit) {
     history.push({ role: 'system', content: narrationStylePrompt.trim() });
+    footerCount++;
   }
 
-  // 6. Last user message (generation point)
+  // 9. Rolling summary ("Historia hasta ahora") — changes every ~6 messages, kept
+  // close to the generation point so its periodic changes don't invalidate the
+  // cache for the conversation history and earlier directive blocks.
+  if (summary?.trim()) {
+    history.push({ role: 'system', content: `## Historia hasta ahora\n${summary.trim()}` });
+    footerCount++;
+  }
+
+  // 10. Last user message (generation point)
   if (needsSplit && lastMessage) {
     history.push({ role: lastMessage.role, content: lastMessage.content });
+    footerCount++;
   }
 
-  return [systemMessage, ...fewShot, ...history];
+  return { messages: [systemMessage, ...fewShot, ...history], footerCount };
 }
 
 function buildCharacterBlock(char: Character): string {
@@ -455,10 +668,20 @@ function buildCharacterBlock(char: Character): string {
   return parts.join('\n\n');
 }
 
+// Purely static — no per-conversation dynamic data (no occurredEventIds, no
+// currentLocation). This lets the KV-cache reuse this block across ALL turns of
+// the same conversation without ever invalidating it.
+//   · Events WITHOUT trigger → background world facts, shown here as "Key Events"
+//   · Events WITH trigger    → handled dynamically in the footer:
+//       - pending  → buildPendingEventsBlock
+//       - occurred → buildOccurredEventsBlock
+//   · Locations → shown in full (no proximity filtering); current-location context
+//     is provided by the sceneCoherenceBlock footer block.
 function buildStoryBlock(story: Story): string {
-  if (!story.globalContext.trim() && !story.worldLore.trim() && !story.narrativeRules.trim()) {
-    return '';
-  }
+  const hasContent =
+    story.globalContext.trim() || story.worldLore.trim() || story.narrativeRules.trim() ||
+    story.persistentEvents.length > 0 || (story.locations?.length ?? 0) > 0;
+  if (!hasContent) return '';
 
   const parts: string[] = [`# Story Context: ${story.name}`];
 
@@ -478,8 +701,11 @@ function buildStoryBlock(story: Story): string {
     parts.push(`## Restrictions\n${story.behaviorRestrictions.map((r) => `- ${r}`).join('\n')}`);
   }
 
-  if (story.persistentEvents.length > 0) {
-    const events = story.persistentEvents
+  // Background facts: events WITHOUT a trigger. Always shown as world truths.
+  // Events WITH a trigger are handled in the footer (pending or occurred blocks).
+  const factEvents = story.persistentEvents.filter((e) => !e.trigger.trim());
+  if (factEvents.length > 0) {
+    const events = factEvents
       .sort((a, b) => b.importance - a.importance)
       .slice(0, 5)
       .map((e) => `- [${e.title}]: ${e.description}`)
@@ -488,15 +714,7 @@ function buildStoryBlock(story: Story): string {
   }
 
   if (story.locations && story.locations.length > 0) {
-    const locationBlocks = story.locations.map((loc) => {
-      const locParts = [`### ${loc.name}`];
-      if (loc.description.trim()) locParts.push(loc.description.trim());
-      if (loc.contents.trim())    locParts.push(`**Contenido:** ${loc.contents.trim()}`);
-      if (loc.exits.trim())       locParts.push(`**Salidas:** ${loc.exits.trim()}`);
-      if (loc.atmosphere.trim())  locParts.push(`**Atmósfera:** ${loc.atmosphere.trim()}`);
-      return locParts.join('\n');
-    }).join('\n\n');
-    parts.push(`## Ubicaciones conocidas — REGLA IMPORTANTE\nLas siguientes ubicaciones son las que existen en esta historia. El narrador NO debe inventar lugares, objetos, puertas ni salidas que no estén descritos aquí.\n\n${locationBlocks}`);
+    parts.push(buildLocationsSection(story));
   }
 
   if (Object.keys(story.stateVariables).length > 0) {
@@ -507,6 +725,98 @@ function buildStoryBlock(story: Story): string {
   }
 
   return parts.join('\n\n');
+}
+
+// ── Ubicaciones de historia — lista completa (estática) ──────────────────────
+//
+// Muestra TODAS las ubicaciones con detalle completo. La ubicación actual se
+// comunica por el sceneCoherenceBlock del footer (dinámico), no aquí. Esto
+// mantiene el sistema de ubicaciones completamente estático para el caché KV.
+//
+// story.openWorld controla la regla: mapa cerrado (el narrador no inventa
+// lugares) vs mundo abierto (puede crear lugares nuevos coherentes y debe
+// registrarlos con [UBICACION:...]).
+function buildLocationsSection(story: Story): string {
+  const locs = story.locations;
+
+  const renderLoc = (loc: (typeof locs)[number]) => {
+    const locParts = [`### ${loc.name}`];
+    if (loc.description.trim()) locParts.push(loc.description.trim());
+    if (loc.contents.trim())    locParts.push(`**Contenido:** ${loc.contents.trim()}`);
+    if (loc.exits.trim())       locParts.push(`**Salidas:** ${loc.exits.trim()}`);
+    if (loc.atmosphere.trim())  locParts.push(`**Atmósfera:** ${loc.atmosphere.trim()}`);
+    return locParts.join('\n');
+  };
+
+  const body = locs.map((l) => renderLoc(l)).join('\n\n');
+
+  const rule = story.openWorld
+    ? `Las siguientes ubicaciones existen en esta historia. Prefiérelas al narrar. ` +
+      `Si la narrativa necesita un lugar que no está descrito aquí, puedes crearlo, ` +
+      `siempre coherente con el mundo y su tono — y registra el cambio de escena ` +
+      `emitiendo [UBICACION:nombre] al final de tu respuesta. Lo que SÍ está descrito ` +
+      `(contenidos, salidas, atmósfera) son hechos fijos que debes respetar.`
+    : `Las siguientes ubicaciones son las ÚNICAS que existen en esta historia (mapa cerrado). ` +
+      `El narrador NO debe inventar lugares, objetos, puertas ni salidas que no estén descritos aquí.`;
+
+  return `## Ubicaciones conocidas — REGLA IMPORTANTE\n${rule}\n\n${body}`;
+}
+
+// ── Trama pendiente: eventos con trigger aún no ocurridos ────────────────────
+//
+// Es el "guión" reintroducido: eventos con disparador que actúan como DESTINOS
+// narrativos. Se inyecta en el footer (cerca del punto de generación) y cambia
+// solo cuando un evento ocurre — el LLM lo marca emitiendo [EVENTO_OCURRIDO:...],
+// que engine.ts parsea y persiste por conversación.
+function buildPendingEventsBlock(stories: Story[], occurredEventIds: Set<string>): string | null {
+  const pending = stories.flatMap((story) =>
+    story.persistentEvents.filter((e) => e.trigger.trim() && !occurredEventIds.has(e.id)),
+  );
+  if (pending.length === 0) return null;
+
+  const top = pending.sort((a, b) => b.importance - a.importance).slice(0, 6);
+  const lines = top.map(
+    (e) =>
+      `- «${e.title}» (importancia ${e.importance}/10)\n` +
+      `  Disparador: ${e.trigger.trim()}\n` +
+      `  Qué ocurre: ${e.description.trim()}`,
+  );
+
+  return (
+    `## TRAMA PENDIENTE — DESTINOS NARRATIVOS\n\n` +
+    `Los siguientes eventos de la historia AÚN NO HAN OCURRIDO. Son destinos hacia los que ` +
+    `debe avanzar la narración — no una ruta fija, y NUNCA hechos del pasado:\n\n` +
+    `${lines.join('\n\n')}\n\n` +
+    `CÓMO USARLOS:\n` +
+    `- NO los menciones ni narres como si ya hubieran pasado\n` +
+    `- Cuando la situación se acerque al disparador de un evento, orienta la escena hacia él de forma natural\n` +
+    `- Como mucho UN evento puede ocurrir por respuesta, y solo si su disparador se ha cumplido\n` +
+    `- Cuando narres efectivamente uno de estos eventos, añade al final de tu respuesta (línea separada):\n` +
+    `[EVENTO_OCURRIDO:título exacto del evento]\n` +
+    `- No emitas esa etiqueta si el evento aún no ha sucedido en tu narración`
+  );
+}
+
+// ── Eventos de guión ya ocurridos — bloque dinámico del footer ───────────────
+//
+// Eventos CON trigger que ya se dispararon en esta conversación. Se inyectan en
+// el footer (no en el mensaje de sistema estático) para que su aparición
+// progresiva no invalide el caché KV del prefijo estático.
+function buildOccurredEventsBlock(stories: Story[], occurredEventIds: Set<string>): string | null {
+  const occurred = stories.flatMap((s) =>
+    s.persistentEvents.filter((e) => e.trigger.trim() && occurredEventIds.has(e.id)),
+  );
+  if (occurred.length === 0) return null;
+
+  const lines = occurred
+    .map((e) => `- [${e.title}]: ${e.description}`)
+    .join('\n');
+
+  return (
+    `## Eventos del guión ya ocurridos en esta conversación\n` +
+    `Estos eventos YA SUCEDIERON narrativamente. Son hechos del pasado: trátalos como ` +
+    `parte de la historia vivida, no los repitas ni los narres de nuevo como novedad.\n${lines}`
+  );
 }
 
 const TYPE_LABELS: Record<string, string> = {

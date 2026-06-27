@@ -7,7 +7,7 @@ import { Button } from '../ui/Button.tsx';
 import { Input, Textarea } from '../ui/Input.tsx';
 import { Avatar } from '../ui/Avatar.tsx';
 import type { Story, CreateStoryDto, StoryLocation } from '@rpgspeak/shared';
-import { Plus, Trash2, Search, Wand2, ChevronDown, ChevronUp, MapPin } from 'lucide-react';
+import { Plus, Trash2, Search, Wand2, MapPin } from 'lucide-react';
 
 /** crypto.randomUUID() only works in secure contexts (HTTPS / localhost).
  *  When serving from LAN over plain HTTP, fall back to a Math.random UUID v4. */
@@ -36,10 +36,10 @@ const DEFAULT_STORY: CreateStoryDto = {
   persistentEvents: [],
   locations: [],
   stateVariables: {},
-  timeline: [],
   behaviorRestrictions: [],
   isActive: false,
   adventureMode: false,
+  openWorld: false,
   characters: [],
 };
 
@@ -197,6 +197,26 @@ export function StoryEditor({ story, open, onClose }: StoryEditorProps) {
                 </span>
                 <p className="text-xs text-text-muted mt-0.5">
                   Activa el modo Game Master: la IA narra como GM, gestiona mecánicas RPG y siempre pregunta qué hacer a continuación.
+                </p>
+              </div>
+            </div>
+            <div className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
+              form.openWorld ? 'border-accent bg-accent/10' : 'border-border hover:border-accent/40'
+            }`} onClick={() => set('openWorld', !form.openWorld)}>
+              <input
+                type="checkbox"
+                checked={form.openWorld ?? false}
+                onChange={(e) => set('openWorld', e.target.checked)}
+                className="w-4 h-4 rounded mt-0.5 accent-violet-600 flex-shrink-0"
+                onClick={(e) => e.stopPropagation()}
+              />
+              <div>
+                <span className={`text-sm font-medium ${form.openWorld ? 'text-accent' : 'text-text-primary'}`}>
+                  Mundo abierto
+                </span>
+                <p className="text-xs text-text-muted mt-0.5">
+                  Activado: el narrador puede crear ubicaciones nuevas coherentes con el mundo (las registra automáticamente como ubicación de escena).
+                  Desactivado: mapa cerrado — solo existen las ubicaciones definidas en la pestaña Ubicaciones.
                 </p>
               </div>
             </div>

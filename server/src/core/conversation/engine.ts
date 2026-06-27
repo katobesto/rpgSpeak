@@ -1,4 +1,4 @@
-import type { GenerateRequest, Character, Story, Message, Conversation, MemoryEntry } from '@rpgspeak/shared';
+import type { GenerateRequest, Character, Story, Message, Conversation, MemoryEntry, PartyState } from '@rpgspeak/shared';
 import { buildContext } from './context-builder.js';
 import { trimContext } from './context-trimmer.js';
 import { createProvider } from '../llm/provider.factory.js';
@@ -13,6 +13,7 @@ import { NotFoundError, ProviderError } from '../../shared/errors.js';
 import { getUserById } from '../../modules/auth/auth.service.js';
 import { autoExtractContextAsync } from '../context/context-extractor.js';
 import { SummariesRepository } from '../../modules/summaries/summaries.repository.js';
+import { EventStatusRepository } from '../../modules/stories/event-status.repository.js';
 
 const providerRepo   = new ProviderRepository();
 const charRepo       = new CharacterRepository();
@@ -22,6 +23,7 @@ const convRepo       = new ConversationRepository();
 const settingsService = new SettingsService();
 const memRepo        = new MemoryRepository();
 const summariesRepo  = new SummariesRepository();
+const eventStatusRepo = new EventStatusRepository();
 
 export interface GenerateOptions {
   conversationId: string;
@@ -47,7 +49,9 @@ export interface AffinityUpdate {
 export interface StreamOptions extends GenerateOptions {
   signal?: AbortSignal;
   onToken: (token: string) => void;
-  onDone: (response: { messageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null }) => void;
+  /** Called for each token inside a &lt;think&gt;...&lt;/think&gt; block (reasoning models). */
+  onThinkToken?: (token: string) => void;
+  onDone: (response: { messageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null; thinkContent?: string }) => void;
   onError: (error: Error) => void;
 }
 
@@ -574,7 +578,11 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       ownerStyle === 'medium' ? (settings.narrationMediumPrompt || undefined) :
       undefined;
 
-    const rawContext = await buildContext({
+    // Eventos de historia ya ocurridos en esta conversación (los pendientes con
+    // trigger se inyectan como "trama pendiente" en el footer del contexto)
+    const occurredEventIds = eventStatusRepo.findOccurredIds(conversationId);
+
+    const { messages: rawContext, footerCount } = await buildContext({
       character: character ?? groupCharacters[0],
       stories: linkedStories,
       messages: [...historyForContext, { ...userMsg, role: 'user' as const }],
@@ -590,7 +598,6 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       affinitySystemPrompt: settings.affinitySystemPrompt,
       responseFormatPrompt: settings.responseFormatPrompt,
       narratorPrompt: settings.narratorPrompt,
-      adventurePrompt: settings.adventurePrompt,
       fastLlmEnabled: useFastLlm,
       memoryInjectionPrompt: settings.memoryInjectionPrompt,
       contextIndexInjectionEnabled:  settings.contextIndexInjectionEnabled,
@@ -601,12 +608,26 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       embeddingModel:      settings.embeddingModel,
       narrationStylePrompt,
       currentLocation:     conversation.currentLocation,
+      partyState:          (conversation.metadata as { partyState?: PartyState } | null)?.partyState,
+      occurredEventIds,
     });
 
-    // Use character's contextLength, then settings default, then 32768
+    // The global "Ajustes → Contexto" value (settings.defaultContextLength) is the
+    // AUTHORITATIVE FLOOR for the context window. A per-character `contextLength`
+    // can only ever EXTEND the window beyond the global value, never shrink it
+    // below it — otherwise an old/low per-character value (e.g. the legacy 4096
+    // default) silently overrides the user's global settings and crowds out real
+    // conversation history (see footerCount usage below).
     const activeChar = character ?? groupCharacters[0];
-    const maxCtxTokens = activeChar?.contextLength ?? settings.defaultContextLength ?? 32768;
-    const { messages: trimmedMessagesRaw } = trimContext(rawContext, maxCtxTokens);
+    const globalCtxTokens = settings.defaultContextLength ?? 32768;
+    const maxCtxTokens = Math.max(activeChar?.contextLength ?? 0, globalCtxTokens);
+    // Always preserve `footerCount` trailing directive blocks (context index, memories,
+    // affinity, spatial/object coherence, narration style, last user msg) PLUS at least
+    // 6 real conversation turns. Without this, when maxCtxTokens is small (e.g. a
+    // character with the 4096-token default), the directive footer alone can fill the
+    // whole "preserveRecent" window and trim away ALL real history — the LLM then has
+    // no idea what just happened a couple of messages ago.
+    const { messages: trimmedMessagesRaw } = trimContext(rawContext, maxCtxTokens, footerCount + 6);
     const trimmedMessages = [...trimmedMessagesRaw];
 
     // ── Pre-turn behavioral directive injection ────────────────────────────────
@@ -682,6 +703,9 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       stopSequences: activeChar?.llmParams?.stopSequences,
       stream: true,
       disableFallbacks: settings.disableFallbacks,
+      reasoning: settings.reasoningEnabled
+        ? { enabled: true, effort: settings.reasoningEffort }
+        : undefined,
     };
 
     const assistantMsg = msgRepo.create({
@@ -696,10 +720,51 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     });
 
     let accumulated = '';
+    let thinkAccumulated = '';
     let finalTokens = 0;
     let tokenBreakdown = { prompt: 0, completion: 0, cached: 0 };
     const startTime = Date.now();
     const { signal } = opts;
+
+    // ── <think>…</think> router ───────────────────────────────────────────────
+    // Filters reasoning blocks emitted by models like Qwen3 (via <think> tags).
+    // Content tokens go to onToken/accumulated; think tokens go to onThinkToken/
+    // thinkAccumulated. Runs at the engine level so ALL providers benefit (Ollama,
+    // LM Studio, OpenAI-compatible) without each having to implement the filter.
+    let inThink = false;
+    let thinkBoundary = '';
+
+    const routeToken = (raw: string): void => {
+      thinkBoundary += raw;
+      while (thinkBoundary.length > 0) {
+        const tag = inThink ? '</think>' : '<think>';
+        const fullIdx = thinkBoundary.indexOf(tag);
+        if (fullIdx !== -1) {
+          const before = thinkBoundary.slice(0, fullIdx);
+          thinkBoundary = thinkBoundary.slice(fullIdx + tag.length);
+          if (!inThink && before) { accumulated += before; onToken(before); }
+          if (inThink && before)  { thinkAccumulated += before; opts.onThinkToken?.(before); }
+          inThink = !inThink;
+          continue;
+        }
+        // Partial tag at end — hold it back until we know if it's a full tag.
+        let holdFrom = thinkBoundary.length;
+        for (let i = 0; i < thinkBoundary.length; i++) {
+          if (thinkBoundary[i] === '<') {
+            const tail = thinkBoundary.slice(i);
+            if (tag.startsWith(tail)) { holdFrom = i; break; }
+          }
+        }
+        const safe = thinkBoundary.slice(0, holdFrom);
+        if (safe) {
+          if (inThink) { thinkAccumulated += safe; opts.onThinkToken?.(safe); }
+          else         { accumulated += safe; onToken(safe); }
+        }
+        thinkBoundary = thinkBoundary.slice(holdFrom);
+        break;
+      }
+    };
+    // ─────────────────────────────────────────────────────────────────────────
 
     const gen = llm.stream(request);
     let iterResult = await gen.next();
@@ -718,10 +783,14 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
         });
         break;
       }
-      const token = iterResult.value as string;
-      accumulated += token;
-      onToken(token);
+      routeToken(iterResult.value as string);
       iterResult = await gen.next();
+    }
+
+    // Flush any partial tag held in the boundary buffer
+    if (thinkBoundary) {
+      if (inThink) { thinkAccumulated += thinkBoundary; opts.onThinkToken?.(thinkBoundary); }
+      else         { accumulated += thinkBoundary; onToken(thinkBoundary); }
     }
 
     if (!aborted) {
@@ -775,17 +844,52 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       cleanContent = accumulated.replace(/\[AFINIDAD:[^\]]+\]/g, '').trimEnd();
     }
 
-    // ── Parse [LOCATION:...] location tags ────────────────────────────────────
-    // The main LLM emits this tag when the scene moves to a new place.
+    // ── Parse [UBICACION:...] / [LOCATION:...] location tags ───────────────────
+    // The main LLM emits this tag (per the spatial-coherence directive, in
+    // Spanish: [UBICACION:...]) when the scene moves to a new place. We also
+    // accept the English [LOCATION:...] form for backward compatibility.
     // We take the LAST occurrence (most authoritative in long responses),
     // persist it and strip all occurrences from the visible content.
-    const LOCATION_RE = /\[LOCATION:\s*([^\]]+?)\s*\]/gi;
+    const LOCATION_RE = /\[(?:UBICACION|LOCATION):\s*([^\]]+?)\s*\]/gi;
     let locationUpdate: string | null | undefined;
     const locationMatches = [...cleanContent.matchAll(LOCATION_RE)];
     if (locationMatches.length > 0) {
       locationUpdate = locationMatches[locationMatches.length - 1][1].trim();
       convRepo.updateLocation(conversationId, locationUpdate);
       cleanContent = cleanContent.replace(LOCATION_RE, '').trimEnd();
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── Parse [EVENTO_OCURRIDO:...] story-event tags ──────────────────────────
+    // The pending-events footer block instructs the LLM to emit this tag when it
+    // narrates one of the script's pending events. We match the title against
+    // the linked stories' triggered events, persist the occurred status for this
+    // conversation, and strip all occurrences from the visible content.
+    const EVENT_DONE_RE = /\[EVENTO_OCURRIDO:\s*([^\]]+?)\s*\]/gi;
+    const eventMatches = [...cleanContent.matchAll(EVENT_DONE_RE)];
+    if (eventMatches.length > 0) {
+      for (const m of eventMatches) {
+        const tagTitle = m[1].trim().toLowerCase();
+        for (const story of linkedStories) {
+          const candidates = story.persistentEvents.filter(
+            (e) => e.trigger.trim() && !occurredEventIds.has(e.id),
+          );
+          // Exact title match first; fall back to containment for minor LLM rephrasing
+          const ev =
+            candidates.find((e) => e.title.trim().toLowerCase() === tagTitle) ??
+            candidates.find((e) => {
+              const t = e.title.trim().toLowerCase();
+              return t.includes(tagTitle) || tagTitle.includes(t);
+            });
+          if (ev) {
+            eventStatusRepo.markOccurred(conversationId, story.id, ev.id);
+            occurredEventIds.add(ev.id);
+            console.log(`[story-events] Evento ocurrido en conv ${conversationId}: "${ev.title}"`);
+            break;
+          }
+        }
+      }
+      cleanContent = cleanContent.replace(EVENT_DONE_RE, '').trimEnd();
     }
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -803,13 +907,14 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
         cachedTokens: tokenBreakdown.cached,
         ...(aborted ? { aborted: true } : {}),
         ...(narratorMode ? { narrator: true } : {}),
+        ...(thinkAccumulated ? { thinkContent: thinkAccumulated } : {}),
         promptMessages: trimmedMessages,
       },
     });
 
     if (!aborted) {
       convRepo.incrementCounts(conversationId, finalTokens);
-      onDone({ messageId: assistantMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, locationUpdate });
+      onDone({ messageId: assistantMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, locationUpdate, thinkContent: thinkAccumulated || undefined });
       // Fire-and-forget background tasks (non-blocking)
       updateSummaryAsync(conversationId, provider, modelId, narratorMode);
       const updatedConv = convRepo.findById(conversationId);
@@ -951,7 +1056,98 @@ async function analyzeExchangeAsync(
   }
 }
 
-// ─── Summary Update ───────────────────────────────────────────────────────────
+// ─── Rolling Summary ──────────────────────────────────────────────────────────
+//
+// conversations.summary is a ROLLING summary of the WHOLE story, not just the
+// latest fragment: each update feeds the previous accumulated summary plus the
+// most recent exchanges back to the LLM, which returns an updated whole-story
+// summary. Without this, once the trimmer drops old history the LLM only ever
+// "remembers" the last ~6 messages worth of summarized story — everything
+// earlier evaporates from the context.
+
+async function generateRollingSummary(
+  conversationId: string,
+  provider: NonNullable<ReturnType<ProviderRepository['findById']>>,
+  modelId: string,
+  isNarrator: boolean,
+): Promise<void> {
+  const conv = convRepo.findById(conversationId);
+  if (!conv) return;
+
+  const allMessages    = msgRepo.findByConversation(conversationId);
+  const recentMessages = allMessages.slice(-6).filter((m) => m.role !== 'system');
+  if (recentMessages.length < 2) return;
+
+  const messageIndexTo  = allMessages.length - 1;
+  const settings        = settingsService.getAll();
+  const maxFrases       = settings.summaryMaxLength ?? 5;
+  const previousSummary = conv.summary?.trim() ?? '';
+  // The rolling summary covers the whole story, so it gets a larger budget than
+  // the per-fragment setting (which still applies to manual range summaries).
+  const maxFrasesTotal  = maxFrases * 3;
+
+  const messagesText = recentMessages
+    .map((m) => `${m.role === 'user' ? 'Jugador' : (isNarrator ? 'Narrador' : 'Personaje')}: ${m.content}`)
+    .join('\n\n');
+
+  const prompt = previousSummary
+    ? `Eres el cronista de una historia colaborativa de rol. Mantienes un resumen acumulado de TODA la historia.
+
+RESUMEN ACUMULADO HASTA AHORA:
+---
+${previousSummary}
+---
+
+NUEVOS INTERCAMBIOS (lo más reciente):
+---
+${messagesText}
+---
+
+Escribe la versión ACTUALIZADA del resumen acumulado, integrando los nuevos intercambios:
+- Cubre TODA la historia, no solo lo nuevo — nada importante del resumen anterior debe perderse
+- Conserva siempre: nombres propios, lugares, objetos relevantes, promesas, decisiones y el estado actual de la situación
+- Comprime más los eventos antiguos y da más detalle a los recientes
+- Máximo ${maxFrasesTotal} frases, en pasado narrativo
+- Sin explicaciones ni frases introductorias
+
+Responde SOLO con el texto del resumen actualizado.`
+    : `Eres el cronista de una historia colaborativa de rol. Revisa estos últimos intercambios:
+
+---
+${messagesText}
+---
+
+Escribe un resumen de lo ocurrido. El resumen debe ser:
+- Objetivo y fiel a lo narrado
+- Conciso: máximo ${maxFrases} frases
+- En pasado narrativo
+- Sin explicaciones ni frases introductorias
+
+Responde SOLO con el texto del resumen.`;
+
+  const llm = createProvider(provider);
+  const request: GenerateRequest = {
+    messages: [
+      { role: 'system', content: 'Eres un cronista que mantiene el resumen acumulado de una historia colaborativa de rol.' },
+      { role: 'user', content: prompt },
+    ],
+    model: modelId,
+    temperature: 0.3,
+    stream: false,
+    disableFallbacks: settings.disableFallbacks,
+  };
+
+  const response = await llm.generate(request);
+  const newSummary = response.content.trim();
+  if (!newSummary) return;
+
+  // Historial: el resumen rodante cubre la historia desde el principio; el primer
+  // resumen (sin acumulado previo) cubre solo el fragmento reciente.
+  const messageIndexFrom = previousSummary ? 0 : Math.max(0, messageIndexTo - 5);
+  summariesRepo.create({ conversationId, content: newSummary, messageIndexFrom, messageIndexTo });
+  // conversations.summary es lo que buildContext inyecta como "Historia hasta ahora"
+  convRepo.update(conversationId, { summary: newSummary });
+}
 
 async function updateSummaryAsync(
   conversationId: string,
@@ -968,55 +1164,7 @@ async function updateSummaryAsync(
     // Only update every N messages
     if (conv.messageCount % SUMMARY_EVERY_N !== 0) return;
 
-    // Take the last 6 messages
-    const allMessages   = msgRepo.findByConversation(conversationId);
-    const recentMessages = allMessages.slice(-6).filter((m) => m.role !== 'system');
-    if (recentMessages.length < 2) return;
-
-    const messageIndexTo   = allMessages.length - 1;
-    const messageIndexFrom = Math.max(0, messageIndexTo - 5);
-
-    const settings = settingsService.getAll();
-    const maxFrases = settings.summaryMaxLength ?? 5;
-    const messagesText = recentMessages
-      .map((m) => `${m.role === 'user' ? 'Jugador' : (isNarrator ? 'Narrador' : 'Personaje')}: ${m.content}`)
-      .join('\n\n');
-
-    const prompt = `Eres el asistente de una historia colaborativa de rol. Revisa estos últimos intercambios:
-
----
-${messagesText}
----
-
-Escribe un resumen de lo ocurrido en este fragmento. El resumen debe ser:
-- Objetivo y fiel a lo narrado
-- Conciso: máximo ${maxFrases} frases
-- En pasado narrativo
-- Sin explicaciones ni frases introductorias
-
-Responde SOLO con el texto del resumen.`;
-
-    const llm = createProvider(provider);
-    const request: GenerateRequest = {
-      messages: [
-        { role: 'system', content: 'Eres un asistente que resume fragmentos de historias colaborativas de rol.' },
-        { role: 'user', content: prompt },
-      ],
-      model: modelId,
-      temperature: 0.3,
-      stream: false,
-      disableFallbacks: settings.disableFallbacks,
-    };
-
-    const response = await llm.generate(request);
-    const newSummary = response.content.trim();
-
-    if (newSummary) {
-      // Guardar en historial acumulativo
-      summariesRepo.create({ conversationId, content: newSummary, messageIndexFrom, messageIndexTo });
-      // Mantener conversations.summary para inyección en el contexto
-      convRepo.update(conversationId, { summary: newSummary });
-    }
+    await generateRollingSummary(conversationId, provider, modelId, isNarrator);
   } catch (err) {
     // Summary update is non-critical — log and continue
     console.error('[summary] Error updating summary:', err);
@@ -1040,53 +1188,10 @@ export async function triggerSummaryUpdate(conversationId: string): Promise<Conv
   const modelId = firstChar?.modelId ?? provider.defaultModel ?? settings.defaultModelId;
   if (!modelId) return conv;
 
-  const allMessages    = msgRepo.findByConversation(conversationId);
-  const recentMessages = allMessages.slice(-6).filter((m) => m.role !== 'system');
-  if (recentMessages.length < 2) return conv;
-
-  const messageIndexTo   = allMessages.length - 1;
-  const messageIndexFrom = Math.max(0, messageIndexTo - 5);
-
-  const s = settingsService.getAll();
-  const maxFrases = s.summaryMaxLength ?? 5;
-  const messagesText = recentMessages
-    .map((m) => `${m.role === 'user' ? 'Jugador' : 'Personaje'}: ${m.content}`)
-    .join('\n\n');
-
-  const prompt = `Eres el asistente de una historia colaborativa de rol. Revisa estos últimos intercambios:
-
----
-${messagesText}
----
-
-Escribe un resumen de lo ocurrido en este fragmento. El resumen debe ser:
-- Objetivo y fiel a lo narrado
-- Conciso: máximo ${maxFrases} frases
-- En pasado narrativo
-- Sin explicaciones ni frases introductorias
-
-Responde SOLO con el texto del resumen.`;
+  const isNarrator = conv.mode === 'story' && !conv.activeCharacterId;
 
   try {
-    const llm = createProvider(provider);
-    const request: GenerateRequest = {
-      messages: [
-        { role: 'system', content: 'Eres un asistente que resume fragmentos de historias colaborativas de rol.' },
-        { role: 'user', content: prompt },
-      ],
-      model: modelId,
-      temperature: 0.3,
-      stream: false,
-      disableFallbacks: s.disableFallbacks,
-    };
-
-    const response = await llm.generate(request);
-    const newSummary = response.content.trim();
-
-    if (newSummary) {
-      summariesRepo.create({ conversationId, content: newSummary, messageIndexFrom, messageIndexTo });
-      convRepo.update(conversationId, { summary: newSummary });
-    }
+    await generateRollingSummary(conversationId, provider, modelId, isNarrator);
   } catch (err) {
     console.error('[summary] Error in triggerSummaryUpdate:', err);
   }

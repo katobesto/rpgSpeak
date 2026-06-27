@@ -1,13 +1,14 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { storiesApi } from '../api/stories.ts';
 import { charactersApi } from '../api/characters.ts';
 import { api } from '../api/client.ts';
 import { StoryEditor } from '../components/stories/StoryEditor.tsx';
+import { StoryAssistant } from '../components/stories/StoryAssistant.tsx';
 import { Avatar } from '../components/ui/Avatar.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { Modal } from '../components/ui/Modal.tsx';
-import { Plus, Edit2, Trash2, BookOpen, ToggleLeft, ToggleRight, UserCircle, Lock, Eye, Users, X, Search, FileText, Filter } from 'lucide-react';
+import { Plus, Edit2, Trash2, BookOpen, ToggleLeft, ToggleRight, UserCircle, Lock, Eye, Users, X, Search, FileText, Filter, Wand2 } from 'lucide-react';
 import type { Story, User } from '@rpgspeak/shared';
 import { useAuthStore } from '../stores/auth.store.ts';
 
@@ -22,6 +23,7 @@ function useDebounce<T>(value: T, delay = 350): T {
 
 export function StoriesPage() {
   const [editorOpen, setEditorOpen] = useState(false);
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const [editingStory, setEditingStory] = useState<Story | null>(null);
   const [previewStory, setPreviewStory] = useState<Story | null>(null);
 
@@ -87,9 +89,14 @@ export function StoriesPage() {
           <h1 className="text-lg font-semibold">Historias</h1>
           <p className="text-xs text-text-muted">{stories.length} {stories.length === 1 ? 'historia' : 'historias'}</p>
         </div>
-        <Button size="sm" onClick={() => { setEditingStory(null); setEditorOpen(true); }}>
-          <Plus size={14} /> Nueva Historia
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="outline" onClick={() => setAssistantOpen(true)}>
+            <Wand2 size={14} /> Asistente de historias
+          </Button>
+          <Button size="sm" onClick={() => { setEditingStory(null); setEditorOpen(true); }}>
+            <Plus size={14} /> Nueva Historia
+          </Button>
+        </div>
       </div>
 
       {/* ── Barra de filtros ── */}
@@ -327,6 +334,8 @@ export function StoriesPage() {
       </div>
 
       <StoryEditor key={editingStory?.id ?? 'new'} open={editorOpen} story={editingStory} onClose={() => setEditorOpen(false)} />
+
+      <StoryAssistant open={assistantOpen} onClose={() => setAssistantOpen(false)} />
 
       {/* Story preview modal */}
       <Modal

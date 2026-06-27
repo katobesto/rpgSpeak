@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { Copy, Edit2, RefreshCw, Trash2, Check, Bug, X, Pin, Volume2, VolumeX, Loader, Wand2, Image as ImageIcon, Zap, ChevronDown, RotateCcw, Play, Square, Pause, Download, Share2, Upload } from 'lucide-react';
+import { Copy, Edit2, RefreshCw, Trash2, Check, Bug, X, Pin, Volume2, VolumeX, Loader, Wand2, Image as ImageIcon, Zap, ChevronDown, RotateCcw, Rewind, Play, Square, Pause, Download, Share2, Upload, Brain, AlertTriangle } from 'lucide-react';
 import type { Message, ChatMessage } from '@rpgspeak/shared';
 import { Avatar } from '../ui/Avatar.tsx';
 import { useMutation, useQuery } from '@tanstack/react-query';
@@ -64,6 +64,16 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
   const activeConversation = useChatStore((s) => s.activeConversation);
   const removeMessage = useChatStore((s) => s.removeMessage);
   const updateMessage = useChatStore((s) => s.updateMessage);
+  const regenerate = useChatStore((s) => s.regenerate);
+  const rewind = useChatStore((s) => s.rewind);
+
+  // Nº de mensajes posteriores a éste (para el botón "Rebobinar" y su confirmación)
+  const messagesAfterCount = useChatStore((s) => {
+    const idx = s.messages.findIndex((m) => m.id === message.id);
+    return idx === -1 ? 0 : s.messages.length - 1 - idx;
+  });
+  const [showRewindConfirm, setShowRewindConfirm] = useState(false);
+  const [rewinding, setRewinding] = useState(false);
 
   // Poll while any image in the array is pending (waiting for 4K final)
   React.useEffect(() => {
@@ -362,14 +372,22 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
             </div>
           ) : (
             <>
-              {isStreaming && !message.content ? (
-                <TypingIndicator />
-              ) : (
+              {/* ThinkBlock — shown when think content is arriving or was saved */}
+              {!isUser && message.metadata?.thinkContent && (
+                <ThinkBlock
+                  content={message.metadata.thinkContent as string}
+                  isThinking={Boolean(message.metadata?.isThinking)}
+                />
+              )}
+              {/* Loading state: show Brain indicator while waiting for first token (think or content) */}
+              {isStreaming && !isUser && !message.metadata?.thinkContent && !message.content ? (
+                <GeneratingIndicator />
+              ) : message.content ? (
                 <div
                   className={`prose${isNarrator ? ' narrator-content' : ''}`}
                   dangerouslySetInnerHTML={{ __html: html || message.content }}
                 />
-              )}
+              ) : null}
               {isStreaming && message.content && (
                 <span className="inline-block w-0.5 h-4 bg-current opacity-70 animate-pulse ml-0.5 align-middle" />
               )}
@@ -411,7 +429,20 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
               <ActionButton icon={Bug} onClick={() => setShowPrompt(true)} title="Debug prompt" />
             )}
             {!isUser && (
-              <ActionButton icon={RefreshCw} onClick={() => {}} title="Regenerate" />
+              <ActionButton
+                icon={RefreshCw}
+                onClick={() => regenerate(message.id, message.characterId)}
+                title="Regenerar respuesta"
+                disabled={isStreaming}
+              />
+            )}
+            {!isUser && !isError && messagesAfterCount > 0 && (
+              <ActionButton
+                icon={Rewind}
+                onClick={() => setShowRewindConfirm(true)}
+                title="Rebobinar — eliminar todos los mensajes posteriores"
+                disabled={isStreaming}
+              />
             )}
             {!isUser && !isError && (
               <>
@@ -533,12 +564,33 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
           </div>
         )}
 
-        {/* Prompt debug modal */}
-        {showPrompt && (
+        {/* Prompt debug modal — only when promptMessages still exist. If the
+            message was replaced (regenerate/rewind) while the modal was open,
+            metadata.promptMessages becomes undefined; guarding here avoids
+            crashing PromptModal with undefined messages. */}
+        {showPrompt && Array.isArray(message.metadata?.promptMessages) && (
           <PromptModal
             messages={message.metadata.promptMessages as ChatMessage[]}
             model={message.metadata.model as string | undefined}
             onClose={() => setShowPrompt(false)}
+          />
+        )}
+
+        {/* Rewind confirmation modal */}
+        {showRewindConfirm && (
+          <RewindConfirmModal
+            count={messagesAfterCount}
+            busy={rewinding}
+            onCancel={() => setShowRewindConfirm(false)}
+            onConfirm={async () => {
+              setRewinding(true);
+              try {
+                await rewind(message.id);
+                setShowRewindConfirm(false);
+              } finally {
+                setRewinding(false);
+              }
+            }}
           />
         )}
 
@@ -838,14 +890,15 @@ function TtsPlayerBar({ messageId, text, voiceId, speed, temperature, replacemen
   );
 }
 
-function ActionButton({ icon: Icon, onClick, title, danger = false, spin = false }: {
-  icon: React.ElementType; onClick: () => void; title: string; danger?: boolean; spin?: boolean;
+function ActionButton({ icon: Icon, onClick, title, danger = false, spin = false, disabled = false }: {
+  icon: React.ElementType; onClick: () => void; title: string; danger?: boolean; spin?: boolean; disabled?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
       title={title}
-      className={`p-1 rounded transition-colors ${
+      disabled={disabled}
+      className={`p-1 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
         danger
           ? 'hover:bg-red-500/10 text-text-muted hover:text-red-400'
           : 'hover:bg-white/8 text-text-muted hover:text-text-primary'
@@ -856,12 +909,56 @@ function ActionButton({ icon: Icon, onClick, title, danger = false, spin = false
   );
 }
 
-function TypingIndicator() {
+function GeneratingIndicator() {
   return (
-    <div className="flex gap-1 items-center py-1">
-      <span className="typing-dot" />
-      <span className="typing-dot" />
-      <span className="typing-dot" />
+    <div className="flex items-center gap-2 py-1.5">
+      <Brain size={15} className="text-accent animate-brain-spin opacity-80" />
+      <span className="flex gap-1">
+        <span className="think-dot" />
+        <span className="think-dot" />
+        <span className="think-dot" />
+      </span>
+    </div>
+  );
+}
+
+function ThinkBlock({ content, isThinking }: { content: string; isThinking: boolean }) {
+  const [open, setOpen] = useState(false);
+
+  // Always collapsed by default — never auto-expand, even during streaming.
+  // When thinking finishes, collapse in case the user had opened it mid-stream.
+  React.useEffect(() => {
+    if (!isThinking) setOpen(false);
+  }, [isThinking]);
+
+  return (
+    <div className="mb-2">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        title={open ? 'Ocultar razonamiento' : 'Ver razonamiento'}
+        className="flex items-center gap-1.5 opacity-40 hover:opacity-70 transition-opacity"
+      >
+        <Brain
+          size={11}
+          className={isThinking ? 'text-accent animate-brain-spin' : (open ? 'text-accent' : 'text-text-muted')}
+        />
+        {isThinking && (
+          <span className="flex gap-1">
+            <span className="think-dot" style={{ width: 4, height: 4 }} />
+            <span className="think-dot" style={{ width: 4, height: 4 }} />
+            <span className="think-dot" style={{ width: 4, height: 4 }} />
+          </span>
+        )}
+        <ChevronDown
+          size={10}
+          className={`text-text-muted transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+      {open && (
+        <div className="mt-1.5 pl-3 border-l border-border text-xs text-text-muted leading-relaxed whitespace-pre-wrap opacity-70">
+          {content}
+        </div>
+      )}
     </div>
   );
 }
@@ -872,8 +969,177 @@ const ROLE_STYLES: Record<string, { label: string; badge: string; border: string
   assistant: { label: 'assistant', badge: 'bg-green-500/20 text-green-300 border border-green-500/30',    border: 'border-green-500/20',  bg: 'bg-green-500/5' },
 };
 
+// ─── Prompt structure grouping (mirrors "Estructura de la petición al LLM" in Ajustes → Generación) ───
+
+interface PromptGroup {
+  title: string;
+  hint?: string;
+  /** Procedencia del bloque: ruta de la constante en código (inyectado fijo) o
+   *  el ajuste editable que lo genera. Se muestra como badge en la cabecera. */
+  source?: string;
+  items: ChatMessage[];
+  defaultOpen?: boolean;
+}
+
+// Etiquetas de procedencia. Los bloques "en código" son constantes fijas que NO
+// se pueden editar desde Ajustes; el badge indica el archivo y la constante.
+const SRC_CODE = 'core/conversation/context-builder.ts';
+
+function classifyHeaderPart(content: string): { title: string; hint?: string; source?: string } {
+  const c = content.trim();
+
+  // ── Blindajes inyectados en código (no editables en Ajustes) ───────────────
+  if (/^## IDENTIDAD DEL JUGADOR/.test(c))
+    return { title: 'Identidad del jugador', hint: 'Blinda el nombre del jugador y el trato en 2ª persona', source: `${SRC_CODE} › buildUserIdentityBlock()` };
+  if (/^### IDENTIDAD DE CADA PERSONAJE/.test(c))
+    return { title: 'Candado de identidad de personajes', hint: 'Impide mezclar rasgos entre personajes (narrador)', source: `${SRC_CODE} › CHARACTER_IDENTITY_LOCK` };
+  if (/^### TU IDENTIDAD ES SOLO TUYA/.test(c))
+    return { title: 'Candado de identidad (personaje activo)', hint: 'Evita que el personaje absorba rasgos de otros', source: `${SRC_CODE} › buildSingleIdentityLock()` };
+  if (/^### CONOCIMIENTO LIMITADO A TU EXPERIENCIA/.test(c))
+    return { title: 'Conocimiento limitado (personaje)', hint: 'No conoce lo privado de otros ni lo previo a su llegada', source: `${SRC_CODE} › buildKnowledgeScopingSingle()` };
+  if (/^### CONOCIMIENTO POR PERSONAJE/.test(c))
+    return { title: 'Conocimiento por personaje (narrador)', hint: 'Cada personaje solo sabe lo que presenció', source: `${SRC_CODE} › KNOWLEDGE_SCOPING_NARRATOR` };
+  if (/^## Formato de acciones y gestos/.test(c))
+    return { title: 'Formato de gestos (3ª persona)', source: `${SRC_CODE} › GESTURE_FORMAT_INSTRUCTION` };
+  if (/^## Contexto de aventura activa/.test(c))
+    return { title: 'Aviso de aventura', source: `${SRC_CODE} › ADVENTURE_CONTEXT_NOTICE` };
+
+  // ── Personajes y lore ──────────────────────────────────────────────────────
+  if (/^# Character:/.test(c)) {
+    const m = c.match(/^# Character:\s*(.+)/);
+    return { title: `Personaje${m ? `: ${m[1]}` : ''}` };
+  }
+  if (/^## Personajes en la aventura/.test(c)) return { title: 'Personajes (Game Master)' };
+  if (/^# Narrador/.test(c)) return { title: 'Prompt de Narrador (+ personajes en escena)', source: 'Ajustes › Generación › narratorPrompt' };
+  if (/^## Personajes presentes en la escena/.test(c)) return { title: 'Personajes (Narrador)' };
+  if (/^## Otros personajes presentes/.test(c)) return { title: 'Otros personajes del grupo' };
+  if (/^# Story Context:/.test(c)) {
+    const m = c.match(/^# Story Context:\s*(.+)/);
+    return { title: `Lore / Historia${m ? `: ${m[1]}` : ''}` };
+  }
+  if (/^## Memorias activas/.test(c)) return { title: 'Memorias activas (bloque básico)' };
+  if (c.startsWith('[Example conversations:]')) return { title: 'Ejemplos de diálogo (few-shot)' };
+
+  // ── Prompts editables en Ajustes ───────────────────────────────────────────
+  if (/^## Principios narrativos fundamentales/.test(c)) return { title: 'Principios narrativos (global)', source: 'Ajustes › Generación › globalSystemPrompt' };
+  if (/^## Profundidad y credibilidad/.test(c)) return { title: 'Formato de respuesta (personaje)', source: 'Ajustes › Generación › responseFormatPrompt' };
+  return { title: 'Prompt de sistema global / personaje', hint: 'Incluye el prompt global, formato de respuesta y/o instrucciones del personaje' };
+}
+
+function classifyFooterPart(content: string): { title: string; source?: string } {
+  const c = content.trim();
+  if (/^## Historia hasta ahora/.test(c)) return { title: 'Resumen de sucesos' };
+  if (/^## Índice de contexto/.test(c)) return { title: 'Índice de Contexto', source: 'Ajustes › Generación › contextIndexInjectionPrompt' };
+  if (/^## UBICACIÓN/.test(c)) return { title: 'Coherencia espacial (ubicación)', source: `${SRC_CODE} › buildSceneCoherenceBlock()` };
+  if (/^## COHERENCIA DE OBJETOS/.test(c)) return { title: 'Coherencia de objetos', source: SRC_CODE };
+  if (/ESTADO EMOCIONAL ACTUAL/.test(c)) return { title: 'Afinidad / estado emocional', source: `${SRC_CODE} (+ Ajustes › affinitySystemPrompt)` };
+  if (/^## Hechos establecidos|memoria/i.test(c)) return { title: 'Memorias inyectadas', source: 'Ajustes › Generación › memoryInjectionPrompt' };
+  return { title: 'Estilo de narración / directiva adicional' };
+}
+
+function groupPromptMessages(messages: ChatMessage[]): PromptGroup[] {
+  const groups: PromptGroup[] = [];
+  if (messages.length === 0) return groups;
+
+  let i = 0;
+
+  // Header: leading system message — split by the '---' separators used to join systemParts
+  if (messages[0].role === 'system') {
+    const parts = messages[0].content.split('\n\n---\n\n');
+    for (const part of parts) {
+      if (!part.trim()) continue;
+      const { title, hint, source } = classifyHeaderPart(part);
+      groups.push({ title, hint, source, items: [{ role: 'system', content: part }] });
+    }
+    i = 1;
+  }
+
+  let convBuffer: ChatMessage[] = [];
+  const flushConv = () => {
+    if (convBuffer.length === 0) return;
+    if (convBuffer.length === 1 && convBuffer[0].role === 'user') {
+      groups.push({ title: 'Último mensaje del jugador', items: convBuffer, defaultOpen: true });
+    } else {
+      groups.push({ title: `Historial de conversación (${convBuffer.length} mensajes)`, items: [...convBuffer] });
+    }
+    convBuffer = [];
+  };
+
+  for (; i < messages.length; i++) {
+    const m = messages[i];
+    if (m.role === 'system') {
+      flushConv();
+      const { title, source } = classifyFooterPart(m.content);
+      groups.push({ title, source, items: [m] });
+    } else {
+      convBuffer.push(m);
+    }
+  }
+  flushConv();
+  return groups;
+}
+
+function PromptAccordionGroup({ group, defaultOpen }: { group: PromptGroup; defaultOpen: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const chars = group.items.reduce((sum, m) => sum + m.content.length, 0);
+
+  const isCode = group.source?.includes('context-builder.ts');
+
+  return (
+    <div className="rounded-lg border border-border overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex flex-col gap-1 px-3 py-2 bg-surface-2 hover:bg-white/5 transition-colors text-left"
+      >
+        <div className="w-full flex items-center gap-2">
+          <ChevronDown size={13} className={`text-text-muted shrink-0 transition-transform ${open ? '' : '-rotate-90'}`} />
+          <span className="text-xs font-medium text-text-primary">{group.title}</span>
+          {group.hint && <span className="text-[10px] text-text-muted hidden sm:inline">— {group.hint}</span>}
+          <span className="text-[11px] text-text-muted ml-auto shrink-0">
+            {group.items.length > 1 ? `${group.items.length} msgs · ` : ''}{chars.toLocaleString()} chars
+          </span>
+        </div>
+        {group.source && (
+          <span
+            className={`ml-5 inline-flex items-center gap-1 self-start text-[9px] font-mono px-1.5 py-0.5 rounded border max-w-full truncate ${
+              isCode
+                ? 'text-amber-300/90 bg-amber-500/10 border-amber-500/20'
+                : 'text-sky-300/90 bg-sky-500/10 border-sky-500/20'
+            }`}
+            title={group.source}
+          >
+            {isCode ? '⟨código⟩' : '⚙ ajustes'} {group.source}
+          </span>
+        )}
+      </button>
+      {open && (
+        <div className="p-2 space-y-2">
+          {group.items.map((msg, i) => {
+            const style = ROLE_STYLES[msg.role] ?? ROLE_STYLES.user;
+            return (
+              <div key={i} className={`rounded-lg border ${style.border} ${style.bg} overflow-hidden`}>
+                <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/5">
+                  <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${style.badge}`}>
+                    {style.label}
+                  </span>
+                  <span className="text-[11px] text-text-muted ml-auto">{msg.content.length} chars</span>
+                </div>
+                <pre className="p-3 text-xs text-text-primary font-mono whitespace-pre-wrap break-words leading-relaxed">
+                  {msg.content}
+                </pre>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PromptModal({ messages, model, onClose }: { messages: ChatMessage[]; model?: string; onClose: () => void }) {
-  const totalChars = messages.reduce((sum, m) => sum + m.content.length, 0);
+  const safeMessages = Array.isArray(messages) ? messages : [];
+  const totalChars = safeMessages.reduce((sum, m) => sum + m.content.length, 0);
+  const groups = useMemo(() => groupPromptMessages(safeMessages), [safeMessages]);
 
   return (
     <div
@@ -898,7 +1164,7 @@ function PromptModal({ messages, model, onClose }: { messages: ChatMessage[]; mo
           </div>
           <div className="flex items-center gap-3">
             <span className="text-[11px] text-text-muted">
-              {messages.length} mensajes · {totalChars.toLocaleString()} chars
+              {safeMessages.length} mensajes · {totalChars.toLocaleString()} chars
             </span>
             <button
               onClick={onClose}
@@ -909,38 +1175,77 @@ function PromptModal({ messages, model, onClose }: { messages: ChatMessage[]; mo
           </div>
         </div>
 
-        {/* Scrollable messages */}
-        <div className="flex-1 overflow-y-auto p-4 space-y-3">
-          {messages.map((msg, i) => {
-            const style = ROLE_STYLES[msg.role] ?? ROLE_STYLES.user;
-            return (
-              <div key={i} className={`rounded-lg border ${style.border} ${style.bg} overflow-hidden`}>
-                {/* Role badge */}
-                <div className="flex items-center gap-2 px-3 py-1.5 border-b border-white/5">
-                  <span className={`text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded ${style.badge}`}>
-                    {style.label}
-                  </span>
-                  <span className="text-[11px] text-text-muted ml-auto">{msg.content.length} chars</span>
-                </div>
-                {/* Content */}
-                <pre className="p-3 text-xs text-text-primary font-mono whitespace-pre-wrap break-words leading-relaxed">
-                  {msg.content}
-                </pre>
-              </div>
-            );
-          })}
+        {/* Scrollable messages, grouped into a collapsed-by-default accordion */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-2">
+          {groups.map((group, i) => (
+            <PromptAccordionGroup key={i} group={group} defaultOpen={Boolean(group.defaultOpen)} />
+          ))}
         </div>
 
         {/* Footer */}
         <div className="flex items-center justify-end px-5 py-3 border-t border-border flex-shrink-0">
           <button
             onClick={() => {
-              const text = messages.map(m => `[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n---\n\n');
+              const text = safeMessages.map(m => `[${m.role.toUpperCase()}]\n${m.content}`).join('\n\n---\n\n');
               navigator.clipboard.writeText(text);
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary hover:bg-white/8 transition-colors"
           >
             <Copy size={12} /> Copiar todo
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Rewind Confirmation Modal ────────────────────────────────────────────────
+function RewindConfirmModal({
+  count, busy, onCancel, onConfirm,
+}: { count: number; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.75)' }}
+      onClick={(e) => { if (e.target === e.currentTarget && !busy) onCancel(); }}
+    >
+      <div
+        className="relative w-full max-w-md rounded-xl border border-border flex flex-col animate-slide-up"
+        style={{ background: 'var(--surface-1)' }}
+      >
+        <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-border">
+          <Rewind size={15} className="text-amber-400" />
+          <span className="font-semibold text-sm">Rebobinar la conversación</span>
+        </div>
+
+        <div className="px-5 py-4 space-y-3">
+          <div className="flex items-start gap-2.5 rounded-lg border border-amber-500/25 bg-amber-500/10 px-3 py-2.5">
+            <AlertTriangle size={15} className="text-amber-400 shrink-0 mt-0.5" />
+            <p className="text-xs text-text-secondary leading-relaxed">
+              Se eliminarán <strong className="text-text-primary">{count} mensaje{count === 1 ? '' : 's'}</strong> posteriores a éste
+              (tanto tus mensajes como las respuestas de la IA). Este mensaje se conserva como nuevo final de la conversación.
+            </p>
+          </div>
+          <p className="text-[11px] text-text-muted leading-relaxed">
+            Esta acción es <strong className="text-text-secondary">permanente</strong> y no se puede deshacer: los mensajes se borran de la base de datos.
+          </p>
+        </div>
+
+        <div className="flex items-center justify-end gap-2 px-5 py-3 border-t border-border">
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-lg text-xs text-text-muted hover:text-text-primary hover:bg-white/8 transition-colors disabled:opacity-40"
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={busy}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-red-500/15 text-red-300 border border-red-500/30 hover:bg-red-500/25 transition-colors disabled:opacity-50"
+          >
+            {busy ? <Loader size={12} className="animate-spin" /> : <Rewind size={12} />}
+            {busy ? 'Eliminando…' : `Eliminar ${count} mensaje${count === 1 ? '' : 's'}`}
           </button>
         </div>
       </div>

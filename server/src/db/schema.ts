@@ -58,10 +58,10 @@ export const stories = sqliteTable('stories', {
   persistentEvents: text('persistent_events').notNull().default('[]'), // JSON
   locations: text('locations').notNull().default('[]'),                  // JSON
   stateVariables: text('state_variables').notNull().default('{}'),      // JSON
-  timeline: text('timeline').notNull().default('[]'),                    // JSON
   behaviorRestrictions: text('behavior_restrictions').notNull().default('[]'), // JSON
   isActive: integer('is_active', { mode: 'boolean' }).notNull().default(false),
   adventureMode: integer('adventure_mode', { mode: 'boolean' }).default(false),
+  openWorld: integer('open_world', { mode: 'boolean' }).default(false),
   userId: text('user_id'),  // owner; NULL = shared/legacy
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
@@ -127,6 +127,25 @@ export const conversationStories = sqliteTable(
     priority: integer('priority').notNull().default(0),
   },
   (t) => ({ pk: primaryKey({ columns: [t.conversationId, t.storyId] }) })
+);
+
+// Estado por conversación de los eventos de historia (persistent_events):
+// una fila = el evento ya OCURRIÓ narrativamente en esa conversación.
+// Sin fila = pendiente. El event_id referencia el id dentro del JSON
+// stories.persistent_events (no hay FK posible a un campo JSON).
+export const conversationStoryEvents = sqliteTable(
+  'conversation_story_events',
+  {
+    conversationId: text('conversation_id')
+      .notNull()
+      .references(() => conversations.id, { onDelete: 'cascade' }),
+    storyId: text('story_id')
+      .notNull()
+      .references(() => stories.id, { onDelete: 'cascade' }),
+    eventId: text('event_id').notNull(),
+    occurredAt: text('occurred_at').notNull(),
+  },
+  (t) => ({ pk: primaryKey({ columns: [t.conversationId, t.eventId] }) })
 );
 
 // ─── Messages ─────────────────────────────────────────────────────────────────

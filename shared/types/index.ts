@@ -122,10 +122,12 @@ export interface Story {
   persistentEvents: StoryEvent[];
   locations: StoryLocation[];
   stateVariables: Record<string, string | number | boolean>;
-  timeline: TimelineEntry[];
   behaviorRestrictions: string[];
   isActive: boolean;
   adventureMode: boolean;
+  /** true = mundo abierto: el narrador puede crear ubicaciones nuevas coherentes con el mundo;
+   *  false = mapa cerrado: solo existen las ubicaciones definidas en la historia */
+  openWorld: boolean;
   characters: StoryCharacterLink[];
   createdAt: string;
   updatedAt: string;
@@ -147,13 +149,6 @@ export interface StoryLocation {
   contents: string;
   exits: string;
   atmosphere: string;
-}
-
-export interface TimelineEntry {
-  id: string;
-  label: string;
-  description: string;
-  order: number;
 }
 
 export interface StoryCharacterLink {
@@ -280,6 +275,64 @@ export interface SceneImage {
   description?: string;
 }
 
+// ─── Background Image (per-conversation) ──────────────────────────────────────
+
+export interface BackgroundImage {
+  id: string;
+  url: string;
+  prompt: string;
+  width: number;
+  height: number;
+  createdAt: string;
+}
+
+export interface ConversationBackground {
+  url: string;
+  prompt?: string;
+  /** 0-1, visibilidad de la imagen de fondo; default 1 */
+  opacity?: number;
+}
+
+// ─── Party State (combate persistente) ─────────────────────────────────────
+
+export interface PartyMemberState {
+  id: string;
+  name: string;
+  hp: number;
+  maxHp: number;
+  energy: number;
+  maxEnergy: number;
+}
+
+export interface PartyInventoryItemState {
+  id: string;
+  name: string;
+  quantity: number;
+}
+
+export interface PartyState {
+  members: PartyMemberState[];
+  inventory: PartyInventoryItemState[];
+  xp: number;
+  gold: number;
+  updatedAt: string;
+}
+
+export interface BackgroundAspectRatio {
+  id: string;
+  label: string;
+  width: number;
+  height: number;
+}
+
+export const BACKGROUND_ASPECT_RATIOS: BackgroundAspectRatio[] = [
+  { id: '1:1',  label: 'Cuadrado (1:1)',    width: 1024, height: 1024 },
+  { id: '16:9', label: 'Panorámico (16:9)', width: 1344, height: 768 },
+  { id: '9:16', label: 'Vertical (9:16)',   width: 768,  height: 1344 },
+  { id: '4:3',  label: 'Estándar (4:3)',    width: 1152, height: 896 },
+  { id: '3:4',  label: 'Retrato (3:4)',     width: 896,  height: 1152 },
+];
+
 // ─── TTS Types ────────────────────────────────────────────────────────────────
 
 export interface TtsTextReplacement {
@@ -328,7 +381,6 @@ export interface AppSettings {
   globalSystemPrompt: string;
   responseFormatPrompt: string;
   narratorPrompt: string;
-  adventurePrompt: string;
   affinitySystemPrompt: string;
   contextStrategy: 'rolling' | 'summary' | 'hybrid';
   maxContextMessages: number;
@@ -342,6 +394,7 @@ export interface AppSettings {
   comfyUiUrl: string;
   sceneImagePrompt: string;
   charImagePrompt: string;
+  backgroundImagePrompt: string;
   // Image generation provider
   imageProvider: 'comfyui' | 'pollinations' | 'gemini' | 'fal' | 'bzcomfy';
   imageProviderApiKey: string | null;        // API key for Gemini / Fal
@@ -381,6 +434,8 @@ export interface AppSettings {
   storyEventGenerationPrompt: string;
   // Generación de ubicaciones de historia
   storyLocationGenerationPrompt: string;
+  // Asistente de historias — genera historia completa + personajes a partir de un briefing
+  storyAssistantPrompt: string;
   // Estilo de narración — prompts inyectados cuando el usuario elige Medium o Short
   narrationMediumPrompt: string;
   narrationShortPrompt:  string;
@@ -391,6 +446,9 @@ export interface AppSettings {
   summaryMaxLength: number;
   // Opciones de API
   disableFallbacks: boolean;
+  // Thinking / razonamiento (DeepSeek V4 y modelos compatibles con `thinking`)
+  reasoningEnabled: boolean;
+  reasoningEffort: 'high' | 'max';
   // Cloudflare Access — para proteger ComfyUI remoto tras un túnel
   comfyUiCfClientId: string | null;
   comfyUiCfClientSecret: string | null;
@@ -435,6 +493,8 @@ export interface GenerateRequest {
   stream: boolean;
   /** When true, adds allow_fallbacks:false to OpenAI-compatible requests (e.g. OpenRouter). */
   disableFallbacks?: boolean;
+  /** Enables `thinking` mode on supporting models (e.g. DeepSeek V4). */
+  reasoning?: { enabled: boolean; effort?: 'high' | 'max'; expose?: boolean };
 }
 
 export interface ChatMessage {
@@ -520,6 +580,55 @@ export type UpdateCharacterDto = Partial<CreateCharacterDto>;
 
 export type CreateStoryDto = Omit<Story, 'id' | 'userId' | 'ownerName' | 'createdAt' | 'updatedAt'>;
 export type UpdateStoryDto = Partial<CreateStoryDto>;
+
+// ─── Story Assistant Types ────────────────────────────────────────────────────
+
+/** Una pista de personaje proporcionada por el usuario en el cuestionario.
+ *  Cualquier campo vacío lo completa el LLM. */
+export interface StoryAssistantCharacterHint {
+  name: string;   // sugerencia de nombre ('' = que lo invente la IA)
+  notes: string;  // características aproximadas / rol deseado
+}
+
+/** Briefing que el usuario rellena en el wizard antes de generar la historia. */
+export interface StoryAssistantBriefing {
+  theme: string;          // temática / premisa (obligatorio)
+  genre: string;          // género (opcional)
+  tone: string;           // tono (opcional)
+  /** Ritmo de la historia: 1 = muy pausado/contemplativo … 5 = muy rápido/frenético. */
+  pacing: number;
+  numCharacters: number;  // cuántos personajes generar
+  numEvents: number;      // cuántos eventos persistentes generar
+  numLocations: number;   // cuántas ubicaciones generar
+  adventureMode: boolean;
+  openWorld: boolean;
+  characterHints: StoryAssistantCharacterHint[];
+  extra: string;          // notas libres adicionales
+}
+
+/** Borrador de personaje devuelto por el asistente (antes de crearlo en la BD). */
+export interface StoryAssistantCharacterDraft {
+  name: string;
+  role: string;        // rol dentro de la historia (se guarda en el vínculo)
+  description: string;
+  personality: string;
+  lore: string;
+  tags: string[];
+}
+
+/** Resultado de la generación del asistente: borradores listos para previsualizar. */
+export interface StoryAssistantResult {
+  story: {
+    name: string;
+    description: string;
+    globalContext: string;
+    worldLore: string;
+    narrativeRules: string;
+    events: Omit<StoryEvent, 'id' | 'timestamp'>[];
+    locations: Omit<StoryLocation, 'id'>[];
+  };
+  characters: StoryAssistantCharacterDraft[];
+}
 
 export type CreateConversationDto = {
   title?: string;

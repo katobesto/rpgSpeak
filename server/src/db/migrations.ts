@@ -40,7 +40,6 @@ export function runMigrations(db: Db): void {
       world_lore TEXT NOT NULL DEFAULT '',
       persistent_events TEXT NOT NULL DEFAULT '[]',
       state_variables TEXT NOT NULL DEFAULT '{}',
-      timeline TEXT NOT NULL DEFAULT '[]',
       behavior_restrictions TEXT NOT NULL DEFAULT '[]',
       is_active INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
@@ -204,6 +203,22 @@ export function runMigrations(db: Db): void {
   // ─── Stories — locations column ──────────────────────────────────────────
   try { db.run(sql`ALTER TABLE stories ADD COLUMN locations TEXT NOT NULL DEFAULT '[]'`); } catch { /* already exists */ }
 
+  // ─── Stories — open world toggle (0 = mapa cerrado, comportamiento previo) ──
+  try { db.run(sql`ALTER TABLE stories ADD COLUMN open_world INTEGER DEFAULT 0`); } catch { /* already exists */ }
+
+  // ─── Conversation Story Events — eventos de historia ya ocurridos por chat ──
+  // Una fila = el evento (stories.persistent_events[].id) ya ocurrió
+  // narrativamente en esa conversación; sin fila = pendiente.
+  db.run(sql`
+    CREATE TABLE IF NOT EXISTS conversation_story_events (
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      story_id        TEXT NOT NULL REFERENCES stories(id) ON DELETE CASCADE,
+      event_id        TEXT NOT NULL,
+      occurred_at     TEXT NOT NULL,
+      PRIMARY KEY (conversation_id, event_id)
+    )
+  `);
+
   // ─── Conversations — current scene location ───────────────────────────────
   try { db.run(sql`ALTER TABLE conversations ADD COLUMN current_location TEXT`); } catch { /* already exists */ }
 
@@ -350,7 +365,7 @@ export function runMigrations(db: Db): void {
   db.run(sql`
     INSERT OR IGNORE INTO stories (
       id, name, description, global_context, narrative_rules, world_lore,
-      persistent_events, state_variables, timeline, behavior_restrictions,
+      persistent_events, state_variables, behavior_restrictions,
       is_active, created_at, updated_at
     ) VALUES (
       'story-cronicas-rey-demonio',
@@ -375,7 +390,6 @@ export function runMigrations(db: Db): void {
 **El Corazón de Eclipse:** Un cristal negro del tamaño de un corazón humano, creado por los primeros vampiros hace cinco mil años. Puede sellar al Rey Demonio permanentemente, pero consume la esencia vital de quien lo activa.',
       '[{"id":"evt-1","title":"El Gran Sello se rompe","description":"Tras mil años, el sello que mantenía dormido al Rey Demonio Kael''tharion se ha quebrado. La onda de choque mágica fue sentida por todos los Antiguos vampíricos simultáneamente. Sorin Umbraveil fue el primero en reportarlo al Consejo.","timestamp":"2024-01-01T00:00:00Z","importance":10},{"id":"evt-2","title":"Consejo de Emergencia de los Antiguos","description":"Elara ha convocado a los cinco clanes vampíricos al Dominio de la Media Luna. Tres han respondido; dos permanecen en silencio sospechoso. Se debate si usar el Corazón de Eclipse o negociar con el Rey Demonio.","timestamp":"2024-01-02T00:00:00Z","importance":9},{"id":"evt-3","title":"La embajada humana llega al Dominio","description":"El Emperador de Valeth ha enviado una embajadora —Lady Mirren— con una propuesta de alianza. Los vampiros y los humanos no han cooperado en ochocientos años. La desconfianza es mutua y palpable.","timestamp":"2024-01-03T00:00:00Z","importance":7},{"id":"evt-4","title":"El Corazón de Eclipse ha sido robado","description":"El artefacto ha desaparecido de la Cámara de las Reliquias. Sólo alguien con acceso de Antiguo podría haber entrado. La traición viene de dentro.","timestamp":"2024-01-05T00:00:00Z","importance":10}]',
       '{"fase":"Crisis inicial","Rey Demonio estado":"Despertado, reuniendo fuerzas","Corazón de Eclipse":"ROBADO - ubicación desconocida","alianza_humana":"Negociando","clanes_vampiricos_leales":"3 de 5","clanes_vampiricos_silenciosos":"Clan Nocthar y Clan Velsh","Sorin_estado":"Investigando el robo","Elara_estado":"Presidiendo el Consejo, bajo presión"}',
-      '[{"id":"tl-1","label":"El Antiguo Mundo","description":"Hace 5000 años: Primer vampiro creado. Los Cinco Clanes originales fundan el Dominio.","order":1},{"id":"tl-2","label":"La Gran Guerra Demoníaca","description":"Hace 1000 años: El Rey Demonio conquista un tercio del continente. La alianza de razas lo sella a costa de miles de vidas.","order":2},{"id":"tl-3","label":"Los Siglos de Paz Frágil","description":"1000 años de calma tensa. Los vampiros decaen en número. Los humanos olvidan el peligro. Los elfos advierten.","order":3},{"id":"tl-4","label":"El Presente","description":"Ahora: El sello se rompe. El Corazón es robado. La guerra se acerca.","order":4}]',
       '["No describir actos sexuales explícitos","Respetar la jerarquía de poder establecida en el lore","Los humanos con magia solar hacen daño físico a los vampiros","El Rey Demonio no aparece directamente hasta que la historia lo justifique"]',
       1,
       datetime('now'),
@@ -404,4 +418,118 @@ export function runMigrations(db: Db): void {
   db.run(sql`UPDATE characters    SET user_id = 'user-admin' WHERE user_id IS NULL`);
   db.run(sql`UPDATE stories       SET user_id = 'user-admin' WHERE user_id IS NULL`);
   db.run(sql`UPDATE conversations SET user_id = 'user-admin' WHERE user_id IS NULL`);
+
+  // ─── Migrate stored prompts: drop references to the removed chapter script ──
+  // The chapter-script system ("guión de capítulos") was removed in 3e7f5a6, but
+  // narratorPrompt/adventurePrompt persisted in the settings table may still order
+  // the LLM to advance a script that no longer exists — which makes it invent its
+  // own plot and escalate constantly. Replace those exact lines with the new
+  // destination-based phrasing. Lines the user customized (no exact match) are
+  // left untouched.
+  const PROMPT_FIXES: Record<string, Array<[oldText: string, newText: string]>> = {
+    narratorPrompt: [
+      [
+        'La historia tiene un guión de capítulos con eventos concretos que deben ocurrir. Tu trabajo como narrador no es ESPERAR a que el jugador llegue a esos eventos: es EMPUJAR el mundo hacia ellos.',
+        'El mundo tiene momentum propio: los PNJs toman iniciativas, las situaciones se desarrollan, los plazos se acortan. La historia avanza siempre, pero al ritmo de lo narrado — sin saltos.',
+      ],
+      [
+        '- El mundo tiene momentum propio: PNJs toman iniciativas, situaciones se desarrollan, plazos se acorcan\n',
+        '',
+      ],
+      [
+        '- Cada respuesta debe introducir, escalar o resolver algún elemento del guión activo',
+        '- Si el contexto incluye eventos clave de la historia que aún no han ocurrido, trátalos como DESTINOS, no como una ruta fija: cuando la escena se acerque a uno, oriéntala hacia él\n- Introduce como mucho un elemento nuevo de trama por respuesta, y solo si encaja de forma natural en la escena',
+      ],
+    ],
+    adventurePrompt: [
+      [
+        'La aventura tiene capítulos con objetivos concretos. Como GM, tu misión activa es hacer que esos objetivos avancen en cada turno.',
+        'La aventura avanza hacia los eventos clave definidos en el contexto de la historia. Trátalos como DESTINOS, no como una ruta fija.\n- Si hay eventos de la historia que aún no han ocurrido, vigila cuándo la situación se acerca a uno y oriéntala hacia él — sin forzar su llegada ni saltarte el recorrido',
+      ],
+      [
+        '- Cada escena debe escalar la tensión o revelar información que empuje hacia el clímax del capítulo',
+        '- Introduce como mucho un elemento nuevo de trama por escena, y solo si encaja de forma natural',
+      ],
+      [
+        '- Un capítulo no termina cuando el jugador "decide" terminarlo — termina cuando los eventos descritos han ocurrido narrativamente\n',
+        '',
+      ],
+      [
+        '→ Mueve un elemento del guión activo: introduce un PNJ, revela una pista, escala el conflicto',
+        '→ Si encaja de forma natural, mueve un elemento de la trama: introduce un PNJ, revela una pista, escala el conflicto',
+      ],
+    ],
+    // affinitySystemPrompt only reaches the LLM when the fast LLM is OFF (the
+    // engine strips it otherwise), but a previous edit baked that condition INTO
+    // the prompt text itself as "(Solo cuando el LLM Rápido no está activo)". The
+    // LLM has no way to evaluate that condition — it's a backend concept it can't
+    // see — so it silently ignored the [AFINIDAD:...] tag instruction entirely,
+    // breaking affinity updates whenever the fast LLM was disabled.
+    affinitySystemPrompt: [
+      [
+        '(Solo cuando el LLM Rápido no está activo) Cuando algo cambie significativamente la afinidad',
+        'Cuando algo cambie significativamente la afinidad',
+      ],
+      // Gradación romántica: el afecto/romance ya no debe brotar a media afinidad.
+      [
+        '▸ 41-60 | Neutralidad\nTrato correcto pero sin calidez. Coopera si hay razón clara. No busca ni evita la compañía del jugador. Postura reservada.',
+        '▸ 41-60 | Neutralidad\nTrato correcto pero sin calidez NI interés romántico. Coopera si hay razón clara. Desvía con naturalidad cualquier insinuación o coqueteo — no los corresponde. No busca ni evita la compañía del jugador. Postura reservada.',
+      ],
+      [
+        '▸ 61-79 | Confianza y cercanía\nAbierto y amistoso. Comparte más de sí mismo. Afecto genuino posible, sin ser romántico.',
+        '▸ 61-79 | Confianza y cercanía\nAbierto y amistoso. Comparte más de sí mismo. Afecto genuino posible. El romance, si surge, es apenas una semilla incipiente y cautelosa: dudas y contención, nunca declarado ni dado por hecho. Aún necesita más tiempo y momentos compartidos.',
+      ],
+      [
+        'IMPORTANTE: La afinidad es el estado emocional real de cada personaje. Si un personaje ha sido maltratado, actúa como alguien herido o que desconfía — no como si nada hubiera pasado.',
+        'IMPORTANTE: La afinidad es el estado emocional real de cada personaje, fruto de la historia compartida. Sube despacio: unos pocos encuentros agradables no convierten la neutralidad en romance. Si un personaje ha sido maltratado, actúa como alguien herido o que desconfía — no como si nada hubiera pasado.',
+      ],
+      // La emisión de etiquetas [AFINIDAD:...] pasa a estar gestionada por código
+      // (AFFINITY_SELF_REPORT_INSTRUCTION, concreta y obligatoria). Se elimina la
+      // instrucción vaga del prompt editable para evitar números contradictorios.
+      [
+        '\n\nCuando algo cambie significativamente la afinidad, incluye AL FINAL de tu respuesta:\n[AFINIDAD:NombrePersonaje:+N] o [AFINIDAD:NombrePersonaje:-N]\nN entre 1 y 15 según la magnitud. No lo menciones en la narrativa.',
+        '',
+      ],
+    ],
+    // Afinidad por LLM rápido: positivos más contenidos → el vínculo sube despacio.
+    fastLlmAnalysisPrompt: [
+      [
+        'Solo cambia si ocurrió algo de la lista anterior. Delta MÍNIMO ±8 — valores menores son ruido y no deben registrarse.',
+        'Solo cambia si ocurrió algo de la lista anterior. Delta MÍNIMO ±5 — valores menores son ruido y no deben registrarse.',
+      ],
+      [
+        '• Salvar la vida directamente / lealtad bajo presión: +10 a +15\n• Regalo de alto valor emocional / confesión de gran confianza: +8 a +12',
+        '• Salvar la vida directamente / lealtad bajo presión extrema: +6 a +10\n• Regalo de altísimo valor emocional / confesión de gran confianza correspondida: +5 a +8',
+      ],
+      [
+        'La reacción externa del personaje NO importa — el impacto interno es real aunque lo disimule.',
+        'El afecto y el romance suben DESPACIO: reserva los valores altos para hechos verdaderamente excepcionales. Un vínculo se construye con muchos momentos, no con uno — ante la duda, tira a la baja en los positivos.\nLa reacción externa del personaje NO importa — el impacto interno es real aunque lo disimule.',
+      ],
+    ],
+  };
+
+  // adventurePrompt was removed — the RPG mechanics it described had no real backing system
+  db.run(sql`DELETE FROM settings WHERE key = 'adventurePrompt'`);
+
+  for (const [key, pairs] of Object.entries(PROMPT_FIXES)) {
+    const row = db.get<{ value: string }>(sql`SELECT value FROM settings WHERE key = ${key}`);
+    if (!row?.value) continue;
+    let text: unknown;
+    try {
+      text = JSON.parse(row.value);
+    } catch {
+      continue;
+    }
+    if (typeof text !== 'string') continue;
+    let updated = text;
+    for (const [oldStr, newStr] of pairs) {
+      updated = updated.split(oldStr).join(newStr);
+    }
+    if (updated !== text) {
+      db.run(sql`
+        UPDATE settings SET value = ${JSON.stringify(updated)}, updated_at = datetime('now')
+        WHERE key = ${key}
+      `);
+    }
+  }
 }

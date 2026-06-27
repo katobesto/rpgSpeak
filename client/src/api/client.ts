@@ -58,7 +58,7 @@ export const api = {
     request<T>(path, { method: 'POST', body }),
   patch: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'PATCH', body: JSON.stringify(body) }),
-  delete: (path: string) => request<void>(path, { method: 'DELETE' }),
+  delete: <T = void>(path: string) => request<T>(path, { method: 'DELETE' }),
   deleteWithBody: <T>(path: string, body: unknown) =>
     request<T>(path, { method: 'DELETE', body: JSON.stringify(body) }),
 };
@@ -80,7 +80,8 @@ export interface TokenBreakdown {
 
 export interface StreamCallbacks {
   onToken: (token: string) => void;
-  onDone: (result: { messageId: string; tokens: number; tokenBreakdown?: TokenBreakdown; promptMessages?: unknown[]; affinityUpdates?: AffinityUpdate[]; fastLlmDebug?: string; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null }) => void;
+  onThinkToken?: (token: string) => void;
+  onDone: (result: { messageId: string; tokens: number; tokenBreakdown?: TokenBreakdown; promptMessages?: unknown[]; affinityUpdates?: AffinityUpdate[]; fastLlmDebug?: string; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null; thinkContent?: string }) => void;
   onError: (err: Error) => void;
 }
 
@@ -127,7 +128,7 @@ export async function streamGenerate(
           if (!line.startsWith('data: ')) continue;
           try {
             const event = JSON.parse(line.slice(6)) as {
-              type: 'token' | 'done' | 'error';
+              type: 'token' | 'think' | 'done' | 'error';
               token?: string;
               messageId?: string;
               tokens?: number;
@@ -139,13 +140,16 @@ export async function streamGenerate(
               characterId?: string | null;
               content?: string;
               locationUpdate?: string | null;
+              thinkContent?: string;
               error?: string;
             };
 
             if (event.type === 'token' && event.token) {
               callbacks.onToken(event.token);
+            } else if (event.type === 'think' && event.token) {
+              callbacks.onThinkToken?.(event.token);
             } else if (event.type === 'done') {
-              callbacks.onDone({ messageId: event.messageId!, tokens: event.tokens!, tokenBreakdown: event.tokenBreakdown, promptMessages: event.promptMessages, affinityUpdates: event.affinityUpdates, fastLlmDebug: event.fastLlmDebug, narrator: event.narrator, characterId: event.characterId, content: event.content, locationUpdate: event.locationUpdate });
+              callbacks.onDone({ messageId: event.messageId!, tokens: event.tokens!, tokenBreakdown: event.tokenBreakdown, promptMessages: event.promptMessages, affinityUpdates: event.affinityUpdates, fastLlmDebug: event.fastLlmDebug, narrator: event.narrator, characterId: event.characterId, content: event.content, locationUpdate: event.locationUpdate, thinkContent: event.thinkContent });
             } else if (event.type === 'error') {
               callbacks.onError(new Error(event.error ?? 'Unknown stream error'));
             }

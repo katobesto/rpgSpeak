@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { Conversation, Message } from '@rpgspeak/shared';
 import { streamGenerate, type AffinityUpdate } from '../api/client.ts';
+import { messagesApi } from '../api/conversations.ts';
 
 interface StreamingState {
   isStreaming: boolean;
@@ -32,6 +33,10 @@ interface ChatState extends StreamingState {
   removeMessage: (id: string) => void;
   setBranch: (branchId: string) => void;
 
+  /** Content of the most recently attempted user message — kept so regenerate can
+   *  re-send it when the original was removed from the store by an error handler. */
+  lastAttemptedMessage: string | null;
+
   sendMessage: (params: {
     message: string;
     characterId?: string;
@@ -39,6 +44,17 @@ interface ChatState extends StreamingState {
     /** Override narrator mode for this specific message (e.g. "Continúa la historia" always forces narrator) */
     forceNarratorMode?: boolean;
   }) => Promise<void>;
+
+  /** Re-generate the response for a given assistant message.
+   *  Deletes the assistant message (and its preceding user message) from the
+   *  server, then re-streams with the same user content. Also works for
+   *  ephemeral error messages (id starts with "error-"). */
+  regenerate: (assistantMessageId: string, characterId?: string | null) => Promise<void>;
+
+  /** Rebobinar: elimina del servidor y del store todos los mensajes posteriores
+   *  a `messageId` (el propio mensaje ancla se conserva). */
+  rewind: (messageId: string) => Promise<void>;
+
   stopStreaming: (() => void) | null;
   abort: () => void;
 }
@@ -72,6 +88,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   selectedProviderId: null,
   selectedModelId: null,
   narratorMode: false,
+  lastAttemptedMessage: null,
 
   setProviderModel: (providerId, modelId) =>
     set({ selectedProviderId: providerId, selectedModelId: modelId }),
@@ -166,7 +183,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       updatedAt: new Date().toISOString(),
     });
 
-    set({ isStreaming: true, streamingContent: '', streamingMessageId: placeholderId });
+    set({ isStreaming: true, streamingContent: '', streamingMessageId: placeholderId, lastAttemptedMessage: message });
 
     const abort = await streamGenerate(
       {
@@ -178,18 +195,40 @@ export const useChatStore = create<ChatState>((set, get) => ({
         overrides: Object.keys(mergedOverrides).length > 0 ? mergedOverrides : undefined,
       },
       {
+        onThinkToken: (token) => {
+          set((s) => ({
+            messages: s.messages.map((m) =>
+              m.id === placeholderId
+                ? {
+                    ...m,
+                    metadata: {
+                      ...m.metadata,
+                      isThinking: true,
+                      thinkContent: ((m.metadata?.thinkContent as string) || '') + token,
+                    },
+                  }
+                : m
+            ),
+          }));
+        },
         onToken: (token) => {
           set((s) => {
             const newContent = s.streamingContent + token;
             return {
               streamingContent: newContent,
               messages: s.messages.map((m) =>
-                m.id === placeholderId ? { ...m, content: newContent } : m
+                m.id === placeholderId
+                  ? {
+                      ...m,
+                      content: newContent,
+                      metadata: { ...m.metadata, isThinking: false },
+                    }
+                  : m
               ),
             };
           });
         },
-        onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate }) => {
+        onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent }) => {
           set((s) => ({
             isStreaming: false,
             streamingContent: '',
@@ -208,6 +247,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                     characterId: characterId !== undefined ? characterId : m.characterId,
                     metadata: {
                       isStreaming: false,
+                      isThinking: false,
                       // narrator flag — drives styling in MessageItem
                       ...(narrator ? { narrator: true } : {}),
                       ...(tokenBreakdown ? {
@@ -218,6 +258,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                       ...(promptMessages?.length ? { promptMessages } : {}),
                       ...(fastLlmDebug ? { fastLlmDebug } : {}),
                       ...(affinityUpdates?.length ? { affinityUpdates } : {}),
+                      ...(thinkContent ? { thinkContent } : {}),
                     },
                   }
                 : m
@@ -243,6 +284,213 @@ export const useChatStore = create<ChatState>((set, get) => ({
     );
 
     set({ stopStreaming: abort });
+  },
+
+  regenerate: async (assistantMessageId, characterIdArg) => {
+    const {
+      activeConversationId, activeBranchId, messages,
+      selectedProviderId, selectedModelId, narratorMode: storeNarratorMode,
+      isStreaming, lastAttemptedMessage, addMessage,
+    } = get();
+
+    if (!activeConversationId || isStreaming) return;
+
+    const isEphemeral =
+      assistantMessageId.startsWith('error-') || assistantMessageId.startsWith('streaming-');
+
+    let userContent: string | null = null;
+    let charId: string | undefined = characterIdArg ?? undefined;
+    const idsToRemove = new Set<string>([assistantMessageId]);
+
+    if (isEphemeral) {
+      // Error bubble: no DB record — just use the last attempted message content
+      userContent = lastAttemptedMessage;
+    } else {
+      // Real assistant message: find and delete the preceding user message too
+      const msgIndex = messages.findIndex((m) => m.id === assistantMessageId);
+      if (msgIndex !== -1) {
+        if (!charId) charId = messages[msgIndex].characterId ?? undefined;
+        for (let i = msgIndex - 1; i >= 0; i--) {
+          if (messages[i].role === 'user') {
+            userContent = messages[i].content;
+            const uid = messages[i].id;
+            idsToRemove.add(uid);
+            if (!uid.startsWith('temp-')) {
+              try { await messagesApi.delete(uid); } catch { /* ignore */ }
+            }
+            break;
+          }
+        }
+      }
+      try { await messagesApi.delete(assistantMessageId); } catch { /* ignore */ }
+    }
+
+    if (!userContent) return;
+
+    // Remove the old messages from the store
+    set((s) => ({ messages: s.messages.filter((m) => !idsToRemove.has(m.id)) }));
+
+    // Optimistic user message (mirrors sendMessage behaviour)
+    const tempId = `temp-${Date.now()}`;
+    addMessage({
+      id: tempId,
+      conversationId: activeConversationId,
+      parentId: null,
+      branchId: activeBranchId,
+      role: 'user',
+      content: userContent,
+      characterId: null,
+      tokens: 0,
+      isActive: true,
+      metadata: {},
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const placeholderId = `streaming-${Date.now()}`;
+    addMessage({
+      id: placeholderId,
+      conversationId: activeConversationId,
+      parentId: null,
+      branchId: activeBranchId,
+      role: 'assistant',
+      content: '',
+      characterId: charId ?? null,
+      tokens: 0,
+      isActive: true,
+      metadata: { isStreaming: true },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+
+    const narratorMode = storeNarratorMode;
+    const mergedOverrides = {
+      ...(selectedProviderId ? { providerId: selectedProviderId } : {}),
+      ...(selectedModelId    ? { model: selectedModelId }         : {}),
+    };
+
+    set({ isStreaming: true, streamingContent: '', streamingMessageId: placeholderId, lastAttemptedMessage: userContent });
+
+    const abort = await streamGenerate(
+      {
+        conversationId: activeConversationId,
+        message: userContent,
+        characterId: narratorMode ? undefined : charId,
+        branchId: activeBranchId,
+        narratorMode,
+        overrides: Object.keys(mergedOverrides).length > 0 ? mergedOverrides : undefined,
+      },
+      {
+        onThinkToken: (token) => {
+          set((s) => ({
+            messages: s.messages.map((m) =>
+              m.id === placeholderId
+                ? { ...m, metadata: { ...m.metadata, isThinking: true, thinkContent: ((m.metadata?.thinkContent as string) || '') + token } }
+                : m
+            ),
+          }));
+        },
+        onToken: (token) => {
+          set((s) => {
+            const newContent = s.streamingContent + token;
+            return {
+              streamingContent: newContent,
+              messages: s.messages.map((m) =>
+                m.id === placeholderId
+                  ? { ...m, content: newContent, metadata: { ...m.metadata, isThinking: false } }
+                  : m
+              ),
+            };
+          });
+        },
+        onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId: doneCharId, content, locationUpdate, thinkContent }) => {
+          set((s) => ({
+            isStreaming: false,
+            streamingContent: '',
+            streamingMessageId: null,
+            stopStreaming: null,
+            messages: s.messages.map((m) =>
+              m.id === placeholderId
+                ? {
+                    ...m,
+                    id: messageId,
+                    tokens,
+                    content: content !== undefined ? content : m.content,
+                    characterId: doneCharId !== undefined ? doneCharId : m.characterId,
+                    metadata: {
+                      isStreaming: false,
+                      isThinking: false,
+                      ...(narrator ? { narrator: true } : {}),
+                      ...(tokenBreakdown ? { promptTokens: tokenBreakdown.prompt, completionTokens: tokenBreakdown.completion, cachedTokens: tokenBreakdown.cached } : {}),
+                      ...(promptMessages?.length ? { promptMessages } : {}),
+                      ...(fastLlmDebug ? { fastLlmDebug } : {}),
+                      ...(affinityUpdates?.length ? { affinityUpdates } : {}),
+                      ...(thinkContent ? { thinkContent } : {}),
+                    },
+                  }
+                : m
+            ),
+          }));
+          if (affinityUpdates?.length) get().updateCharacterAffinities(affinityUpdates);
+          if (locationUpdate !== undefined) get().updateCurrentLocation(locationUpdate);
+        },
+        onError: (err) => {
+          set((s) => ({
+            isStreaming: false,
+            streamingContent: '',
+            streamingMessageId: null,
+            stopStreaming: null,
+            messages: [
+              ...s.messages.filter((m) => m.id !== placeholderId && m.id !== tempId),
+              makeErrorMessage(activeConversationId!, `⚠️ ${err.message}`),
+            ],
+          }));
+        },
+      }
+    );
+
+    set({ stopStreaming: abort });
+  },
+
+  rewind: async (messageId) => {
+    const { messages, isStreaming } = get();
+    if (isStreaming) return;
+
+    const idx = messages.findIndex((m) => m.id === messageId);
+    if (idx === -1) return;
+
+    // No hay nada posterior que borrar.
+    if (idx === messages.length - 1) return;
+
+    const idsAfter = messages.slice(idx + 1).map((m) => m.id);
+
+    // Optimista: recorta el store de inmediato. El ancla (idx) se conserva.
+    set((s) => ({ messages: s.messages.slice(0, s.messages.findIndex((m) => m.id === messageId) + 1) }));
+
+    try {
+      // El ancla puede ser un id temporal/efímero si la conversación no se ha
+      // recargado; en ese caso no existe en BD y no hay cola persistida que cortar.
+      const isPersisted = !messageId.startsWith('temp-') && !messageId.startsWith('streaming-') && !messageId.startsWith('error-');
+      if (isPersisted) {
+        await messagesApi.deleteAfter(messageId);
+      } else {
+        // Ancla no persistida: borra uno a uno los posteriores que sí lo estén.
+        for (const id of idsAfter) {
+          if (!id.startsWith('temp-') && !id.startsWith('streaming-') && !id.startsWith('error-')) {
+            try { await messagesApi.delete(id); } catch { /* ignore */ }
+          }
+        }
+      }
+    } catch {
+      // Si el borrado en servidor falla, recargamos para resincronizar el store.
+      const { activeConversationId, activeBranchId } = get();
+      if (activeConversationId) {
+        try {
+          const fresh = await messagesApi.list(activeConversationId, activeBranchId);
+          set({ messages: fresh });
+        } catch { /* ignore */ }
+      }
+    }
   },
 
   abort: () => {

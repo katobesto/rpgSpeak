@@ -45,6 +45,12 @@ export class MessageService {
     repo.delete(id);
   }
 
+  /** Rebobinar: borra todos los mensajes posteriores al ancla (no el ancla). */
+  deleteAfter(id: string): { deleted: number } {
+    this.get(id); // valida que el mensaje ancla existe
+    return { deleted: repo.deleteAfter(id) };
+  }
+
   branch(messageId: string): { branchId: string } {
     const msg = this.get(messageId);
     repo.deactivateBranch(msg.conversationId, messageId);

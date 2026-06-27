@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useCallback, useImperativeHandle } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { MessageItem } from './MessageItem.tsx';
+import { ErrorBoundary } from '../ui/ErrorBoundary.tsx';
 import type { Message, Character } from '@rpgspeak/shared';
 import { useChatStore } from '../../stores/chat.store.ts';
 
@@ -119,14 +120,16 @@ export const MessageList = React.forwardRef<MessageListHandle, MessageListProps>
                   transform: `translateY(${virtualItem.start}px)`,
                 }}
               >
-                <MessageItem
-                  message={message}
-                  characterName={character?.name}
-                  characterAvatar={character?.avatar}
-                  groupCharacters={characters}
-                  isStreaming={isStreaming && message.id === streamingMessageId}
-                  highlighted={message.id === highlightedMessageId}
-                />
+                <ErrorBoundary label="MessageItem">
+                  <MessageItem
+                    message={message}
+                    characterName={character?.name}
+                    characterAvatar={character?.avatar}
+                    groupCharacters={characters}
+                    isStreaming={isStreaming && message.id === streamingMessageId}
+                    highlighted={message.id === highlightedMessageId}
+                  />
+                </ErrorBoundary>
               </div>
             );
           })}

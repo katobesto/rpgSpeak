@@ -6,7 +6,7 @@ import { ValidationError, ForbiddenError } from '../../shared/errors.js';
 import { ProviderRepository } from '../providers/provider.repository.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { createProvider } from '../../core/llm/provider.factory.js';
-import type { StoryEvent, StoryLocation } from '@rpgspeak/shared';
+import type { StoryEvent, StoryLocation, StoryAssistantResult, StoryAssistantCharacterDraft } from '@rpgspeak/shared';
 
 const service = new StoryService();
 
@@ -44,6 +44,44 @@ function parseGeneratedEvents(text: string): Omit<StoryEvent, 'id' | 'timestamp'
   }
   return events;
 }
+
+// ─── Story-assistant helpers ─────────────────────────────────────────────────
+
+/** Maps the 1-5 pacing slider to a directive that is woven into the prompt and the
+ *  generated story's narrative rules so it carries through to actual play. */
+function pacingDirective(pacing: number): string {
+  switch (Math.min(5, Math.max(1, Math.round(pacing)))) {
+    case 1:
+      return 'Muy pausado y contemplativo. Prioriza la introspección, el detalle sensorial, las conversaciones largas y el desarrollo emocional. Los acontecimientos importantes son escasos y se construyen con lentitud; deja respirar las escenas.';
+    case 2:
+      return 'Pausado. Da espacio a la atmósfera y a los personajes; los giros importantes llegan poco a poco, sin prisa.';
+    case 3:
+      return 'Equilibrado. Alterna momentos tranquilos de desarrollo con escenas de acción o tensión.';
+    case 4:
+      return 'Ágil. Suceden cosas con frecuencia: mantén la tensión alta y sorprende al jugador a menudo con giros y complicaciones.';
+    default:
+      return 'Muy rápido y frenético. Constantemente ocurren acontecimientos sorprendentes, giros inesperados y peligros. Cada escena introduce algo nuevo; nunca hay tiempos muertos.';
+  }
+}
+
+/** Extracts ordered "LABEL: value" fields from a block. Each value runs until the
+ *  next known label or the end of the block, so multi-line values are preserved. */
+function extractBlockFields(block: string, labels: string[]): Record<string, string> {
+  const result: Record<string, string> = {};
+  const labelAlt = labels.join('|');
+  for (const label of labels) {
+    const re = new RegExp(
+      `(?:^|\\n)\\s*${label}\\s*:\\s*([\\s\\S]*?)(?=\\n\\s*(?:${labelAlt})\\s*:|$)`,
+      'i',
+    );
+    const m = block.match(re);
+    result[label.toLowerCase()] = m ? m[1].trim() : '';
+  }
+  return result;
+}
+
+const HISTORIA_BLOCK_RE  = /===HISTORIA===([\s\S]*?)===FIN HISTORIA===/i;
+const PERSONAJE_BLOCK_RE = /===PERSONAJE===([\s\S]*?)===FIN PERSONAJE===/gi;
 
 export const storyRoutes: FastifyPluginAsync = async (app) => {
   app.get('/', async (req) => {
@@ -218,5 +256,133 @@ export const storyRoutes: FastifyPluginAsync = async (app) => {
 
     console.log(`[story/generate-locations] Generated ${locations.length}/${numLocations} locations for story "${story.name}"`);
     return reply.send({ success: true, data: { locations } });
+  });
+
+  // POST /stories/assistant — generate a full story + characters draft from a briefing.
+  // Does NOT write to the DB: returns drafts so the client can preview and confirm.
+  app.post('/assistant', async (req, reply) => {
+    const hintSchema = z.object({
+      name:  z.string().max(100).default(''),
+      notes: z.string().max(1000).default(''),
+    });
+    const schema = z.object({
+      theme:          z.string().min(1, 'Indica una temática o premisa').max(2000),
+      genre:          z.string().max(200).default(''),
+      tone:           z.string().max(200).default(''),
+      pacing:         z.number().int().min(1).max(5).default(3),
+      numCharacters:  z.number().int().min(1).max(8).default(3),
+      numEvents:      z.number().int().min(0).max(15).default(5),
+      numLocations:   z.number().int().min(0).max(15).default(4),
+      adventureMode:  z.boolean().default(false),
+      openWorld:      z.boolean().default(false),
+      characterHints: z.array(hintSchema).max(8).default([]),
+      extra:          z.string().max(2000).default(''),
+    });
+    const briefing = schema.parse(req.body);
+
+    const settings = new SettingsService();
+    const provRepo = new ProviderRepository();
+
+    const providerId = settings.get('defaultProviderId') as string | null;
+    const modelId    = settings.get('defaultModelId')    as string | null;
+    if (!providerId) throw new ValidationError('No hay ningún provider LLM configurado');
+
+    const providerRecord = provRepo.findById(providerId);
+    if (!providerRecord?.isEnabled) throw new ValidationError('El provider LLM no está disponible');
+
+    const llm = createProvider(providerRecord);
+
+    const pacingText = `${briefing.pacing}/5 — ${pacingDirective(briefing.pacing)}`;
+    const hintsText = briefing.characterHints.length
+      ? briefing.characterHints
+          .map((h, i) => `  ${i + 1}. ${h.name?.trim() || '(nombre libre)'}${h.notes?.trim() ? ` — ${h.notes.trim()}` : ''}`)
+          .join('\n')
+      : '  (ninguno: invéntalos todos)';
+
+    const promptTemplate = settings.get('storyAssistantPrompt') as string;
+    const prompt = promptTemplate
+      .replace('{{TEMATICA}}',             briefing.theme.trim())
+      .replace('{{GENERO}}',               briefing.genre.trim()  || '(libre)')
+      .replace('{{TONO}}',                 briefing.tone.trim()   || '(libre)')
+      .replace('{{RITMO}}',                pacingText)
+      .replace('{{MODO_AVENTURA}}',        briefing.adventureMode ? 'Sí' : 'No')
+      .replace('{{MUNDO_ABIERTO}}',        briefing.openWorld ? 'Sí' : 'No')
+      .replace(/\{\{NUM_PERSONAJES\}\}/g,  String(briefing.numCharacters))
+      .replace(/\{\{NUM_EVENTOS\}\}/g,     String(briefing.numEvents))
+      .replace(/\{\{NUM_UBICACIONES\}\}/g, String(briefing.numLocations))
+      .replace('{{PERSONAJES_SUGERIDOS}}', hintsText)
+      .replace('{{EXTRA}}',                briefing.extra.trim() || '(ninguna)');
+
+    const llmResult = await llm.generate({
+      messages: [
+        {
+          role: 'system',
+          content: 'Eres un diseñador de campañas de rol. Sigue el formato de salida EXACTAMENTE, sin texto adicional fuera de los bloques y etiquetas indicados.',
+        },
+        { role: 'user', content: prompt },
+      ],
+      model:       modelId ?? '',
+      temperature: 0.85,
+      maxTokens:   6000,
+      stream:      false,
+    });
+
+    const text = llmResult.content;
+
+    // Parse story block
+    const histMatch = text.match(HISTORIA_BLOCK_RE);
+    const histFields = histMatch
+      ? extractBlockFields(histMatch[1], ['NOMBRE', 'DESCRIPCION', 'CONTEXTO', 'LORE', 'REGLAS'])
+      : {};
+
+    // Weave the pacing directive into the narrative rules so it persists into play.
+    const baseRules = (histFields.reglas ?? '').trim();
+    const narrativeRules = [
+      baseRules,
+      `## Ritmo de la narración (${briefing.pacing}/5)\n${pacingDirective(briefing.pacing)}`,
+    ].filter(Boolean).join('\n\n');
+
+    // Parse character blocks
+    const characters: StoryAssistantCharacterDraft[] = [];
+    for (const m of text.matchAll(PERSONAJE_BLOCK_RE)) {
+      const f = extractBlockFields(m[1], ['NOMBRE', 'ROL', 'DESCRIPCION', 'PERSONALIDAD', 'LORE', 'TAGS']);
+      if (!f.nombre) continue;
+      characters.push({
+        name:        f.nombre,
+        role:        f.rol ?? '',
+        description: f.descripcion ?? '',
+        personality: f.personalidad ?? '',
+        lore:        f.lore ?? '',
+        tags: (f.tags ?? '')
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean)
+          .slice(0, 8),
+      });
+    }
+
+    const result: StoryAssistantResult = {
+      story: {
+        name:           histFields.nombre?.trim() || briefing.theme.slice(0, 60),
+        description:    histFields.descripcion ?? '',
+        globalContext:  histFields.contexto ?? '',
+        worldLore:      histFields.lore ?? '',
+        narrativeRules,
+        events:    parseGeneratedEvents(text),
+        locations: parseGeneratedLocations(text),
+      },
+      characters,
+    };
+
+    console.log(
+      `[story/assistant] Generated story "${result.story.name}" with ${characters.length} characters, ` +
+      `${result.story.events.length} events, ${result.story.locations.length} locations`,
+    );
+
+    if (!histMatch && characters.length === 0) {
+      throw new ValidationError('El LLM no devolvió un resultado en el formato esperado. Inténtalo de nuevo.');
+    }
+
+    return reply.send({ success: true, data: result });
   });
 };

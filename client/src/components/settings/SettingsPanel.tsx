@@ -19,7 +19,7 @@ import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
 
 type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats' | 'backup';
 
-const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'adventurePrompt', 'sceneImagePrompt', 'charImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength'];
+const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'sceneImagePrompt', 'charImagePrompt', 'backgroundImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret', 'bzComfyUrl', 'bzComfyApiToken', 'bzComfyWorkflow'];
 
@@ -244,6 +244,25 @@ export function SettingsPanel() {
                       checked={draft.disableFallbacks ?? false}
                       onChange={(v) => update('disableFallbacks', v)}
                     />
+                    <ToggleRow
+                      label="Razonamiento (thinking) en el modelo principal"
+                      description="Activa el modo thinking (p.ej. DeepSeek V4: thinking:enabled + reasoning_effort). Mejora la coherencia y el seguimiento de detalles (objetos, ubicaciones), pero aumenta la latencia y el coste por respuesta. Solo funciona con modelos que soporten este modo."
+                      checked={draft.reasoningEnabled ?? false}
+                      onChange={(v) => update('reasoningEnabled', v)}
+                    />
+                    {draft.reasoningEnabled && (
+                      <div className="mt-2">
+                        <label className="block text-sm font-medium text-text-secondary mb-1">Nivel de esfuerzo</label>
+                        <select
+                          className="w-full px-3 py-2 rounded-lg bg-surface-2 border border-border text-sm text-text-primary"
+                          value={draft.reasoningEffort ?? 'high'}
+                          onChange={(e) => update('reasoningEffort', e.target.value as AppSettings['reasoningEffort'])}
+                        >
+                          <option value="high">Alto</option>
+                          <option value="max">Máximo</option>
+                        </select>
+                      </div>
+                    )}
                   </Section>
 
                   <Section title="Prompt de sistema global">
@@ -283,21 +302,6 @@ export function SettingsPanel() {
                       settingsKey="narratorPrompt"
                       value={draft.narratorPrompt ?? ''}
                       onChange={(v) => update('narratorPrompt', v)}
-                      rows={14}
-                      mono
-                    />
-                  </Section>
-
-                  <Section title="Prompt del Game Master (Aventura)">
-                    <p className="text-xs text-text-muted mb-1 leading-relaxed">
-                      <span className="text-accent/70 font-mono text-[10px] mr-1">[SYSTEM]</span>
-                      Reemplaza el prompt de personaje cuando el modo <strong className="text-text-secondary">Narrador + Aventura</strong> está activo.
-                      Usa <code className="bg-white/8 px-1 rounded text-accent/80 font-mono text-[10px]">{'{{PERSONAJES}}'}</code> para los bloques de personaje con sus fichas RPG.
-                    </p>
-                    <RestorablePrompt
-                      settingsKey="adventurePrompt"
-                      value={draft.adventurePrompt ?? ''}
-                      onChange={(v) => update('adventurePrompt', v)}
                       rows={14}
                       mono
                     />
@@ -452,16 +456,32 @@ export function SettingsPanel() {
                   {/* ── Estructura visual del prompt ──────────────────────────── */}
                   <Section title="Estructura de la petición al LLM">
                     <p className="text-xs text-text-muted mb-3 leading-relaxed">
-                      Orden en que se ensamblan los mensajes enviados al modelo en cada turno de chat:
+                      Orden en que se ensamblan los mensajes enviados al modelo en cada turno de chat.
+                      Este es el mismo agrupamiento que verás en los bloques desplegables del "Debug prompt"
+                      de cada respuesta.
                     </p>
                     <div className="rounded-lg border border-border bg-surface-2 px-4 py-3 font-mono text-[11px] leading-6 space-y-0.5">
+                      <div className="text-text-muted/60 mt-1 mb-0.5">— Mensaje de sistema único (cacheable) —</div>
                       <div>
                         <span className="text-blue-400/80">[SYSTEM]</span>
                         <span className="text-text-secondary ml-2">Prompt de sistema global</span>
                       </div>
                       <div>
                         <span className="text-blue-400/80">[SYSTEM]</span>
-                        <span className="text-text-secondary ml-2">Prompt del personaje / Narrador / Game Master</span>
+                        <span className="text-text-secondary ml-2">Nombre del usuario</span>
+                        <span className="text-text-muted/50 ml-1">(si está configurado)</span>
+                      </div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Personaje / Narrador / Game Master</span>
+                      </div>
+                      <div className="pl-11 text-text-muted">
+                        └─ <span className="text-text-muted/70">Aviso de aventura</span>
+                        <span className="text-text-muted/40 ml-1">(modo personaje + aventura)</span>
+                      </div>
+                      <div className="pl-11 text-text-muted">
+                        └─ <span className="text-text-muted/70">Otros personajes del grupo</span>
+                        <span className="text-text-muted/40 ml-1">(si hay personajes secundarios)</span>
                       </div>
                       <div className="pl-11 text-text-muted">
                         └─ <span className="text-text-muted/70">Formato de respuesta</span>
@@ -472,14 +492,30 @@ export function SettingsPanel() {
                         <span className="text-text-secondary ml-2">Lore e historias vinculadas</span>
                         <span className="text-text-muted/50 ml-1">(si las hay)</span>
                       </div>
-                      <div className="text-text-muted/40 py-0.5">···</div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Memorias activas (bloque básico)</span>
+                        <span className="text-text-muted/50 ml-1">(solo si NO hay plantilla de "Memorias inyectadas")</span>
+                      </div>
                       <div>
                         <span className="text-amber-400/70">[USER]</span>
                         <span className="text-text-muted mx-1">/</span>
                         <span className="text-green-400/70">[ASSISTANT]</span>
-                        <span className="text-text-secondary ml-2">historial de mensajes</span>
+                        <span className="text-text-secondary ml-2">Ejemplos de diálogo</span>
+                        <span className="text-text-muted/50 ml-1">(few-shot, si el personaje los tiene)</span>
                       </div>
-                      <div className="text-text-muted/40 py-0.5">···</div>
+
+                      <div className="text-text-muted/40 py-0.5 mt-1">···</div>
+
+                      <div>
+                        <span className="text-amber-400/70">[USER]</span>
+                        <span className="text-text-muted mx-1">/</span>
+                        <span className="text-green-400/70">[ASSISTANT]</span>
+                        <span className="text-text-secondary ml-2">Historial de conversación</span>
+                      </div>
+
+                      <div className="text-text-muted/40 py-0.5 mt-1">— Bloques de directiva final (ordenados de más estables a más cambiantes, para maximizar la caché) —</div>
+
                       <div>
                         <span className="text-blue-400/80">[SYSTEM]</span>
                         <span className="text-text-secondary ml-2">Índice de Contexto</span>
@@ -487,8 +523,33 @@ export function SettingsPanel() {
                       </div>
                       <div>
                         <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Trama pendiente</span>
+                        <span className="text-text-muted/50 ml-1">(eventos de historia con disparador aún no ocurridos — destinos narrativos; cambia solo cuando un evento ocurre)</span>
+                      </div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
                         <span className="text-text-secondary ml-2">Memorias inyectadas</span>
-                        <span className="text-text-muted/50 ml-1">(si está activado)</span>
+                        <span className="text-text-muted/50 ml-1">(plantilla "Memorias inyectadas" — si hay memorias y está configurada)</span>
+                      </div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Coherencia de escena</span>
+                        <span className="text-text-muted/50 ml-1">(siempre — ubicación actual + objetos establecidos, en un solo bloque)</span>
+                      </div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Afinidad / estado emocional</span>
+                        <span className="text-text-muted/50 ml-1">(estado actual + reglas de consentimiento — cambia a menudo, por eso va después de la coherencia)</span>
+                      </div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Estilo de narración</span>
+                        <span className="text-text-muted/50 ml-1">(si está configurado)</span>
+                      </div>
+                      <div>
+                        <span className="text-blue-400/80">[SYSTEM]</span>
+                        <span className="text-text-secondary ml-2">Resumen de sucesos</span>
+                        <span className="text-text-muted/50 ml-1">("Historia hasta ahora" — resumen acumulado de TODA la historia, se actualiza cada 6 mensajes; va al final para no romper la caché del resto)</span>
                       </div>
                       <div>
                         <span className="text-amber-400/70">[USER]</span>
@@ -719,11 +780,11 @@ export function SettingsPanel() {
                   onChange={(e) => update('defaultContextLength', parseInt(e.target.value) || 32768)}
                   min={1024}
                   max={131072}
-                  hint="Cuántos tokens del historial se envían al modelo."
+                  hint="Tamaño MÍNIMO (en tokens) de la ventana de contexto para TODOS los personajes. Si un personaje tiene un 'Context Length' propio menor que este valor, se ignora y se usa este valor global; si lo tiene mayor, se respeta el del personaje. Es decir, este valor es el suelo: el contexto efectivo nunca será menor que esto."
                 />
                 <Input label="Máx. mensajes en contexto" type="number" value={draft.maxContextMessages}
                   onChange={(e) => update('maxContextMessages', parseInt(e.target.value))} min={5} max={200}
-                  hint="Número máximo de mensajes del historial incluidos." />
+                  hint="Número máximo de mensajes del historial considerados antes de aplicar el recorte por tokens. El recorte final también respeta siempre los últimos mensajes reales más los bloques de directivas (afinidad, ubicación, objetos, memorias, etc.)." />
                 <Input label="Umbral de auto-resumen" type="number" value={draft.autoSummarizeThreshold}
                   onChange={(e) => update('autoSummarizeThreshold', parseInt(e.target.value))} min={5} max={200}
                   hint="Resumir contexto cuando el número de mensajes supera este valor." />
@@ -1525,6 +1586,12 @@ function ImageGenTab({
         onChange={(v) => update('sceneImagePrompt', v)}
       />
 
+      {/* ── Background image prompt ─────────────────────────────────────── */}
+      <BackgroundPromptSection
+        value={draft.backgroundImagePrompt ?? ''}
+        onChange={(v) => update('backgroundImagePrompt', v)}
+      />
+
       {/* ── Character image prompt ──────────────────────────────────────── */}
       <Section title="Prompt de descripción visual de personaje">
         <p className="text-xs text-text-muted mb-1 leading-relaxed">
@@ -1612,6 +1679,27 @@ function ScenePromptSection({ value, onChange }: { value: string; onChange: (v: 
         rows={12}
         mono
         hint="Incluye instrucciones de posicionamiento (on the left / in the center / on the right) para mejorar escenas con varios personajes."
+      />
+    </Section>
+  );
+}
+
+// ─── Background prompt section ───────────────────────────────────────────────
+
+function BackgroundPromptSection({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <Section title="Prompt de mejora de fondos de chat">
+      <p className="text-xs text-text-muted">
+        Plantilla que se envía al LLM al pulsar "Mejorar prompt" en el generador de fondos de la
+        ventana de chat. Usa <code className="bg-surface-3 px-1 rounded text-accent">{'{{prompt}}'}</code>{' '}
+        como variable para la descripción escrita por el usuario.
+      </p>
+      <RestorablePrompt
+        settingsKey="backgroundImagePrompt"
+        value={value}
+        onChange={onChange}
+        rows={10}
+        mono
       />
     </Section>
   );

@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   MessageSquare, Users, BookOpen, Settings, ChevronLeft, ChevronRight, Plus, Zap,
-  MoreHorizontal, Trash2, AlertTriangle, Sword, ChevronDown, ChevronUp, LogOut, KeyRound, X,
+  MoreHorizontal, Trash2, AlertTriangle, ChevronDown, ChevronUp, LogOut, KeyRound, X,
   Search, SlidersHorizontal, UserCircle,
 } from 'lucide-react';
 import { useUiStore } from '../../stores/ui.store.ts';
@@ -52,8 +52,6 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
   const activeConversationId = useChatStore((s) => s.activeConversationId);
   const activeConversation = useChatStore((s) => s.activeConversation);
   const qc = useQueryClient();
-  const [adventurePanelOpen, setAdventurePanelOpen] = useState(true);
-
   // ── Filtros de conversaciones ──────────────────────────────────────────────
   const [filtersOpen, setFiltersOpen]     = useState(false);
   const [searchInput, setSearchInput]     = useState('');
@@ -97,10 +95,6 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
   const convCharacters = charIds.length > 0
     ? allCharacters.filter((c) => charIds.includes(c.id))
     : [];
-
-  const isAdventureActive = activeConversation?.stories.some(
-    (s) => allStories.find((st) => st.id === s.storyId)?.adventureMode
-  ) ?? false;
 
   const createConv = useMutation({
     mutationFn: () => conversationsApi.create({ title: 'Nueva conversación' }),
@@ -295,18 +289,6 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
         </div>
       )}
 
-      {/* Adventure Status Panel — only when not collapsed and adventure active */}
-      {!collapsed && isAdventureActive && activeConversation && (
-        <AdventureSidebarPanel
-          characters={convCharacters}
-          allCharacters={allCharacters}
-          conversation={activeConversation}
-          allStories={allStories}
-          open={adventurePanelOpen}
-          onToggle={() => setAdventurePanelOpen((v) => !v)}
-        />
-      )}
-
       {/* User footer + logout */}
       <div className="mt-auto border-t border-border flex-shrink-0">
         {collapsed ? (
@@ -360,115 +342,6 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
 
       {changePwdOpen && (
         <ChangePasswordModal onClose={() => setChangePwdOpen(false)} />
-      )}
-    </div>
-  );
-}
-
-// ─── Adventure Sidebar Panel ──────────────────────────────────────────────────
-
-function AdventureSidebarPanel({
-  characters, allCharacters, conversation, allStories, open, onToggle,
-}: {
-  characters: Character[];
-  allCharacters: Character[];
-  conversation: Conversation;
-  allStories: import('@rpgspeak/shared').Story[];
-  open: boolean;
-  onToggle: () => void;
-}) {
-  const objectives: string[] = [];
-  for (const link of conversation.stories) {
-    const story = allStories.find((s) => s.id === link.storyId);
-    if (story?.stateVariables) {
-      for (const [k, v] of Object.entries(story.stateVariables)) {
-        if (k.startsWith('objetivo_') || k.startsWith('mision_')) {
-          objectives.push(String(v));
-        }
-      }
-    }
-  }
-
-  return (
-    <div className="border-t border-border flex-shrink-0" style={{ background: 'var(--surface-1)' }}>
-      {/* Collapsible header */}
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-white/4 transition-colors"
-      >
-        <div className="flex items-center gap-2">
-          <Sword size={12} className="text-accent" />
-          <span className="text-[11px] font-semibold text-accent uppercase tracking-wider">Aventura activa</span>
-        </div>
-        {open
-          ? <ChevronDown size={12} className="text-text-muted" />
-          : <ChevronUp size={12} className="text-text-muted" />}
-      </button>
-
-      {open && (
-        <div className="overflow-y-auto" style={{ maxHeight: '280px' }}>
-          <div className="px-3 pb-3 space-y-3">
-            {/* HP bars */}
-            {characters.length > 0 && (
-              <div className="space-y-2.5">
-                <p className="text-[9px] uppercase tracking-widest text-text-muted font-semibold pt-0.5">Personajes</p>
-                {characters.map((char) => {
-                  const full = allCharacters.find((c) => c.id === char.id) ?? char;
-                  const hp = full.rpgStats?.hp;
-                  const maxHp = full.rpgStats?.maxHp;
-                  const hasHp = hp !== undefined && maxHp !== undefined && maxHp > 0;
-                  const ratio = hasHp ? Math.max(0, Math.min(1, hp! / maxHp!)) : null;
-                  const barColor = ratio === null ? ''
-                    : ratio > 0.6 ? '#22c55e'
-                    : ratio > 0.3 ? '#eab308'
-                    : '#ef4444';
-                  return (
-                    <div key={char.id} className="flex items-center gap-2.5">
-                      <div className="w-6 h-6 rounded-full bg-accent-muted flex items-center justify-center text-[9px] font-bold text-accent flex-shrink-0">
-                        {char.name.charAt(0).toUpperCase()}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-[11px] text-text-primary font-medium truncate leading-none">{char.name}</span>
-                          {hasHp && (
-                            <span className="text-[9px] text-text-muted flex-shrink-0 ml-1 font-mono">{hp}/{maxHp}</span>
-                          )}
-                        </div>
-                        <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'rgba(255,255,255,0.08)' }}>
-                          {ratio !== null ? (
-                            <div
-                              className="h-full rounded-full transition-all duration-300"
-                              style={{ width: `${ratio * 100}%`, background: barColor }}
-                            />
-                          ) : (
-                            <div className="h-full w-full rounded-full opacity-30" style={{ background: 'var(--accent)' }} />
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Objectives — full text, no truncation */}
-            {objectives.length > 0 && (
-              <div className="space-y-1.5">
-                <p className="text-[9px] uppercase tracking-widest text-text-muted font-semibold">Objetivos</p>
-                {objectives.map((obj, i) => (
-                  <div key={i} className="flex gap-2 items-start">
-                    <div className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0 mt-1.5" />
-                    <p className="text-[11px] text-text-secondary leading-relaxed">{obj}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {characters.length === 0 && objectives.length === 0 && (
-              <p className="text-[10px] text-text-muted italic py-1">Sin datos de aventura configurados.</p>
-            )}
-          </div>
-        </div>
       )}
     </div>
   );

@@ -1,0 +1,77 @@
+services:
+    c11dh3vnmhu2t9218rzohuyk-125728685955:
+        image: 'c11dh3vnmhu2t9218rzohuyk:365348d197487e5ddc6e455f64e88220bbaa859f'
+        container_name: c11dh3vnmhu2t9218rzohuyk-125728685955
+        restart: unless-stopped
+        expose:
+            - '3000'
+        networks:
+            coolify:
+                aliases:
+                    - c11dh3vnmhu2t9218rzohuyk-125728685955
+        mem_limit: '0'
+        memswap_limit: '0'
+        mem_swappiness: 60
+        mem_reservation: '0'
+        cpus: 0.0
+        cpu_shares: 1024
+        env_file:
+            - .env
+        labels:
+            - traefik.enable=true
+            - traefik.http.middlewares.gzip.compress=true
+            - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
+            - traefik.http.routers.http-0-c11dh3vnmhu2t9218rzohuyk.entryPoints=http
+            - traefik.http.routers.http-0-c11dh3vnmhu2t9218rzohuyk.middlewares=redirect-to-https
+            - 'traefik.http.routers.http-0-c11dh3vnmhu2t9218rzohuyk.rule=Host(`drpgspeak.javierbenzo.com`) && PathPrefix(`/`)'
+            - traefik.http.routers.http-0-c11dh3vnmhu2t9218rzohuyk.service=http-0-c11dh3vnmhu2t9218rzohuyk
+            - traefik.http.routers.http-1-c11dh3vnmhu2t9218rzohuyk.entryPoints=http
+            - traefik.http.routers.http-1-c11dh3vnmhu2t9218rzohuyk.middlewares=redirect-to-https
+            - 'traefik.http.routers.http-1-c11dh3vnmhu2t9218rzohuyk.rule=Host(`rpgspeak.javierbenzo.com`) && PathPrefix(`/`)'
+            - traefik.http.routers.http-1-c11dh3vnmhu2t9218rzohuyk.service=http-1-c11dh3vnmhu2t9218rzohuyk
+            - traefik.http.routers.https-0-c11dh3vnmhu2t9218rzohuyk.entryPoints=https
+            - traefik.http.routers.https-0-c11dh3vnmhu2t9218rzohuyk.middlewares=gzip
+            - 'traefik.http.routers.https-0-c11dh3vnmhu2t9218rzohuyk.rule=Host(`drpgspeak.javierbenzo.com`) && PathPrefix(`/`)'
+            - traefik.http.routers.https-0-c11dh3vnmhu2t9218rzohuyk.service=https-0-c11dh3vnmhu2t9218rzohuyk
+            - traefik.http.routers.https-0-c11dh3vnmhu2t9218rzohuyk.tls.certresolver=letsencrypt
+            - traefik.http.routers.https-0-c11dh3vnmhu2t9218rzohuyk.tls=true
+            - traefik.http.routers.https-1-c11dh3vnmhu2t9218rzohuyk.entryPoints=https
+            - traefik.http.routers.https-1-c11dh3vnmhu2t9218rzohuyk.middlewares=gzip
+            - 'traefik.http.routers.https-1-c11dh3vnmhu2t9218rzohuyk.rule=Host(`rpgspeak.javierbenzo.com`) && PathPrefix(`/`)'
+            - traefik.http.routers.https-1-c11dh3vnmhu2t9218rzohuyk.service=https-1-c11dh3vnmhu2t9218rzohuyk
+            - traefik.http.routers.https-1-c11dh3vnmhu2t9218rzohuyk.tls.certresolver=letsencrypt
+            - traefik.http.routers.https-1-c11dh3vnmhu2t9218rzohuyk.tls=true
+            - traefik.http.services.http-0-c11dh3vnmhu2t9218rzohuyk.loadbalancer.server.port=3000
+            - traefik.http.services.http-1-c11dh3vnmhu2t9218rzohuyk.loadbalancer.server.port=3000
+            - traefik.http.services.https-0-c11dh3vnmhu2t9218rzohuyk.loadbalancer.server.port=3000
+            - traefik.http.services.https-1-c11dh3vnmhu2t9218rzohuyk.loadbalancer.server.port=3000
+            - 'caddy_0.encode=zstd gzip'
+            - 'caddy_0.handle_path.0_reverse_proxy={{upstreams 3000}}'
+            - 'caddy_0.handle_path=/*'
+            - caddy_0.header=-Server
+            - 'caddy_0.try_files={path} /index.html /index.php'
+            - 'caddy_0=https://drpgspeak.javierbenzo.com'
+            - 'caddy_1.encode=zstd gzip'
+            - 'caddy_1.handle_path.1_reverse_proxy={{upstreams 3000}}'
+            - 'caddy_1.handle_path=/*'
+            - caddy_1.header=-Server
+            - 'caddy_1.try_files={path} /index.html /index.php'
+            - 'caddy_1=https://rpgspeak.javierbenzo.com'
+            - caddy_ingress_network=coolify
+            - coolify.managed=true
+            - coolify.version=4.1.1
+            - coolify.applicationId=2
+            - coolify.type=application
+            - coolify.name=c11dh3vnmhu2t9218rzohuyk
+            - coolify.resourceName=rpg-speakmain-c11dh3vnmhu2t9218rzohuyk
+            - coolify.projectName=rpgspeak
+            - coolify.serviceName=rpg-speakmain-c11dh3vnmhu2t9218rzohuyk
+            - coolify.environmentName=production
+            - coolify.pullRequestId=0
+        volumes:
+            - '/data/coolify/applications/c11dh3vnmhu2t9218rzohuyk:/app/data'
+networks:
+    coolify:
+        external: true
+        name: coolify
+        attachable: true

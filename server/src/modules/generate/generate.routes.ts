@@ -1,5 +1,5 @@
 import type { FastifyPluginAsync } from 'fastify';
-import type { MemoryEntry } from '@rpgspeak/shared';
+import type { MemoryEntry, BackgroundImage, ConversationBackground } from '@rpgspeak/shared';
 import { generateStream } from '../../core/conversation/engine.js';
 import { ValidationError, NotFoundError } from '../../shared/errors.js';
 import { z } from 'zod';
@@ -184,8 +184,9 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       overrides,
       signal: abortController.signal,
       onToken: (token) => send({ type: 'token', token }),
-      onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate }) => {
-        send({ type: 'done', messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate });
+      onThinkToken: (token) => send({ type: 'think', token }),
+      onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent }) => {
+        send({ type: 'done', messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent });
         reply.raw.end();
       },
       onError: (error) => {
@@ -947,5 +948,177 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       send({ type: 'error', message: msg });
       reply.raw.end();
     }
+  });
+
+  // ── Background image generation (per-conversation) ──────────────────────
+  // Backgrounds are stored in conversation.metadata.backgroundGallery / .background
+
+  // POST /generate/background-image-sse — generates a background image and appends it to the gallery
+  app.post('/background-image-sse', async (req, reply) => {
+    const body = z.object({
+      conversationId: z.string(),
+      prompt:         z.string().min(1),
+      workflowName:   z.string().optional(),
+      loraName:       z.string().optional(),
+      loraStrength:   z.number().min(0).max(2).optional(),
+      width:          z.number().int().positive(),
+      height:         z.number().int().positive(),
+    }).parse(req.body);
+
+    const { conversationId, prompt, workflowName, loraName, loraStrength, width, height } = body;
+
+    reply.raw.writeHead(200, {
+      'Content-Type':  'text/event-stream',
+      'Cache-Control': 'no-cache',
+      'Connection':    'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    const send = (data: object) => {
+      try { reply.raw.write(`data: ${JSON.stringify(data)}\n\n`); } catch { /* client gone */ }
+    };
+
+    try {
+      const convRepo = new ConversationRepository();
+      const settings = new SettingsService();
+
+      const conversation = convRepo.findById(conversationId);
+      if (!conversation) { send({ type: 'error', message: 'Conversación no encontrada' }); reply.raw.end(); return; }
+
+      send({ type: 'status', message: 'Enviando a generador de imágenes…' });
+
+      const imageProvider = createImageProvider(settings.getAll());
+      const imageReq = { prompt, workflowName, loraName, loraStrength, width, height };
+
+      const result = imageProvider.generateWithProgress
+        ? await imageProvider.generateWithProgress(
+            imageReq,
+            (evt) => {
+              if (evt.type === 'progress') send({ type: 'progress', value: evt.value, max: evt.max });
+              else if (evt.type === 'node') send({ type: 'node', nodeId: evt.nodeId, nodeName: evt.nodeName });
+              else if (evt.type === 'preview') send({ type: 'latentPreview', dataUrl: evt.dataUrl });
+            },
+          )
+        : await imageProvider.generate(imageReq);
+
+      const bgDir = path.join(PROJECT_ROOT, 'data', 'images', 'backgrounds', conversationId);
+      fs.mkdirSync(bgDir, { recursive: true });
+
+      const ext = path.extname(result.filename) || '.png';
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+      const savedFilename = `bg_${id}${ext}`;
+      fs.writeFileSync(path.join(bgDir, savedFilename), result.buffer);
+      const url = `/images/backgrounds/${conversationId}/${savedFilename}`;
+
+      const entry: BackgroundImage = { id, url, prompt, width, height, createdAt: new Date().toISOString() };
+
+      const meta = (conversation.metadata ?? {}) as Record<string, unknown>;
+      const gallery = Array.isArray(meta.backgroundGallery) ? meta.backgroundGallery as BackgroundImage[] : [];
+      convRepo.update(conversationId, { metadata: { ...meta, backgroundGallery: [...gallery, entry] } });
+
+      send({ type: 'done', image: entry });
+      reply.raw.end();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      send({ type: 'error', message: msg });
+      reply.raw.end();
+    }
+  });
+
+  // POST /generate/upload-background-image — sube una imagen externa a la galería de fondos
+  // Mismo flujo que la generación por IA pero sin prompt: guarda el archivo en disco y
+  // añade una entrada BackgroundImage a conversation.metadata.backgroundGallery.
+  app.post('/upload-background-image', async (req, reply) => {
+    const { conversationId } = req.query as { conversationId?: string };
+    if (!conversationId) throw new ValidationError('conversationId es requerido como query param');
+
+    const fileData = await req.file();
+    if (!fileData) throw new ValidationError('No se recibió ningún archivo');
+
+    const allowed = ['image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/gif'];
+    if (!allowed.includes(fileData.mimetype)) {
+      throw new ValidationError('Tipo de archivo no permitido. Usa JPG, PNG, WebP o GIF.');
+    }
+
+    const buffer = await fileData.toBuffer();
+    if (buffer.length > 20 * 1024 * 1024) {
+      throw new ValidationError('La imagen no puede superar 20 MB.');
+    }
+
+    const convRepo = new ConversationRepository();
+    const conversation = convRepo.findById(conversationId);
+    if (!conversation) throw new NotFoundError('Conversation', conversationId);
+
+    const bgDir = path.join(PROJECT_ROOT, 'data', 'images', 'backgrounds', conversationId);
+    fs.mkdirSync(bgDir, { recursive: true });
+
+    const ext = path.extname(fileData.filename).toLowerCase() || '.png';
+    const id = Date.now().toString(36) + Math.random().toString(36).slice(2);
+    const savedFilename = `bg_upload_${id}${ext}`;
+    fs.writeFileSync(path.join(bgDir, savedFilename), buffer);
+    const url = `/images/backgrounds/${conversationId}/${savedFilename}`;
+
+    // width/height desconocidos en subidas manuales (informativos; la galería usa CSS).
+    const entry: BackgroundImage = { id, url, prompt: '', width: 0, height: 0, createdAt: new Date().toISOString() };
+
+    const meta = (conversation.metadata ?? {}) as Record<string, unknown>;
+    const gallery = Array.isArray(meta.backgroundGallery) ? meta.backgroundGallery as BackgroundImage[] : [];
+    const updated = convRepo.update(conversationId, { metadata: { ...meta, backgroundGallery: [...gallery, entry] } });
+
+    return reply.send({ success: true, data: updated });
+  });
+
+  // DELETE /generate/background-image — removes an image from the gallery (and disk)
+  app.delete('/background-image', async (req, reply) => {
+    const { conversationId, id } = z.object({
+      conversationId: z.string(),
+      id:             z.string(),
+    }).parse(req.body);
+
+    const convRepo = new ConversationRepository();
+    const conversation = convRepo.findById(conversationId);
+    if (!conversation) throw new NotFoundError('Conversation', conversationId);
+
+    const meta = (conversation.metadata ?? {}) as Record<string, unknown>;
+    const gallery = Array.isArray(meta.backgroundGallery) ? meta.backgroundGallery as BackgroundImage[] : [];
+    const entry = gallery.find((g) => g.id === id);
+    const remaining = gallery.filter((g) => g.id !== id);
+
+    let background = meta.background as ConversationBackground | undefined;
+    if (entry && background?.url === entry.url) background = undefined;
+
+    if (entry) {
+      const diskPath = path.join(PROJECT_ROOT, 'data', 'images', entry.url.replace(/^\/images\//, ''));
+      if (fs.existsSync(diskPath)) fs.unlinkSync(diskPath);
+    }
+
+    const updated = convRepo.update(conversationId, {
+      metadata: { ...meta, backgroundGallery: remaining, background },
+    });
+
+    return reply.send({ success: true, data: updated });
+  });
+
+  // POST /generate/background-active — sets (or clears, with background: null) the active background
+  app.post('/background-active', async (req, reply) => {
+    const { conversationId, background } = z.object({
+      conversationId: z.string(),
+      background: z.object({
+        url:     z.string(),
+        prompt:  z.string().optional(),
+        opacity: z.number().min(0).max(1).optional(),
+      }).nullable(),
+    }).parse(req.body);
+
+    const convRepo = new ConversationRepository();
+    const conversation = convRepo.findById(conversationId);
+    if (!conversation) throw new NotFoundError('Conversation', conversationId);
+
+    const meta = (conversation.metadata ?? {}) as Record<string, unknown>;
+    const updated = convRepo.update(conversationId, {
+      metadata: { ...meta, background: background ?? undefined },
+    });
+
+    return reply.send({ success: true, data: updated });
   });
 };

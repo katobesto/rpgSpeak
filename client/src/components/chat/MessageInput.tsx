@@ -11,9 +11,10 @@ interface MessageInputProps {
   activeCharacterId: string | null;
   onCharacterChange: (id: string) => void;
   rightSlot?: React.ReactNode;
+  onGameCommand?: () => void;
 }
 
-export function MessageInput({ characters, activeCharacterId, onCharacterChange, rightSlot }: MessageInputProps) {
+export function MessageInput({ characters, activeCharacterId, onCharacterChange, rightSlot, onGameCommand }: MessageInputProps) {
   const [text, setText] = useState('');
   const [showCharMenu, setShowCharMenu] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -48,6 +49,12 @@ export function MessageInput({ characters, activeCharacterId, onCharacterChange,
   async function handleSend() {
     const trimmed = text.trim();
     if (!trimmed || isStreaming) return;
+    if (/^\/game\b/i.test(trimmed)) {
+      setText('');
+      if (textareaRef.current) textareaRef.current.style.height = 'auto';
+      onGameCommand?.();
+      return;
+    }
     setText('');
     if (textareaRef.current) textareaRef.current.style.height = 'auto';
     await sendMessage({ message: trimmed, characterId: narratorMode ? undefined : activeChar?.id });
