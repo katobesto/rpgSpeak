@@ -245,8 +245,12 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
     setSceneError(null);
     try {
       const result = await generateApi.uploadSceneImage(activeConversation.id, message.id, file);
+      const newEntry = { url: result.imageUrl };
       updateMessage(message.id, {
-        metadata: { ...(message.metadata ?? {}), sceneImageUrl: result.imageUrl },
+        metadata: {
+          ...(message.metadata ?? {}),
+          sceneImages: [...sceneImages, newEntry],
+        },
       });
       setShowScenePanel(false);
     } catch (err) {

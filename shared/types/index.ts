@@ -650,6 +650,25 @@ export type UpdateProviderDto = Partial<CreateProviderDto>;
 
 export type UpdateSettingsDto = Partial<AppSettings>;
 
+/** A single LoRA slot inside a "Power Lora Loader (rgthree)" node. */
+export interface BzPowerLora {
+  /** Input key on the Power Lora Loader node, e.g. "lora_4". */
+  key: string;
+  /** LoRA filename. */
+  name: string;
+  /** Whether the LoRA is currently enabled in the workflow. */
+  on: boolean;
+  /** LoRA strength (model + clip). */
+  strength: number;
+}
+
+/** Base-model selector exposed by a workflow (e.g. UNETLoader checkpoint choice). */
+export interface BzModelControl {
+  label: string;
+  defaultModel: string | null;
+  options: string[];
+}
+
 export interface BzWorkflow {
   id: string;
   label: string;
@@ -662,4 +681,10 @@ export interface BzWorkflow {
   defaultMegapixel?: string;
   /** Default aspect_ratio value read from the workflow's FluxResolutionNode. */
   defaultAspectRatio?: string;
+  /** True when the workflow exposes a base-model selector (e.g. UNETLoader). */
+  hasModelControl?: boolean;
+  modelControl?: BzModelControl | null;
+  /** True when the workflow contains a "Power Lora Loader (rgthree)" node. */
+  hasPowerLora?: boolean;
+  powerLoras?: BzPowerLora[];
 }

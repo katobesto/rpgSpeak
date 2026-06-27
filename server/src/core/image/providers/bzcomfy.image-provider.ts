@@ -31,7 +31,7 @@ export class BzComfyImageProvider implements ImageProvider {
         'bzComfy: no hay workflow configurado. Configura bzComfyWorkflow en Ajustes → Integraciones.',
       );
     }
-    const promptId = await this.startGeneration(workflow, req.prompt, req.negativePrompt, undefined, req.loraName, req.loraStrength, req.megapixel, req.aspectRatio, req.width, req.height);
+    const promptId = await this.startGeneration(workflow, req.prompt, req.negativePrompt, undefined, req.loraName, req.loraStrength, req.megapixel, req.aspectRatio, req.width, req.height, req.baseModel, req.powerLoraUpdates);
     const info = await this.waitForImage(promptId, onProgress);
     const buffer = await this.downloadImage(info);
     return { buffer, filename: info.filename };
@@ -67,6 +67,8 @@ export class BzComfyImageProvider implements ImageProvider {
     aspectRatio?: string,
     width?: number,
     height?: number,
+    baseModel?: string,
+    powerLoraUpdates?: Array<{ key: string; on: boolean; strength?: number }>,
   ): Promise<string> {
     const body: Record<string, unknown> = { workflow, prompt };
     if (negativePrompt) body.negativePrompt = negativePrompt;
@@ -77,6 +79,8 @@ export class BzComfyImageProvider implements ImageProvider {
     if (aspectRatio !== undefined) body.aspectRatio = aspectRatio;
     if (width !== undefined) body.width = width;
     if (height !== undefined) body.height = height;
+    if (baseModel !== undefined) body.baseModel = baseModel;
+    if (powerLoraUpdates !== undefined) body.powerLoraUpdates = powerLoraUpdates;
 
     const res = await fetch(`${this.baseUrl}/api/generate`, {
       method: 'POST',

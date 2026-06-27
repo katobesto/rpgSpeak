@@ -251,11 +251,35 @@
         <div id="preview-badge" class="preview-badge hidden">
           <span class="live-dot"></span>LIVE
         </div>
+        <div id="fullscreen-bar" class="fullscreen-bar hidden">
+          <button id="fullscreen-download-btn" class="btn-icon" title="Descargar imagen">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+          </button>
+          <button id="fullscreen-close-btn" class="btn-icon" title="Cerrar pantalla completa">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
       </div>
 
       <div id="image-info" class="image-info hidden">
         <span id="image-filename" class="image-filename"></span>
         <span id="image-dimensions" class="image-dimensions"></span>
+        <button id="fullscreen-btn" class="btn-download" title="Pantalla completa">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 3H5a2 2 0 0 0-2 2v3"/>
+            <path d="M21 8V5a2 2 0 0 0-2-2h-3"/>
+            <path d="M3 16v3a2 2 0 0 0 2 2h3"/>
+            <path d="M16 21h3a2 2 0 0 0 2-2v-3"/>
+          </svg>
+          Pantalla completa
+        </button>
         <button id="download-btn" class="btn-download" title="Descargar imagen">
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -283,7 +307,7 @@
     </main>
   </div>
 
-  <script src="app.js?v=16"></script>
+  <script src="app.js?v=17"></script>
 
   <!-- Floating streaming preview – esquina inferior derecha -->
   <div id="stream-float" class="stream-float hidden">

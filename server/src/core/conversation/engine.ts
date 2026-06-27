@@ -51,7 +51,7 @@ export interface StreamOptions extends GenerateOptions {
   onToken: (token: string) => void;
   /** Called for each token inside a &lt;think&gt;...&lt;/think&gt; block (reasoning models). */
   onThinkToken?: (token: string) => void;
-  onDone: (response: { messageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null; thinkContent?: string }) => void;
+  onDone: (response: { messageId: string; userMessageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null; thinkContent?: string }) => void;
   onError: (error: Error) => void;
 }
 
@@ -551,7 +551,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
           metadata: { blocked: true, reason: 'nsfw' },
         });
         onToken(blockedText);
-        onDone({ messageId: blockedMsg.id, tokens: 0, tokenBreakdown: { prompt: 0, completion: 0, cached: 0 }, promptMessages: [], affinityUpdates: [], content: blockedText });
+        onDone({ messageId: blockedMsg.id, userMessageId: userMsg.id, tokens: 0, tokenBreakdown: { prompt: 0, completion: 0, cached: 0 }, promptMessages: [], affinityUpdates: [], content: blockedText });
         return;
       }
     }
@@ -914,7 +914,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
 
     if (!aborted) {
       convRepo.incrementCounts(conversationId, finalTokens);
-      onDone({ messageId: assistantMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, locationUpdate, thinkContent: thinkAccumulated || undefined });
+      onDone({ messageId: assistantMsg.id, userMessageId: userMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, locationUpdate, thinkContent: thinkAccumulated || undefined });
       // Fire-and-forget background tasks (non-blocking)
       updateSummaryAsync(conversationId, provider, modelId, narratorMode);
       const updatedConv = convRepo.findById(conversationId);

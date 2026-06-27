@@ -421,7 +421,10 @@ textarea { resize: vertical; line-height: 1.55; }
   border: 1.5px dashed var(--border2); border-radius: 7px; pointer-events: none;
 }
 
-#result-img { width: auto; height: auto; max-width: none; max-height: none; border-radius: 6px; display: block; transform-origin: 50% 50%; will-change: transform; }
+/* min-width/height: 0 — without this, the image's native pixel size becomes
+   its automatic flex-item minimum size and can force .image-wrap to grow to
+   match it before the JS transform scales it down to fit. */
+#result-img { width: auto; height: auto; max-width: none; max-height: none; min-width: 0; min-height: 0; border-radius: 6px; display: block; transform-origin: 50% 50%; will-change: transform; }
 
 .image-info {
   display: flex; align-items: center; justify-content: center; gap: 10px;
@@ -476,6 +479,43 @@ textarea { resize: vertical; line-height: 1.55; }
   0%, 100% { opacity: 1; transform: scale(1); }
   50%       { opacity: 0.4; transform: scale(0.7); }
 }
+
+/* ── Fullscreen image view ─────────────────────────────── */
+.image-wrap.fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  border-radius: 0;
+  border: none;
+  background: var(--bg);
+}
+
+.fullscreen-bar {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 201;
+  display: flex;
+  gap: 8px;
+  pointer-events: none;
+}
+.image-wrap.fullscreen .fullscreen-bar { pointer-events: auto; }
+
+.btn-icon {
+  background: rgba(0,0,0,.55);
+  backdrop-filter: blur(6px);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  color: #e0e0e8;
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.btn-icon:hover { background: rgba(0,0,0,.75); color: #fff; border-color: var(--accent); }
 
 .no-preview-hint {
   margin-top: 8px;
@@ -817,8 +857,12 @@ textarea { resize: vertical; line-height: 1.55; }
 
   .viewer {
     flex: none;
-    min-height: 80vw;
     padding: 12px;
+  }
+
+  .image-wrap.fullscreen {
+    height: 100vh;
+    max-height: none;
   }
 
   /* Progress panel full-width below the viewer */

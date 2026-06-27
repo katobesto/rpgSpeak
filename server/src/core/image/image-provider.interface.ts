@@ -13,6 +13,10 @@ export interface ImageGenRequest {
   megapixel?: string;
   /** ComfyUI FluxResolutionNode: aspect_ratio value e.g. "5:7 (Balanced Portrait)". Must match node enum exactly. */
   aspectRatio?: string;
+  /** Base-model filename override for workflows with a modelControl (e.g. UNETLoader unet_name). */
+  baseModel?: string;
+  /** Per-LoRA on/off + strength overrides for "Power Lora Loader (rgthree)" nodes. */
+  powerLoraUpdates?: Array<{ key: string; on: boolean; strength?: number }>;
 }
 
 export interface ImageGenResult {

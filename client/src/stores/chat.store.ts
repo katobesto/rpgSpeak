@@ -228,13 +228,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
             };
           });
         },
-        onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent }) => {
+        onDone: ({ messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent }) => {
           set((s) => ({
             isStreaming: false,
             streamingContent: '',
             streamingMessageId: null,
             stopStreaming: null,
             messages: s.messages.map((m) =>
+              m.id === tempId ? { ...m, id: userMessageId } : m
+            ).map((m) =>
               m.id === placeholderId
                 ? {
                     ...m,

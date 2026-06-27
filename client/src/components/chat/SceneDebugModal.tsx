@@ -110,6 +110,8 @@ export function SceneDebugModal({
   const [loraStrength,    setLoraStrength]    = useState(1.0);
   const [megapixel,       setMegapixel]       = useState<string>('');
   const [aspectRatio,     setAspectRatio]     = useState<string>('');
+  const [baseModel,       setBaseModel]       = useState<string>('');
+  const [powerLoraStates, setPowerLoraStates] = useState<Record<string, { name: string; on: boolean; strength: number }>>({});
   const sseCleanupRef = useRef<(() => void) | null>(null);
 
   // ── Settings + workflows ──────────────────────────────────────────────────
@@ -129,6 +131,8 @@ export function SceneDebugModal({
   const selectedWorkflowObj   = workflows.find((w) => w.id === selectedWorkflow) ?? null;
   const workflowHasLora       = isBzComfy && !!selectedWorkflowObj?.hasLora;
   const workflowHasResolution = !!selectedWorkflowObj?.hasResolutionControl;
+  const workflowHasModelControl = !!selectedWorkflowObj?.hasModelControl;
+  const workflowHasPowerLora    = !!selectedWorkflowObj?.hasPowerLora;
 
   const { data: availableLoras = [] } = useQuery<string[]>({
     queryKey: ['bzcomfy-loras'],
@@ -169,6 +173,17 @@ export function SceneDebugModal({
       setMegapixel('');
       setAspectRatio('');
     }
+  }, [selectedWorkflow, workflows]);
+
+  // Sync base-model + Power LoRA defaults when selected workflow changes
+  useEffect(() => {
+    const wf = workflows.find((w) => w.id === selectedWorkflow);
+    setBaseModel(wf?.modelControl?.defaultModel ?? '');
+    const loraMap: Record<string, { name: string; on: boolean; strength: number }> = {};
+    for (const l of wf?.powerLoras ?? []) {
+      loraMap[l.key] = { name: l.name, on: l.on, strength: l.strength };
+    }
+    setPowerLoraStates(loraMap);
   }, [selectedWorkflow, workflows]);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -263,6 +278,10 @@ export function SceneDebugModal({
         loraStrength: workflowHasLora ? loraStrength : undefined,
         megapixel: workflowHasResolution && megapixel ? megapixel : undefined,
         aspectRatio: workflowHasResolution && aspectRatio ? aspectRatio : undefined,
+        baseModel: workflowHasModelControl && baseModel ? baseModel : undefined,
+        powerLoraUpdates: workflowHasPowerLora
+          ? Object.entries(powerLoraStates).map(([key, s]) => ({ key, on: s.on, strength: s.strength }))
+          : undefined,
       },
       (evt) => {
         if (evt.type === 'status') {
@@ -540,6 +559,67 @@ export function SceneDebugModal({
                   </select>
                 )}
               </section>
+
+              {/* Base model selector (only when workflow exposes a modelControl) */}
+              {workflowHasModelControl && (
+                <section className="space-y-1.5">
+                  <p className="text-xs font-semibold text-text-secondary">
+                    {selectedWorkflowObj?.modelControl?.label || 'Modelo base'}
+                  </p>
+                  <select
+                    value={baseModel}
+                    onChange={(e) => setBaseModel(e.target.value)}
+                    className="w-full border border-border rounded-lg px-3 py-1.5 text-xs text-text-primary focus:outline-none focus:ring-1 focus:ring-accent"
+                    style={{ background: 'var(--surface-2)' }}
+                  >
+                    {(selectedWorkflowObj?.modelControl?.options ?? []).map((m) => (
+                      <option key={m} value={m}>{m}</option>
+                    ))}
+                    {(selectedWorkflowObj?.modelControl?.options ?? []).length === 0 && (
+                      <option value="">Sin modelos disponibles</option>
+                    )}
+                  </select>
+                </section>
+              )}
+
+              {/* Power LoRA controls (only when workflow has a Power Lora Loader node) */}
+              {workflowHasPowerLora && (
+                <section className="space-y-2.5">
+                  <p className="text-xs font-semibold text-text-secondary">LoRAs</p>
+                  <div className="space-y-2">
+                    {Object.entries(powerLoraStates).map(([key, lora]) => (
+                      <div key={key} className="flex items-center gap-2 rounded-xl border border-border px-3 py-2">
+                        <button
+                          onClick={() => setPowerLoraStates((prev) => ({
+                            ...prev,
+                            [key]: { ...prev[key], on: !prev[key].on },
+                          }))}
+                          className={`w-7 h-4 rounded-full transition-colors relative flex-shrink-0 ${lora.on ? 'bg-accent' : 'bg-white/10'}`}
+                        >
+                          <span className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${lora.on ? 'translate-x-3.5' : 'translate-x-0.5'}`} />
+                        </button>
+                        <span className="text-[11px] text-text-primary truncate flex-1" title={lora.name}>
+                          {lora.name || key}
+                        </span>
+                        <input
+                          type="range"
+                          min={0} max={2} step={0.05}
+                          value={lora.strength}
+                          disabled={!lora.on}
+                          onChange={(e) => setPowerLoraStates((prev) => ({
+                            ...prev,
+                            [key]: { ...prev[key], strength: parseFloat(e.target.value) },
+                          }))}
+                          className="flex-1 accent-accent disabled:opacity-40"
+                        />
+                        <span className="text-[11px] text-text-primary tabular-nums w-8 text-right flex-shrink-0">
+                          {lora.strength.toFixed(2)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )}
 
               {/* LoRA selector (only when workflow supports it) */}
               {workflowHasLora && (

@@ -371,6 +371,12 @@ async function init() {
   el('generate-btn').addEventListener('click', generate)
   el('stop-btn').addEventListener('click', stopGeneration)
   el('download-btn').addEventListener('click', downloadImage)
+  el('fullscreen-btn').addEventListener('click', () => setFullscreen(true))
+  el('fullscreen-close-btn').addEventListener('click', () => setFullscreen(false))
+  el('fullscreen-download-btn').addEventListener('click', downloadImage)
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') setFullscreen(false)
+  })
   el('seed-random-btn').addEventListener('click', () => { el('seed-input').value = '' })
   el('prompt').addEventListener('keydown', e => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') generate()
@@ -1077,6 +1083,12 @@ function resetViewer() {
   el('stream-float-img').src = ''
   state.currentImageSrc = null
   state.currentImageFilename = null
+  resetImageView()
+}
+
+function setFullscreen(on) {
+  el('image-wrap').classList.toggle('fullscreen', on)
+  el('fullscreen-bar').classList.toggle('hidden', !on)
   resetImageView()
 }
 

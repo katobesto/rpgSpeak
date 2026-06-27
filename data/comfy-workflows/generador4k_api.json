@@ -150,17 +150,17 @@
       "lora_1": {
         "on": false,
         "lora": "Z-Image\\(ZIT)_CinematicShot.safetensors",
-        "strength": 0.55
+        "strength": 0.2
       },
       "lora_2": {
         "on": false,
         "lora": "Z-Image\\(ZIT)_Asian2Caucasian_Slider.safetensors",
-        "strength": 1
+        "strength": 0.2
       },
       "lora_3": {
         "on": false,
         "lora": "Z-Image\\(ZIT)_AfterDark_v2.safetensors",
-        "strength": 0.7
+        "strength": 0.2
       },
       "➕ Add Lora": "",
       "model": [
@@ -351,6 +351,38 @@
     "class_type": "CLIPTextEncode",
     "_meta": {
       "title": "➖  Negative Prompt (not used!)"
+    }
+  },
+  "246": {
+    "inputs": {
+      "images": [
+        "8",
+        0
+      ]
+    },
+    "class_type": "PreviewImage",
+    "_meta": {
+      "title": "Preview Image"
+    }
+  },
+  "105": {
+    "inputs": {
+      "randomize_percent": 35,
+      "strength": 20,
+      "noise_insert": "noise on beginning steps",
+      "steps_switchover_percent": 20,
+      "seed": 313940183571246,
+      "mask_starts_at": "beginning",
+      "mask_percent": 0,
+      "log_to_console": false,
+      "conditioning": [
+        "175",
+        0
+      ]
+    },
+    "class_type": "SeedVarianceEnhancer",
+    "_meta": {
+      "title": "🌱  Seed Variance Enhancer"
     }
   },
   "109": {

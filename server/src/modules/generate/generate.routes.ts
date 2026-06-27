@@ -185,8 +185,8 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       signal: abortController.signal,
       onToken: (token) => send({ type: 'token', token }),
       onThinkToken: (token) => send({ type: 'think', token }),
-      onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent }) => {
-        send({ type: 'done', messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent });
+      onDone: ({ messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent }) => {
+        send({ type: 'done', messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent });
         reply.raw.end();
       },
       onError: (error) => {
@@ -790,6 +790,12 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       loraStrength:     z.number().min(0).max(2).optional(),
       megapixel:        z.string().optional(),
       aspectRatio:      z.string().optional(),
+      baseModel:        z.string().optional(),
+      powerLoraUpdates: z.array(z.object({
+        key: z.string(),
+        on: z.boolean(),
+        strength: z.number().optional(),
+      })).optional(),
     }).parse(req.body);
 
     const {
@@ -801,6 +807,8 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       loraStrength,
       megapixel,
       aspectRatio,
+      baseModel,
+      powerLoraUpdates,
     } = body;
 
     reply.raw.writeHead(200, {
@@ -920,7 +928,7 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       } else {
         // Non-progressive workflow — use generateWithProgress if available (e.g. bzComfy)
         const anyProvider = comfyProvider as { generateWithProgress?: Function };
-        const imageReq = { prompt: sceneDescription, workflowName, loraName, loraStrength, megapixel, aspectRatio };
+        const imageReq = { prompt: sceneDescription, workflowName, loraName, loraStrength, megapixel, aspectRatio, baseModel, powerLoraUpdates };
         const result = anyProvider.generateWithProgress
           ? await anyProvider.generateWithProgress(
               imageReq,

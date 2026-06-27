@@ -23,6 +23,8 @@ export function streamSceneImage(
     loraStrength?: number;
     megapixel?: string;
     aspectRatio?: string;
+    baseModel?: string;
+    powerLoraUpdates?: Array<{ key: string; on: boolean; strength?: number }>;
   },
   onEvent: (evt: SceneImageSseEvent) => void,
 ): () => void {

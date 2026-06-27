@@ -10,6 +10,85 @@ const WORKFLOWS_DIR = path.join(PROJECT_ROOT, 'data', 'comfy-workflows');
 
 const service = new SettingsService();
 
+type WorkflowNode = { class_type?: string; inputs?: Record<string, unknown> };
+type WorkflowGraph = Record<string, WorkflowNode>;
+
+interface ModelControlInfo {
+  label: string;
+  nodeId: string;
+  input: string;
+  objectInfoClass: string;
+  objectInfoInput: string;
+  allowPattern: string | null;
+  defaultModel: string | null;
+}
+
+// Detects a workflow's base-model selector from its _meta.json `modelControl` block
+// (e.g. a UNETLoader's `unet_name`), mirroring bzComfy/server.js's detectModelControl.
+function detectModelControl(workflow: WorkflowGraph, meta: Record<string, unknown> | null): ModelControlInfo | null {
+  const control = meta?.modelControl as Record<string, unknown> | undefined;
+  if (!control?.nodeId || !control?.input) return null;
+  const node = workflow[control.nodeId as string];
+  if (!node) return null;
+  const defaultModel = (node.inputs?.[control.input as string] as string | undefined)
+    ?? (control.default as string | undefined)
+    ?? null;
+  return {
+    label: (control.label as string) || 'Modelo',
+    nodeId: control.nodeId as string,
+    input: control.input as string,
+    objectInfoClass: (control.objectInfoClass as string) || node.class_type || '',
+    objectInfoInput: (control.objectInfoInput as string) || (control.input as string),
+    allowPattern: (control.allowPattern as string) || null,
+    defaultModel,
+  };
+}
+
+// Queries ComfyUI's object_info for the combo values of a modelControl, mirroring
+// bzComfy/server.js's loadModelOptions.
+async function loadModelOptions(control: ModelControlInfo, comfyUrl: string, headers: Record<string, string>): Promise<string[]> {
+  if (!control.objectInfoClass || !control.objectInfoInput) return [];
+  const r = await fetch(`${comfyUrl}/object_info/${encodeURIComponent(control.objectInfoClass)}`, {
+    headers,
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!r.ok) throw new Error(`ComfyUI ${r.status}`);
+  const info = await r.json() as Record<string, { input?: { required?: Record<string, [unknown[]]> } }>;
+  const values = info?.[control.objectInfoClass]?.input?.required?.[control.objectInfoInput]?.[0];
+  if (!Array.isArray(values)) return [];
+  let options = values.filter((v): v is string => typeof v === 'string');
+  if (control.allowPattern) {
+    const re = new RegExp(control.allowPattern, 'i');
+    options = options.filter((v) => re.test(v));
+  }
+  if (control.defaultModel && !options.includes(control.defaultModel)) {
+    options.unshift(control.defaultModel);
+  }
+  return options;
+}
+
+// Detects a "Power Lora Loader (rgthree)" node and its lora_N slots, mirroring
+// bzComfy/server.js's detectPowerLoraNode.
+function detectPowerLoraNode(workflow: WorkflowGraph): NonNullable<BzWorkflow['powerLoras']> | null {
+  for (const node of Object.values(workflow)) {
+    if (node.class_type !== 'Power Lora Loader (rgthree)') continue;
+    const loras: NonNullable<BzWorkflow['powerLoras']> = [];
+    for (const [key, val] of Object.entries(node.inputs ?? {})) {
+      if (!/^lora_\d+$/.test(key)) continue;
+      if (typeof val !== 'object' || val === null) continue;
+      const v = val as Record<string, unknown>;
+      loras.push({
+        key,
+        name: (v.lora as string) ?? '',
+        on: !!v.on,
+        strength: typeof v.strength === 'number' ? v.strength : 1.0,
+      });
+    }
+    if (loras.length > 0) return loras;
+  }
+  return null;
+}
+
 export const settingsRoutes: FastifyPluginAsync = async (app) => {
   app.get('/', async () => ({ success: true, data: service.getAll() }));
 
@@ -33,20 +112,37 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
   // GET /api/settings/comfyui-workflows — reads local data/comfy-workflows/ directory
   app.get('/comfyui-workflows', async (_req, reply) => {
     try {
+      const comfyUrl = service.get('comfyUiUrl') as string | null;
+      const cfId  = service.get('comfyUiCfClientId')     as string | null;
+      const cfSec = service.get('comfyUiCfClientSecret') as string | null;
+      const comfyHeaders: Record<string, string> = {};
+      if (cfId && cfSec) {
+        comfyHeaders['CF-Access-Client-Id']     = cfId;
+        comfyHeaders['CF-Access-Client-Secret'] = cfSec;
+      }
+
       const files = await readdir(WORKFLOWS_DIR);
       const workflows: BzWorkflow[] = [];
       for (const f of files.filter((f) => f.endsWith('_api.json'))) {
         const id = f.replace('_api.json', '');
         let label = id.split('_').map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+        let meta: Record<string, unknown> | null = null;
+        try {
+          meta = JSON.parse(await readFile(path.join(WORKFLOWS_DIR, `${id}_meta.json`), 'utf-8'));
+          if (meta?.label) label = meta.label as string;
+        } catch { /* no meta file */ }
+
         let hasImageInput = false;
         let imageInputLabel: string | null = null;
-        try {
-          const meta = JSON.parse(await readFile(path.join(WORKFLOWS_DIR, `${id}_meta.json`), 'utf-8'));
-          if (meta.label) label = meta.label;
-        } catch { /* no meta file */ }
         let hasResolutionControl = false;
         let defaultMegapixel: string | undefined;
         let defaultAspectRatio: string | undefined;
+        let hasModelControl = false;
+        let modelControl: BzWorkflow['modelControl'] = null;
+        let hasPowerLora = false;
+        let powerLoras: BzWorkflow['powerLoras'] = [];
+        const hasLora = !!meta?.loraNodeId;
+
         try {
           const wf = JSON.parse(await readFile(path.join(WORKFLOWS_DIR, f), 'utf-8')) as Record<string, { class_type?: string; inputs?: Record<string, unknown>; _meta?: { title?: string } }>;
           const nodes = Object.values(wf);
@@ -58,8 +154,28 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
             defaultMegapixel = resNode.inputs?.megapixel as string | undefined;
             defaultAspectRatio = resNode.inputs?.aspect_ratio as string | undefined;
           }
+
+          const control = detectModelControl(wf, meta);
+          if (control) {
+            hasModelControl = true;
+            let options: string[] = [];
+            if (comfyUrl) {
+              try {
+                options = await loadModelOptions(control, comfyUrl, comfyHeaders);
+              } catch { /* fall back below */ }
+            }
+            if (options.length === 0 && control.defaultModel) options = [control.defaultModel];
+            modelControl = { label: control.label, defaultModel: control.defaultModel, options };
+          }
+
+          const loras = detectPowerLoraNode(wf);
+          if (loras) { hasPowerLora = true; powerLoras = loras; }
         } catch { /* skip */ }
-        workflows.push({ id, label, hasImageInput, imageInputLabel, hasResolutionControl, defaultMegapixel, defaultAspectRatio });
+
+        workflows.push({
+          id, label, hasImageInput, imageInputLabel, hasResolutionControl, defaultMegapixel, defaultAspectRatio,
+          hasLora, hasModelControl, modelControl, hasPowerLora, powerLoras,
+        });
       }
       return reply.send({ data: workflows });
     } catch (err) {
