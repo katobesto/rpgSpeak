@@ -47,7 +47,7 @@ export interface BuildContextOptions {
 
 // ── Aviso de aventura para modo personaje individual (sin narrador) ─────────
 const ADVENTURE_CONTEXT_NOTICE = `## Contexto de aventura activa
-Eres consciente de tu ficha RPG (stats, habilidades, inventario). Actúa de forma coherente con ellos en situaciones de combate, reto o tensión. Antes de hablar, describe brevemente entre paréntesis tu acción o gesto físico en tercera persona.`;
+Eres consciente de tu ficha RPG (stats, habilidades, inventario). Actúa de forma coherente con ellos en situaciones de combate, reto o tensión. Si tu formato de respuesta permite describir acciones o gestos, hazlo brevemente entre paréntesis y en tercera persona antes de hablar; si tu formato es solo diálogo, transmite la tensión física del momento a través del tono y las palabras, sin añadir descripciones de acción.`;
 
 // ── Identidad del jugador — candado anti-confusión ───────────────────────────
 // El nombre del usuario pertenece EXCLUSIVAMENTE al jugador (la persona real).
@@ -116,8 +116,9 @@ const KNOWLEDGE_SCOPING_NARRATOR =
 // físicas vayan siempre en tercera persona, incluso en modo personaje (donde
 // el diálogo va en primera persona). Cacheada junto con el bloque de personaje.
 const GESTURE_FORMAT_INSTRUCTION =
-  `## Formato de acciones y gestos físicos\n` +
-  `Cuando incluyas descripciones de acciones o gestos (entre asteriscos, paréntesis o como narración entre turnos de diálogo), escríbelas siempre en TERCERA PERSONA, nunca en primera:\n` +
+  `## Formato de acciones y gestos físicos (solo si tu formato de respuesta incluye acciones)\n` +
+  `Si tu formato de respuesta es estrictamente diálogo, esta sección no aplica — no añadas gestos ni acciones.\n` +
+  `Cuando sí incluyas descripciones de acciones o gestos (entre asteriscos, paréntesis o como narración entre turnos de diálogo), escríbelas siempre en TERCERA PERSONA, nunca en primera:\n` +
   `- ✗ INCORRECTO: *me acaricio el pelo mirándote a los ojos y sonrío de forma pícara*\n` +
   `- ✓ CORRECTO: *se acaricia el pelo mirándote a los ojos y sonríe de forma pícara*\n` +
   `El diálogo hablado (lo que el personaje dice en voz alta) sí va en primera persona.\n` +
@@ -368,9 +369,19 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       `${consentLines.join('\n')}\n\n` +
       `NOTA CRÍTICA: Este estado de afinidad refleja el estado emocional REAL Y PRESENTE del personaje ` +
       `hacia el jugador en este momento. Tiene PRECEDENCIA ABSOLUTA sobre cualquier rasgo de personalidad ` +
-      `o sentimiento descrito en la ficha del personaje. ` +
-      `Si la descripción dice que el personaje siente algo por el jugador, eso es su POTENCIAL — ` +
-      `no su realidad actual dado lo ocurrido.\n\n` +
+      `o sentimiento descrito en la ficha del personaje SOLO en cuanto a SI existe atracción o apertura ` +
+      `romántica hacia el jugador. Si la descripción dice que el personaje siente algo por el jugador, eso ` +
+      `es su POTENCIAL — no su realidad actual dado lo ocurrido.\n\n` +
+      `RESPALDO NARRATIVO: si hay memorias activas de momentos compartidos con el jugador (ver más abajo), ` +
+      `básate en ellas para justificar este nivel de afinidad — son la historia real que lo sostiene. ` +
+      `Si no hay memorias relevantes que lo respalden, trata el número con más cautela de la que sugiere por sí solo: ` +
+      `un vínculo profundo sin hechos concretos detrás suena hueco; que la conversación, no solo el número, sea lo que lo haga creíble.\n\n` +
+      `LO QUE LA AFINIDAD NO ANULA — CÓMO se expresa, no SI existe:\n` +
+      `La afinidad decide si la puerta al romance/intimidad está abierta. La personalidad base del personaje ` +
+      `decide CÓMO camina por esa puerta: con qué ritmo, qué condiciones pone, qué dudas conserva, qué tono usa. ` +
+      `Un personaje frío, calculador o reservado por naturaleza NO se vuelve cálido, dócil o complaciente solo ` +
+      `porque la afinidad sea alta — sigue siendo él mismo, pero ahora ese deseo o apertura es real y puede abrirse ` +
+      `paso a través de su forma de ser (con cautela, con condiciones, a su manera), no a pesar de ella ni anulándola.\n\n` +
       `PROGRESIÓN ROMÁNTICA — REGLA DE NATURALIDAD:\n` +
       `El enamoramiento es fruto de MUCHO tiempo compartido y de varios momentos significativos, no de unas pocas interacciones agradables. La afinidad mide esa historia acumulada y sube despacio.\n` +
       `• Afinidad < 60: el personaje NO siente atracción romántica por el jugador. Responde a insinuaciones, coqueteos o declaraciones con cortesía distante, humor, evasión o incomodidad — NUNCA las corresponde. No se sonroja por él, no fantasea, no busca cercanía romántica.\n` +
@@ -386,7 +397,17 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       `• Expresa incomodidad, indignación o enfado proporcional al nivel de afinidad\n` +
       `• PROHIBIDO normalizar ("deberías haberme avisado", "no lo esperaba"…)\n` +
       `• PROHIBIDO mostrar curiosidad o atracción ante ese contacto\n` +
-      `• afinidad < 40 = enfado explícito o rechazo duro; 40-60 = rechazo firme; 61-79 = rechazo claro con herida`;
+      `• afinidad < 40 = enfado explícito o rechazo duro; 40-60 = rechazo firme; 61-79 = rechazo claro con herida\n\n` +
+      `CON AFINIDAD ≥ 80 — el contacto íntimo es POSIBLE, no automático:\n` +
+      `Hay consentimiento emocional de base, pero la reacción concreta a CADA intento sigue pasando por el filtro ` +
+      `de la personalidad del personaje y el momento de la escena — no es un "sí" garantizado en cada ocasión. ` +
+      `Un personaje cauteloso o calculador por naturaleza puede aceptar el deseo y aun así dudar, poner una ` +
+      `condición, tomar la iniciativa él mismo en vez de dejarse llevar, o frenar un momento que percibe ` +
+      `inoportuno (mal lugar, mal momento, algo que le preocupa ahora) — sin que eso sea un rechazo emocional. ` +
+      `Lo que NUNCA debe hacer con afinidad ≥ 80 es reaccionar con la frialdad o el enfado de un rechazo por ` +
+      `falta de consentimiento: la indecisión, si aparece, se expresa como ambivalencia propia del personaje ` +
+      `(vacilación, una condición, un "todavía no aquí"), nunca como las reacciones de incomodidad/enfado ` +
+      `descritas arriba para afinidad insuficiente.`;
 
     // consentDirective (estado + gradación romántica + contacto físico) SIEMPRE.
     // Cuando el LLM rápido está OFF añadimos, al final (máxima autoridad):
