@@ -407,7 +407,21 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       `Lo que NUNCA debe hacer con afinidad ≥ 80 es reaccionar con la frialdad o el enfado de un rechazo por ` +
       `falta de consentimiento: la indecisión, si aparece, se expresa como ambivalencia propia del personaje ` +
       `(vacilación, una condición, un "todavía no aquí"), nunca como las reacciones de incomodidad/enfado ` +
-      `descritas arriba para afinidad insuficiente.`;
+      `descritas arriba para afinidad insuficiente.\n\n` +
+      `CONTINUIDAD DE UNA ESCENA ÍNTIMA YA EN MARCHA (afinidad ≥ 80):\n` +
+      `Si en los turnos recientes de esta misma conversación el personaje ya participó en la escena íntima sin ` +
+      `rechazarla, la siguiente acción del jugador dentro de esa misma escena es CONTINUACIÓN, no un nuevo intento ` +
+      `que deba volver a evaluarse desde cero. No reinicies el consentimiento en cada turno.\n` +
+      `• Verbos de intensidad física (empujar, sujetar, guiar, tirar de, atraer hacia sí) dentro de esa continuidad ` +
+      `se interpretan como pasión o intensidad del momento, NO como agresión o falta de consentimiento — siempre ` +
+      `que no exista en el propio mensaje del jugador una señal real de rechazo o incomodidad (un "no", "para", ` +
+      `"suéltame", apartarse, pedir que se detenga, etc.). Esa señal explícita SIEMPRE se respeta y tiene prioridad ` +
+      `sobre cualquier regla de continuidad — el consentimiento de base no es un cheque en blanco que anule un ` +
+      `límite expresado en el momento.\n` +
+      `• Mientras no aparezca esa señal, no interrumpas la escena con sorpresa, enfado o un discurso de límites: ` +
+      `prioriza la coherencia y la fluidez narrativa de lo que el jugador está describiendo sobre la cautela ` +
+      `reflexiva. Un límite genuino del personaje, si lo hay, se expresa como pausa suave dentro de la escena ` +
+      `(un matiz, una condición, un cambio de ritmo) — no como un freno seco que rompe la continuidad ya aceptada.`;
 
     // consentDirective (estado + gradación romántica + contacto físico) SIEMPRE.
     // Cuando el LLM rápido está OFF añadimos, al final (máxima autoridad):
