@@ -27,7 +27,18 @@ export interface TrimResult {
  * "header" (moved to the front). System messages interspersed in the conversation
  * body (e.g. memory injection just before the last user message) keep their
  * relative position — they are NOT pulled out and reordered.
+ *
+ * Recorte cuantizado (estabilidad del prefix-cache): recortar "lo mínimo para
+ * caber" mueve el punto de corte en CADA turno una vez desbordado el presupuesto,
+ * invalidando el prefix-cache del provider en todos los turnos siguientes. En su
+ * lugar, el número de mensajes descartados se redondea hacia arriba al múltiplo
+ * de TRIM_STEP: el punto de corte queda fijo durante ~TRIM_STEP turnos entre
+ * salto y salto. El sobrecoste es descartar hasta TRIM_STEP-1 mensajes antes de
+ * lo estrictamente necesario — barato comparado con perder el caché del historial
+ * completo turno tras turno.
  */
+const TRIM_STEP = 8;
+
 export function trimContext(messages: ChatMessage[], maxTokens: number, preserveRecent = 6): TrimResult {
   if (estimateContextTokens(messages) <= maxTokens) {
     return { messages, trimmed: 0, estimatedTokens: estimateContextTokens(messages) };
@@ -50,21 +61,24 @@ export function trimContext(messages: ChatMessage[], maxTokens: number, preserve
   const preserved = body.slice(-preserveRecent);
   const trimable = body.slice(0, -preserveRecent);
 
+  // Pass 1 — minimal drop: walk from most-recent trimable backwards until the
+  // budget is exhausted; whatever doesn't fit is the minimal number to drop.
   let currentTokens = estimateContextTokens(preserved);
-  const kept: ChatMessage[] = [];
-  let trimmed = trimable.length;
-
-  // Add from most-recent trimable backwards until budget exhausted
+  let minimalDrop = trimable.length;
   for (let i = trimable.length - 1; i >= 0; i--) {
     const msgTokens = estimateTokens(trimable[i].content) + 4;
     if (currentTokens + msgTokens <= budget) {
-      kept.unshift(trimable[i]);
       currentTokens += msgTokens;
-      trimmed--;
+      minimalDrop--;
     } else {
       break;
     }
   }
+
+  // Pass 2 — quantize: round the drop count up to the next multiple of TRIM_STEP
+  // so the cut point stays stable across turns (see comment above).
+  const trimmed = Math.min(trimable.length, Math.ceil(minimalDrop / TRIM_STEP) * TRIM_STEP);
+  const kept = trimable.slice(trimmed);
 
   const result = [...headerMessages, ...kept, ...preserved];
   return {

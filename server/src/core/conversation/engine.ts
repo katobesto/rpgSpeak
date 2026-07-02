@@ -64,13 +64,18 @@ async function resolveCharacterAndProvider(
   const settings = settingsService.getAll();
 
   if (narratorMode) {
-    // In narrator mode, resolve provider/model from first group character or settings defaults
+    // El narrador NO es un personaje: usa la configuración global (Settings →
+    // Generación) antes que el override de provider/modelo del primer personaje
+    // del grupo. La resolución anterior (primer personaje primero) hacía que el
+    // modelo del narrador dependiera del ORDEN de los personajes en el grupo —
+    // arbitrario e inconsistente entre conversaciones. El primer personaje queda
+    // solo como fallback cuando no hay default global configurado.
     const firstCharId = conversation?.characters[0]?.characterId;
     const firstChar = firstCharId ? charRepo.findById(firstCharId) : null;
 
     const providerId = overrides?.providerId
-      ?? firstChar?.providerId
       ?? settings.defaultProviderId
+      ?? firstChar?.providerId
       ?? 'default-ollama';
 
     const provider = providerRepo.findById(providerId);
@@ -83,9 +88,14 @@ async function resolveCharacterAndProvider(
       throw new ProviderError(`El provider "${provider.name}" está deshabilitado.`);
     }
 
+    // Empareja el modelo con el provider elegido: si el provider es el global,
+    // usa el modelo global; el modelId del personaje solo es válido cuando el
+    // provider también viene del personaje (un modelId de otro provider no lo es).
+    const usingGlobalProvider = providerId === settings.defaultProviderId;
     const modelId = overrides?.model
-      ?? firstChar?.modelId
-      ?? provider.defaultModel
+      ?? (usingGlobalProvider
+        ? (settings.defaultModelId ?? provider.defaultModel)
+        : (firstChar?.modelId ?? provider.defaultModel))
       ?? settings.defaultModelId;
 
     if (!modelId) {
@@ -502,11 +512,28 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     const llm = createProvider(provider);
     const settings = settingsService.getAll();
 
-    // Determine whether to use the fast support LLM for analysis
+    // Determine whether to use the fast support LLM for analysis.
+    // IMPORTANTE: comprueba también que el provider rápido exista y esté
+    // HABILITADO. Antes solo se validaba que estuviera configurado: con
+    // fastLlmEnabled=true y el provider deshabilitado, no se inyectaba la
+    // instrucción de auto-reporte [AFINIDAD] (porque "el fast LLM se encarga")
+    // y el analizador externo tampoco corría (provider disabled) → la afinidad
+    // no se actualizaba NUNCA, en silencio. Con este check, ese estado degrada
+    // limpiamente a la ruta legacy (el LLM principal emite las etiquetas).
+    const fastProvider = settings.fastLlmProviderId
+      ? providerRepo.findById(settings.fastLlmProviderId)
+      : null;
     const useFastLlm =
       settings.fastLlmEnabled === true &&
-      settings.fastLlmProviderId != null &&
+      fastProvider?.isEnabled === true &&
       settings.fastLlmModelId != null;
+    if (settings.fastLlmEnabled === true && !useFastLlm) {
+      console.warn(
+        `[fast-llm] Activado en ajustes pero inutilizable (provider ${settings.fastLlmProviderId ?? 'sin configurar'}` +
+        `${fastProvider ? (fastProvider.isEnabled ? '' : ' deshabilitado') : ' no existe'}` +
+        `${settings.fastLlmModelId ? '' : ', sin modelo'}) — usando auto-reporte de afinidad del LLM principal.`
+      );
+    }
 
     // Use ALL linked stories (not filtered by isActive)
     const linkedStories: Story[] = conversation.stories
@@ -811,7 +838,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     if (useFastLlm && !aborted) {
       console.log(`[fast-llm] Analyzing exchange for conversation ${conversationId} (provider: ${settings.fastLlmProviderId}, model: ${settings.fastLlmModelId})`);
       // Strip any [AFINIDAD:...] tags the main LLM may have emitted — fast LLM handles affinity separately
-      cleanContent = accumulated.replace(/\[AFINIDAD:[^\]]+\]/g, '').trimEnd();
+      cleanContent = accumulated.replace(/\[AFINIDAD:[^\]]+\]/gi, '').trimEnd();
       const result = await analyzeExchangeAsync(
         conversationId,
         userMessage,
@@ -827,11 +854,15 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
         ? { prompt: result.rawPrompt, response: result.rawResponse }
         : undefined;
     } else {
-      // Legacy behavior: parse [AFINIDAD:...] tags emitted by the main LLM
-      // Permissive regex — allows optional whitespace around name and sign
-      const AFFINITY_RE = /\[AFINIDAD:\s*([^\]:\n]+?)\s*:\s*([+-]?\d+)\s*\]/g;
-      for (const match of [...accumulated.matchAll(AFFINITY_RE)]) {
-        const name  = match[1].trim();
+      // Legacy behavior: parse [AFINIDAD:...] tags emitted by the main LLM.
+      // Regex permisiva y case-insensitive; el nombre capturado se limpia de
+      // marcas markdown (**Nombre**, _Nombre_) que algunos modelos añaden y que
+      // antes hacían fallar el match exacto — la etiqueta se emitía pero el
+      // cambio de afinidad se descartaba en silencio.
+      const AFFINITY_RE = /\[AFINIDAD:\s*([^\]:\n]+?)\s*:\s*([+-]?\d+)\s*\]/gi;
+      const tagMatches = [...accumulated.matchAll(AFFINITY_RE)];
+      for (const match of tagMatches) {
+        const name  = match[1].replace(/[*_]/g, '').trim();
         const delta = parseInt(match[2], 10);
         const found = allCharsInConv.find((c) => c.name.toLowerCase() === name.toLowerCase());
         if (found) {
@@ -839,9 +870,17 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
           const newAffinity = Math.max(1, Math.min(100, currentAffinity + delta));
           convRepo.updateCharacterAffinity(conversationId, found.id, newAffinity);
           affinityUpdates.push({ characterId: found.id, newAffinity, previousAffinity: currentAffinity });
+          console.log(`[affinity] ${found.name}: ${currentAffinity} → ${newAffinity} (delta ${delta >= 0 ? '+' : ''}${delta})`);
+        } else {
+          console.warn(`[affinity] Etiqueta [AFINIDAD] con nombre desconocido: "${name}" (personajes válidos: ${allCharsInConv.map((c) => c.name).join(', ')})`);
         }
       }
-      cleanContent = accumulated.replace(/\[AFINIDAD:[^\]]+\]/g, '').trimEnd();
+      // Diagnóstico: si el modelo puso la etiqueta dentro de su razonamiento
+      // <think> en vez de en la respuesta visible, se pierde — avisa en el log.
+      if (tagMatches.length === 0 && thinkAccumulated && AFFINITY_RE.test(thinkAccumulated)) {
+        console.warn('[affinity] El modelo emitió [AFINIDAD:...] dentro del bloque <think> — se ignora. Considera reforzar la instrucción o desactivar reasoning.');
+      }
+      cleanContent = accumulated.replace(/\[AFINIDAD:[^\]]+\]/gi, '').trimEnd();
     }
 
     // ── Parse [UBICACION:...] / [LOCATION:...] location tags ───────────────────
@@ -916,7 +955,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       convRepo.incrementCounts(conversationId, finalTokens);
       onDone({ messageId: assistantMsg.id, userMessageId: userMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, locationUpdate, thinkContent: thinkAccumulated || undefined });
       // Fire-and-forget background tasks (non-blocking)
-      updateSummaryAsync(conversationId, provider, modelId, narratorMode);
+      updateSummaryAsync(conversationId, provider, modelId);
       const updatedConv = convRepo.findById(conversationId);
       if (updatedConv) void autoExtractContextAsync(conversationId, updatedConv.messageCount);
     }
@@ -1017,10 +1056,10 @@ async function analyzeExchangeAsync(
       /\b(foll\w*|viola\w*|violaci[oó]n|abus[ao]\w*|acoso\w*|coger\w*|penetr\w*|chup\w*\s+mi|mamar\w*|masturb\w*|correrse|culo\w*|polla\w*|pene\w*|verga\w*|tetas?|desnud\w*|sexo\s+forz\w*|me\s+voy\s+a\s+(coger|follar|violar)|voy\s+a\s+\w*(follar|violar|coger)\w*|te\s+voy\s+a\s+\w*(follar|violar|poseer)\w*)\b/i;
     const playerHasSexualOrAbusiveIntent = SEXUAL_VEXATIOUS_RE.test(userMessage);
 
-    const AFFINITY_RE = /\[AFINIDAD:\s*([^\]:\n]+?)\s*:\s*([+-]?\d+)\s*\]/g;
+    const AFFINITY_RE = /\[AFINIDAD:\s*([^\]:\n]+?)\s*:\s*([+-]?\d+)\s*\]/gi;
     const affinityUpdates: AffinityUpdate[] = [];
     for (const match of [...responseText.matchAll(AFFINITY_RE)]) {
-      const name  = match[1].trim();
+      const name  = match[1].replace(/[*_]/g, '').trim();
       let delta   = parseInt(match[2], 10);
       const found = allCharsInConv.find((c) => c.name.toLowerCase() === name.toLowerCase());
       if (!found) continue;
@@ -1069,7 +1108,6 @@ async function generateRollingSummary(
   conversationId: string,
   provider: NonNullable<ReturnType<ProviderRepository['findById']>>,
   modelId: string,
-  isNarrator: boolean,
 ): Promise<void> {
   const conv = convRepo.findById(conversationId);
   if (!conv) return;
@@ -1086,8 +1124,24 @@ async function generateRollingSummary(
   // the per-fragment setting (which still applies to manual range summaries).
   const maxFrasesTotal  = maxFrases * 3;
 
+  // Etiqueta cada turno con su hablante REAL (nombre del personaje, Narrador o
+  // Jugador). El etiquetado anterior ("Personaje" genérico para todo turno
+  // assistant) hacía que en conversaciones de grupo el resumen no supiera quién
+  // hizo o dijo qué — y ese resumen es lo que el LLM ve como "Historia hasta
+  // ahora", propagando la confusión de identidades a toda la conversación.
+  const nameCache = new Map<string, string>();
+  const speakerOf = (m: (typeof recentMessages)[number]): string => {
+    if (m.role === 'user') return 'Jugador';
+    if (m.metadata?.narrator || !m.characterId) return 'Narrador';
+    const cached = nameCache.get(m.characterId);
+    if (cached) return cached;
+    const name = charRepo.findById(m.characterId)?.name ?? 'Personaje';
+    nameCache.set(m.characterId, name);
+    return name;
+  };
+
   const messagesText = recentMessages
-    .map((m) => `${m.role === 'user' ? 'Jugador' : (isNarrator ? 'Narrador' : 'Personaje')}: ${m.content}`)
+    .map((m) => `${speakerOf(m)}: ${m.content}`)
     .join('\n\n');
 
   const prompt = previousSummary
@@ -1153,7 +1207,6 @@ async function updateSummaryAsync(
   conversationId: string,
   provider: ReturnType<ProviderRepository['findById']>,
   modelId: string,
-  isNarrator: boolean
 ): Promise<void> {
   if (!provider) return;
   try {
@@ -1164,7 +1217,7 @@ async function updateSummaryAsync(
     // Only update every N messages
     if (conv.messageCount % SUMMARY_EVERY_N !== 0) return;
 
-    await generateRollingSummary(conversationId, provider, modelId, isNarrator);
+    await generateRollingSummary(conversationId, provider, modelId);
   } catch (err) {
     // Summary update is non-critical — log and continue
     console.error('[summary] Error updating summary:', err);
@@ -1188,10 +1241,8 @@ export async function triggerSummaryUpdate(conversationId: string): Promise<Conv
   const modelId = firstChar?.modelId ?? provider.defaultModel ?? settings.defaultModelId;
   if (!modelId) return conv;
 
-  const isNarrator = conv.mode === 'story' && !conv.activeCharacterId;
-
   try {
-    await generateRollingSummary(conversationId, provider, modelId, isNarrator);
+    await generateRollingSummary(conversationId, provider, modelId);
   } catch (err) {
     console.error('[summary] Error in triggerSummaryUpdate:', err);
   }

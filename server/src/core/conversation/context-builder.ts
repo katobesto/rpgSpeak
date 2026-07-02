@@ -64,52 +64,37 @@ function buildUserIdentityBlock(name: string): string {
   );
 }
 
-// ── Identidad de personajes — candado anti-mezcla (modo narrador) ─────────────
-// Impide que el modelo transfiera atributos (nombre, raza/especie, oficio,
-// apariencia, voz, historia) de un personaje a otro cuando hay varios en escena.
-// Se inyecta SIEMPRE, junto a los bloques de ficha, blindando también las
-// conversaciones cuyo narratorPrompt en BD es antiguo y no incluye estas reglas.
-const CHARACTER_IDENTITY_LOCK =
-  `### IDENTIDAD DE CADA PERSONAJE — REGLA ABSOLUTA E INVIOLABLE\n` +
-  `Cada personaje presente en la escena es una identidad CERRADA e INDEPENDIENTE. Su nombre, raza o especie, oficio o profesión, apariencia, forma de hablar, habilidades, historia y relaciones le pertenecen SOLO a él.\n` +
-  `- PROHIBIDO mezclar, intercambiar, heredar o transferir rasgos de un personaje a otro. Ejemplo: si una es cazarrecompensas humana y otra es arquera elfa, la primera JAMÁS se describe ni se refiere a sí misma como elfa ni como arquera, y viceversa.\n` +
-  `- Antes de hacer hablar o actuar a un personaje, localiza SU bloque de ficha y confirma quién es, qué es y a qué se dedica. Usa únicamente los datos de ESE bloque.\n` +
-  `- Un personaje nunca asume el oficio, la raza, las habilidades ni el pasado de otro, ni por error ni para encajar mejor en la escena.\n` +
-  `- Cada voz se mantiene separada: el vocabulario y el tono de un personaje son su firma y no se contagian a los demás.`;
-
-// ── Identidad del personaje activo — candado anti-mezcla (modo personaje) ─────
-// En modo personaje individual, blinda al personaje que habla para que no absorba
-// rasgos de los "otros personajes presentes" listados como contexto.
-function buildSingleIdentityLock(activeName: string): string {
-  return (
-    `### TU IDENTIDAD ES SOLO TUYA — REGLA ABSOLUTA\n` +
-    `Eres **${activeName}** y nadie más. Los demás personajes que aparezcan en el contexto son OTRAS personas: su nombre, raza, oficio, apariencia, voz e historia les pertenecen a ELLOS, no a ti.\n` +
-    `- PROHIBIDO adoptar, mezclar o atribuirte rasgos de otro personaje. No te describas con la profesión, la raza ni las habilidades de otro.\n` +
-    `- Si dudas de quién eres, vuelve a tu propia ficha: solo esos datos te definen.`
-  );
+// ── Identidad y conocimiento por personaje (modo narrador) ───────────────────
+// Condensado: antes eran dos bloques separados (candado de identidad + conocimiento
+// por personaje) cuyos bullets se repetían entre sí, sumados a la avalancha de
+// directivas "REGLA ABSOLUTA" que compiten por la atención del modelo. Con el
+// historial ya atribuido por hablante (**Nombre:**), el modelo tiene la referencia
+// primaria de quién es quién; este bloque queda como refuerzo breve.
+function buildNarratorIdentityBlock(multipleChars: boolean): string {
+  const identity =
+    `### Identidad de cada personaje\n` +
+    `Cada personaje es una identidad cerrada: su nombre, raza, oficio, apariencia, voz e historia le pertenecen SOLO a él y nunca se mezclan ni se transfieren a otro. ` +
+    `Ejemplo: si una es cazarrecompensas humana y otra es arquera elfa, la primera JAMÁS se describe como elfa ni como arquera, y viceversa. ` +
+    `Antes de hacer hablar o actuar a un personaje, confirma sus datos en SU bloque de ficha y usa únicamente esos.`;
+  if (!multipleChars) return identity;
+  const knowledge =
+    `### Conocimiento por personaje\n` +
+    `Cada personaje solo conoce lo que presenció en primera persona: un recién incorporado ignora todo lo anterior a su llegada, y los momentos privados del jugador con un personaje no los conocen los demás. ` +
+    `Cada vínculo con el jugador es independiente — no traslades dinámicas, sentimientos ni afinidades de un personaje a otro.`;
+  return `${identity}\n\n${knowledge}`;
 }
 
-// ── Conocimiento limitado a lo presenciado ───────────────────────────────────
-// Evita que un personaje (sobre todo recién incorporado) "lea" en el historial
-// compartido eventos privados del jugador con otros personajes y los dé por
-// sabidos. El historial es uno solo para toda la conversación, así que esta regla
-// instruye al modelo a respetar lo que cada personaje pudo presenciar de verdad.
-function buildKnowledgeScopingSingle(activeName: string): string {
+// ── Identidad y conocimiento del personaje activo (modo personaje) ───────────
+// Condensado desde dos bloques (candado de identidad + conocimiento limitado):
+// blinda al personaje que habla para que no absorba rasgos de los "otros
+// personajes presentes" ni "lea" en el historial compartido lo que no vivió.
+function buildSingleCharIdentityBlock(activeName: string): string {
   return (
-    `### CONOCIMIENTO LIMITADO A TU EXPERIENCIA\n` +
-    `Eres ${activeName}. Solo conoces lo que TÚ has vivido o presenciado en primera persona.\n` +
-    `- NO sabes lo que ocurrió cuando no estabas presente, ni los momentos o conversaciones privadas del jugador con otros personajes. Aunque aparezcan en el historial, para ti no existen.\n` +
-    `- Si acabas de incorporarte a la escena, ignoras todo lo anterior a tu llegada: no lo menciones, no reacciones a ello, no lo des por sabido.\n` +
-    `- Tu relación con el jugador es solo tuya: no la mezcles ni la compares con la que él tenga con otros personajes.`
+    `### Tu identidad y tu conocimiento\n` +
+    `Eres **${activeName}** y nadie más: no adoptes el nombre, la raza, el oficio, la voz ni las habilidades de los otros personajes del contexto — si dudas de quién eres, vuelve a tu propia ficha.\n` +
+    `Solo conoces lo que TÚ viviste o presenciaste en primera persona. Lo ocurrido sin ti (momentos privados del jugador con otros personajes, o todo lo anterior a tu incorporación a la escena) para ti NO existe aunque aparezca en el historial: no lo menciones ni reacciones a ello. Tu relación con el jugador es solo tuya — no la mezcles con la que él tenga con otros.`
   );
 }
-
-const KNOWLEDGE_SCOPING_NARRATOR =
-  `### CONOCIMIENTO POR PERSONAJE\n` +
-  `Cada personaje solo conoce lo que ha presenciado en primera persona. No le hagas referirse ni reaccionar a algo que no vivió.\n` +
-  `- Un personaje recién incorporado a la escena NO sabe lo ocurrido antes de su llegada — trátalo como ajeno a todo el historial previo a su entrada.\n` +
-  `- Los momentos privados entre el jugador y un personaje no son conocidos por los demás, salvo que los hayan presenciado de verdad.\n` +
-  `- No traslades la dinámica, los sentimientos ni la afinidad de un personaje a otro: cada vínculo con el jugador es independiente.`;
 
 // ── Formato de acciones y gestos ─────────────────────────────────────────────
 // Instrucción estática: garantiza que las descripciones de gestos y acciones
@@ -123,6 +108,16 @@ const GESTURE_FORMAT_INSTRUCTION =
   `- ✓ CORRECTO: *se acaricia el pelo mirándote a los ojos y sonríe de forma pícara*\n` +
   `El diálogo hablado (lo que el personaje dice en voz alta) sí va en primera persona.\n` +
   `Si el personaje describe acciones del jugador/usuario, también en tercera persona ("se acerca", "alza la vista", "te toma de la mano").`;
+
+// ── Etiquetas de hablante en el historial (modo personaje) ──────────────────
+// El historial lleva cada intervención de personaje prefijada con `**Nombre:**`
+// (ver formatHistoryMessage). Sin esta nota, el personaje activo tiende a
+// imitar el prefijo y a "firmarse" a sí mismo en sus respuestas.
+const HISTORY_ATTRIBUTION_NOTE =
+  `## Etiquetas de hablante en el historial\n` +
+  `En el historial de la conversación, cada intervención de un personaje va precedida de su nombre en negrita (\`**Nombre:**\`) para dejar claro quién dijo cada cosa. Es solo una marca del registro:\n` +
+  `- Úsala para saber qué dijiste TÚ y qué dijeron OTROS personajes en turnos anteriores.\n` +
+  `- TÚ respondes directamente con tus palabras, SIN escribir tu propio nombre como prefijo.`;
 
 // ── Auto-reporte de afinidad (solo sin LLM rápido) ───────────────────────────
 // Cuando no hay analizador externo, el LLM principal debe emitir las etiquetas
@@ -289,11 +284,10 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       ? basePrompt.replace('{{PERSONAJES}}', charSection)
       : [basePrompt, charSection].filter(Boolean).join('\n\n');
     if (fullNarrPrompt.trim()) systemParts.push(fullNarrPrompt);
-    // Candado de identidad como parte separada → máxima autoridad (pegado a las
-    // fichas, cerca del punto de generación) y visible/localizable en el debug.
-    if (charBlocks.length > 0) systemParts.push(CHARACTER_IDENTITY_LOCK);
-    // Conocimiento por personaje — solo relevante con varios en escena.
-    if (charBlocks.length > 1) systemParts.push(KNOWLEDGE_SCOPING_NARRATOR);
+    // Identidad + conocimiento por personaje en un solo bloque (pegado a las
+    // fichas y localizable en el debug). La sección de conocimiento solo se
+    // añade con varios personajes en escena.
+    if (charBlocks.length > 0) systemParts.push(buildNarratorIdentityBlock(charBlocks.length > 1));
 
   } else {
     // Single character definition
@@ -317,20 +311,19 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
         otherParts.push(block);
       }
       systemParts.push(otherParts.join('\n\n'));
-      // Candado: el personaje activo no debe absorber rasgos de los anteriores.
-      systemParts.push(buildSingleIdentityLock(character.name));
-      // Conocimiento limitado: no "lee" en el historial lo privado del jugador
-      // con otros personajes ni lo previo a su llegada a la escena.
-      systemParts.push(buildKnowledgeScopingSingle(character.name));
+      // Identidad + conocimiento limitado en un solo bloque: el personaje activo
+      // no absorbe rasgos de los demás ni "lee" en el historial lo que no vivió.
+      systemParts.push(buildSingleCharIdentityBlock(character.name));
     }
 
     if (responseFormatPrompt?.trim()) {
       systemParts.push(responseFormatPrompt.trim());
     }
 
-    // Instrucción estática de formato de gestos — siempre al final del bloque
-    // de personaje para máxima autoridad sobre la descripción base del char.
-    systemParts.push(GESTURE_FORMAT_INSTRUCTION);
+    // Formato de gestos + convención de etiquetas del historial en una sola
+    // parte, al final del bloque de personaje para máxima autoridad sobre la
+    // descripción base del char.
+    systemParts.push(`${GESTURE_FORMAT_INSTRUCTION}\n\n${HISTORY_ATTRIBUTION_NOTE}`);
   }
 
   // ── Affinity + consent directive — built here, injected LATE (see below) ────
@@ -478,8 +471,37 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // injected here at the very front — it's pushed as part of the late-injection
   // footer (close to the last user message) so it doesn't invalidate the KV cache
   // for the entire conversation history every time it changes (~every 8 messages).
-  const trimmedMessages = messages.slice(-maxMessages);
+  //
+  // Ventana escalonada: un slice(-N) rodante desplaza el inicio del historial en
+  // CADA turno una vez superados los N mensajes, invalidando el prefix-cache del
+  // provider (DeepSeek, OpenAI…) en todos los turnos siguientes. En su lugar, el
+  // inicio de la ventana solo avanza en saltos de WINDOW_STEP mensajes: el prefijo
+  // se mantiene estable durante WINDOW_STEP turnos entre salto y salto, a cambio
+  // de una ventana ligeramente más corta (entre N-WINDOW_STEP+1 y N mensajes).
+  const WINDOW_STEP = 8;
+  const overflow    = Math.max(0, messages.length - maxMessages);
+  const windowStart = Math.ceil(overflow / WINDOW_STEP) * WINDOW_STEP;
+  const trimmedMessages = messages.slice(windowStart);
   const history: ChatMessage[] = [];
+
+  // ── Atribución de hablante en el historial ──────────────────────────────────
+  // En modo personaje las respuestas son solo diálogo, sin nombre. Al convivir
+  // varios personajes y el narrador en la misma conversación, los turnos
+  // `assistant` del historial resultan anónimos y el modelo no puede saber quién
+  // dijo cada cosa — raíz de la mezcla de identidades. Se prefija cada
+  // intervención de personaje con `**Nombre:**` (el mismo formato que ya usa el
+  // narrador para el diálogo), de modo que el historial es auto-explicativo en
+  // ambos modos. Los mensajes del narrador ya llevan su formato canónico y no se
+  // tocan. Determinista por mensaje → no afecta a la estabilidad del prefijo.
+  const formatHistoryMessage = (m: Message): ChatMessage => {
+    if (m.role === 'assistant' && m.characterId && !m.metadata?.narrator) {
+      const name = charNameMap.get(m.characterId);
+      if (name && !m.content.trimStart().startsWith(`**${name}:**`)) {
+        return { role: m.role, content: `**${name}:** ${m.content}` };
+      }
+    }
+    return { role: m.role, content: m.content };
+  };
 
   // ── Context index injection (world-state background, further from generation) ──
   let contextIndexBlock: string | null = null;
@@ -570,7 +592,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   const lastMessage = needsSplit ? trimmedMessages[trimmedMessages.length - 1] : null;
 
   for (const m of historyBody) {
-    history.push({ role: m.role, content: m.content });
+    history.push(formatHistoryMessage(m));
   }
 
   let footerCount = 0;
@@ -634,14 +656,24 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // 9. Rolling summary ("Historia hasta ahora") — changes every ~6 messages, kept
   // close to the generation point so its periodic changes don't invalidate the
   // cache for the conversation history and earlier directive blocks.
+  //
+  // En modo personaje con grupo, el resumen global contradice la regla de
+  // "conocimiento limitado a lo presenciado" (incluye escenas privadas del
+  // jugador con otros personajes). La nota de alcance reconcilia ambos: el
+  // resumen es el registro del CRONISTA, no la memoria del personaje.
   if (summary?.trim()) {
-    history.push({ role: 'system', content: `## Historia hasta ahora\n${summary.trim()}` });
+    const scopeNote = !narratorMode && groupCharacters.length > 0
+      ? `\n\n(Nota de alcance: este resumen es el registro global de la historia y puede incluir escenas que ` +
+        `${character?.name ?? 'tu personaje'} NO presenció. Aplica tu regla de conocimiento limitado: usa de aquí ` +
+        `solo lo que tu personaje vivió en primera persona o le fue contado — el resto, para ti, no existe.)`
+      : '';
+    history.push({ role: 'system', content: `## Historia hasta ahora\n${summary.trim()}${scopeNote}` });
     footerCount++;
   }
 
   // 10. Last user message (generation point)
   if (needsSplit && lastMessage) {
-    history.push({ role: lastMessage.role, content: lastMessage.content });
+    history.push(formatHistoryMessage(lastMessage));
     footerCount++;
   }
 

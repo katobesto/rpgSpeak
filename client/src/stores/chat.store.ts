@@ -302,6 +302,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     let userContent: string | null = null;
     let charId: string | undefined = characterIdArg ?? undefined;
+    // Regenerar debe reproducir el MODO del mensaje original, no el estado
+    // actual del selector: si se regeneraba una narración con el selector en un
+    // personaje (o viceversa), la respuesta cambiaba de naturaleza. Para
+    // mensajes efímeros (error/streaming) no hay metadata → selector actual.
+    let messageNarratorMode: boolean | null = null;
     const idsToRemove = new Set<string>([assistantMessageId]);
 
     if (isEphemeral) {
@@ -312,6 +317,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       const msgIndex = messages.findIndex((m) => m.id === assistantMessageId);
       if (msgIndex !== -1) {
         if (!charId) charId = messages[msgIndex].characterId ?? undefined;
+        messageNarratorMode = Boolean(messages[msgIndex].metadata?.narrator);
         for (let i = msgIndex - 1; i >= 0; i--) {
           if (messages[i].role === 'user') {
             userContent = messages[i].content;
@@ -365,7 +371,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       updatedAt: new Date().toISOString(),
     });
 
-    const narratorMode = storeNarratorMode;
+    const narratorMode = messageNarratorMode ?? storeNarratorMode;
     const mergedOverrides = {
       ...(selectedProviderId ? { providerId: selectedProviderId } : {}),
       ...(selectedModelId    ? { model: selectedModelId }         : {}),
