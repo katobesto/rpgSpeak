@@ -1,8 +1,26 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { execSync } from 'child_process';
+
+// Versión de la app: fecha del commit de HEAD + SHA corto, capturados al arrancar
+// Vite (dev) o al construir (build). Identifica de forma estable la versión que
+// se está sirviendo. Si git no está disponible, cae a la hora de build.
+function resolveAppVersion(): string {
+  try {
+    const date = execSync("git log -1 --format=%cd --date=format:'%d/%m/%y %H:%M'")
+      .toString().trim().replace(/'/g, '');
+    const sha = execSync('git rev-parse --short HEAD').toString().trim();
+    return `${date} · ${sha}`;
+  } catch {
+    return new Date().toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+  }
+}
 
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(resolveAppVersion()),
+  },
   plugins: [react()],
   resolve: {
     alias: {

@@ -114,6 +114,12 @@ export function Sidebar({ collapsed, isMobile = false }: SidebarProps) {
           <div className="flex items-center gap-2">
             <Zap size={18} className="text-accent" />
             <span className="font-bold text-sm tracking-tight">rpgSpeak</span>
+            <span
+              className="text-[10px] text-text-muted tabular-nums leading-none"
+              title={`Versión (último commit): ${__APP_VERSION__}`}
+            >
+              {__APP_VERSION__}
+            </span>
           </div>
         )}
 

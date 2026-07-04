@@ -107,6 +107,12 @@ export function MainLayout({ children }: MainLayoutProps) {
         <div className="flex items-center gap-2 flex-1">
           <Zap size={16} className="text-accent" />
           <span className="font-bold text-sm tracking-tight">rpgSpeak</span>
+          <span
+            className="text-[10px] text-text-muted tabular-nums leading-none"
+            title={`Versión (último commit): ${__APP_VERSION__}`}
+          >
+            {__APP_VERSION__}
+          </span>
         </div>
         <button
           onClick={toggleFullscreen}
