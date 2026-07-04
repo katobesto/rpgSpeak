@@ -468,10 +468,16 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       `o sentimiento descrito en la ficha del personaje SOLO en cuanto a SI existe atracción o apertura ` +
       `romántica hacia el jugador. Si la descripción dice que el personaje siente algo por el jugador, eso ` +
       `es su POTENCIAL — no su realidad actual dado lo ocurrido.\n\n` +
-      `RESPALDO NARRATIVO: si hay memorias activas de momentos compartidos con el jugador (ver más abajo), ` +
-      `básate en ellas para justificar este nivel de afinidad — son la historia real que lo sostiene. ` +
-      `Si no hay memorias relevantes que lo respalden, trata el número con más cautela de la que sugiere por sí solo: ` +
-      `un vínculo profundo sin hechos concretos detrás suena hueco; que la conversación, no solo el número, sea lo que lo haga creíble.\n\n` +
+      `RESPALDO NARRATIVO — calibración INTERNA, nunca verbalizada: si hay memorias activas de momentos ` +
+      `compartidos con el jugador (ver más abajo), úsalas para calibrar POR DENTRO cuánta confianza tiene sentido ` +
+      `mostrar — son la historia real que sostiene el número. Si no hay memorias que lo respalden, trata el número ` +
+      `con más cautela de la que sugiere por sí solo. Esta calibración JAMÁS se dice en voz alta: el personaje no ` +
+      `enumera ni recapitula los actos del jugador para justificar lo que siente.\n\n` +
+      `CÓMO SE EXPRESA EL APRECIO — REGLA ANTI-ADULACIÓN:\n` +
+      `El aprecio vive en el TONO y en las DECISIONES (más confianza, más paciencia, pequeños gestos), no en cumplidos.\n` +
+      `• La gratitud o la admiración por un acto concreto se expresa UNA sola vez, cuando el acto ocurre. Después queda en el trato — no se vuelve a mencionar salvo que el diálogo actual lo traiga de forma natural.\n` +
+      `• PROHIBIDO recapitular los méritos del jugador ("me regalaste…", "fuiste tan valiente…", "hablas con tanta franqueza…", "eres increíble") como relleno de conversación o para justificar cercanía. El elogio no pedido y repetido suena servil, no afectuoso.\n` +
+      `• Los personajes tienen su propia vida, sus preocupaciones y sus temas: la conversación NO gira en torno a lo bueno que es el jugador. Habla de lo que a TI te ocupa, no de lo que él ha hecho por ti.\n\n` +
       `LO QUE LA AFINIDAD NO ANULA — CÓMO se expresa, no SI existe:\n` +
       `La afinidad decide si la puerta al romance/intimidad está abierta. La personalidad base del personaje ` +
       `decide CÓMO camina por esa puerta: con qué ritmo, qué condiciones pone, qué dudas conserva, qué tono usa. ` +
@@ -738,12 +744,22 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
 
   // 5. Memories — always injected in footer (never in system message) to keep the
   // static prefix cache-stable. Uses template if configured, plain block otherwise.
+  //
+  // La coda "contexto silencioso" se añade EN CÓDIGO (no en la plantilla de BD,
+  // que puede ser antigua): sin ella, el modelo trata las memorias reinyectadas
+  // cada turno como temas pendientes y recapitula los actos del jugador una y
+  // otra vez ("me regalaste…", "fuiste tan valiente…") — adulación repetitiva.
   if (allMemories.length > 0) {
     const memBlock = memoryInjectionPrompt?.trim()
       ? buildMemoryInjectionBlock(allMemories, charNameMap, memoryInjectionPrompt!)
       : buildMemoryBlock(allMemories, charNameMap);
+    const silentCoda =
+      `\n\n⚠ CONTEXTO SILENCIOSO: estas memorias moldean tu actitud, tono y decisiones, pero NO son temas de ` +
+      `conversación pendientes. No las menciones, enumeres ni recapitules ("me regalaste…", "cuando me salvaste…") ` +
+      `salvo que el diálogo actual las traiga de forma natural. El peso de lo vivido se nota en CÓMO tratas al ` +
+      `jugador, no en recordárselo.`;
     console.log(`[memory] Injecting ${allMemories.length} memories for conv ${conversationId} (${charNameMap.size} chars, template: ${Boolean(memoryInjectionPrompt?.trim())})`);
-    history.push({ role: 'system', content: memBlock });
+    history.push({ role: 'system', content: memBlock + silentCoda });
     footerCount++;
   }
 
