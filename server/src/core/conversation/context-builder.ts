@@ -15,7 +15,11 @@ export interface BuildContextOptions {
   conversationId: string;
   globalSystemPrompt?: string;
   maxMessages?: number;
-  summary?: string | null;        // "Resumen de sucesos" — siempre se incluye antes del historial
+  summary?: string | null;        // Resumen GLOBAL (cronista) — narrador y modo personaje sin grupo
+  /** Resumen personal del personaje activo (solo lo que él presenció). En modo
+   *  personaje con grupo sustituye al resumen global, que filtraría escenas
+   *  privadas del jugador con otros personajes. */
+  characterSummary?: string | null;
   groupCharacters?: Character[];  // Otros personajes del grupo (para modo narrador y modo personaje)
   narratorMode?: boolean;         // true = prompt de narrador omnisciente
   adventureMode?: boolean;        // true = full GM/RPG behavior
@@ -108,6 +112,91 @@ const GESTURE_FORMAT_INSTRUCTION =
   `- ✓ CORRECTO: *se acaricia el pelo mirándote a los ojos y sonríe de forma pícara*\n` +
   `El diálogo hablado (lo que el personaje dice en voz alta) sí va en primera persona.\n` +
   `Si el personaje describe acciones del jugador/usuario, también en tercera persona ("se acerca", "alza la vista", "te toma de la mano").`;
+
+// ── Filtrado de historial por testigo (modo personaje) ──────────────────────
+//
+// El conocimiento limitado como INSTRUCCIÓN no basta: si las escenas privadas
+// del jugador con otros personajes están en el contexto, el modelo las usa
+// aunque se le ordene ignorarlas (el contenido gana a la instrucción, sobre
+// todo en modelos flash). La solución real es no inyectarlas: el personaje
+// activo solo recibe los segmentos que presenció.
+//
+// Segmento = mensajes de usuario + la respuesta assistant que los sigue.
+//   · Segmento del propio personaje → presenciado
+//   · Segmento de OTRO personaje    → NO presenciado (escena privada)
+//   · Segmento de narrador          → presenciado solo si el personaje aparece
+//     nombrado (el narrador nombra a los presentes: **Nombre:** o en la prosa)
+//   · Mensajes de usuario finales sin respuesta (el turno actual) → siempre
+// Cada hueco de segmentos excluidos se sustituye por UNA elipsis neutra, para
+// que se perciba el paso del tiempo sin revelar contenido.
+//
+// Determinista sobre la lista de mensajes → estable para el prefix-cache.
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** \b no funciona con tildes/ñ en JS: usa lookarounds con clase extendida. */
+function nameMentionRegex(name: string): RegExp {
+  const W = '\\wáéíóúüñÁÉÍÓÚÜÑ';
+  return new RegExp(`(?<![${W}])${escapeRegex(name.trim())}(?![${W}])`, 'i');
+}
+
+function makeEllipsisMessage(index: number, conversationId: string): Message {
+  return {
+    id: `ellipsis-${index}`,
+    conversationId,
+    parentId: null,
+    branchId: 'main',
+    role: 'system',
+    content: '[Elipsis: transcurre un tiempo. Hubo escenas en otro lugar que TÚ no presenciaste — no conoces su contenido.]',
+    characterId: null,
+    tokens: 0,
+    isActive: true,
+    metadata: {},
+    createdAt: '',
+    updatedAt: '',
+  };
+}
+
+/** Devuelve solo los mensajes que `activeChar` presenció, con elipsis en los
+ *  huecos. Exportada para reutilizarla en el resumen por personaje (engine). */
+export function filterWitnessedMessages(messages: Message[], activeChar: Character): Message[] {
+  const nameRe = nameMentionRegex(activeChar.name);
+  const out: Message[] = [];
+  let gapOpen = false;
+  let ellipsisCount = 0;
+  let i = 0;
+
+  while (i < messages.length) {
+    const segStart = i;
+    while (i < messages.length && messages[i].role !== 'assistant') i++;
+    const assistant = i < messages.length ? messages[i] : null;
+    const segEnd = assistant ? i + 1 : i; // exclusivo
+
+    let witnessed: boolean;
+    if (!assistant) {
+      witnessed = true; // cola de mensajes de usuario (turno actual)
+    } else if (assistant.characterId === activeChar.id) {
+      witnessed = true;
+    } else if (assistant.characterId && !assistant.metadata?.narrator) {
+      witnessed = false; // escena privada con otro personaje
+    } else {
+      witnessed = nameRe.test(assistant.content); // narrador: presente si nombrado
+    }
+
+    if (witnessed) {
+      out.push(...messages.slice(segStart, segEnd));
+      gapOpen = false;
+    } else if (!gapOpen) {
+      out.push(makeEllipsisMessage(ellipsisCount++, assistant!.conversationId));
+      gapOpen = true;
+    }
+    i = segEnd;
+  }
+
+  return out;
+}
 
 // ── Etiquetas de hablante en el historial (modo personaje) ──────────────────
 // El historial lleva cada intervención de personaje prefijada con `**Nombre:**`
@@ -239,6 +328,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     globalSystemPrompt,
     maxMessages = 40,
     summary,
+    characterSummary,
     groupCharacters = [],
     narratorMode = false,
     adventureMode = false,
@@ -491,10 +581,18 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // inicio de la ventana solo avanza en saltos de WINDOW_STEP mensajes: el prefijo
   // se mantiene estable durante WINDOW_STEP turnos entre salto y salto, a cambio
   // de una ventana ligeramente más corta (entre N-WINDOW_STEP+1 y N mensajes).
+  // Filtrado por testigo: en modo personaje con grupo, el personaje activo solo
+  // recibe los segmentos que presenció (ver filterWitnessedMessages). Se aplica
+  // ANTES de la ventana para que esta se llene con mensajes que sí verá.
+  const sourceMessages =
+    !narratorMode && groupCharacters.length > 0 && character
+      ? filterWitnessedMessages(messages, character)
+      : messages;
+
   const WINDOW_STEP = 8;
-  const overflow    = Math.max(0, messages.length - maxMessages);
+  const overflow    = Math.max(0, sourceMessages.length - maxMessages);
   const windowStart = Math.ceil(overflow / WINDOW_STEP) * WINDOW_STEP;
-  const trimmedMessages = messages.slice(windowStart);
+  const trimmedMessages = sourceMessages.slice(windowStart);
   const history: ChatMessage[] = [];
 
   // ── Atribución de hablante en el historial ──────────────────────────────────
@@ -671,17 +769,18 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // close to the generation point so its periodic changes don't invalidate the
   // cache for the conversation history and earlier directive blocks.
   //
-  // En modo personaje con grupo, el resumen global contradice la regla de
-  // "conocimiento limitado a lo presenciado" (incluye escenas privadas del
-  // jugador con otros personajes). La nota de alcance reconcilia ambos: el
-  // resumen es el registro del CRONISTA, no la memoria del personaje.
-  if (summary?.trim()) {
-    const scopeNote = !narratorMode && groupCharacters.length > 0
-      ? `\n\n(Nota de alcance: este resumen es el registro global de la historia y puede incluir escenas que ` +
-        `${character?.name ?? 'tu personaje'} NO presenció. Aplica tu regla de conocimiento limitado: usa de aquí ` +
-        `solo lo que tu personaje vivió en primera persona o le fue contado — el resto, para ti, no existe.)`
-      : '';
-    history.push({ role: 'system', content: `## Historia hasta ahora\n${summary.trim()}${scopeNote}` });
+  // En modo personaje con grupo, el resumen GLOBAL (cronista) filtraría escenas
+  // privadas del jugador con otros personajes — el mismo agujero que el filtrado
+  // de historial por testigo cierra. En su lugar se inyecta el resumen PERSONAL
+  // del personaje activo (generado solo con lo que él presenció). Si aún no
+  // existe, no se inyecta nada: el historial filtrado cubre lo reciente.
+  const useCharacterSummary = !narratorMode && groupCharacters.length > 0;
+  const summaryForContext = useCharacterSummary ? characterSummary : summary;
+  if (summaryForContext?.trim()) {
+    const header = useCharacterSummary
+      ? `## Historia hasta ahora (lo que TÚ has vivido)`
+      : `## Historia hasta ahora`;
+    history.push({ role: 'system', content: `${header}\n${summaryForContext.trim()}` });
     footerCount++;
   }
 

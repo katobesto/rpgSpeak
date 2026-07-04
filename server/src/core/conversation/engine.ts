@@ -1,5 +1,5 @@
 import type { GenerateRequest, Character, Story, Message, Conversation, MemoryEntry, PartyState } from '@rpgspeak/shared';
-import { buildContext } from './context-builder.js';
+import { buildContext, filterWitnessedMessages } from './context-builder.js';
 import { trimContext } from './context-trimmer.js';
 import { createProvider } from '../llm/provider.factory.js';
 import { ProviderRepository } from '../../modules/providers/provider.repository.js';
@@ -682,6 +682,10 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       globalSystemPrompt: settings.globalSystemPrompt,
       maxMessages,
       summary: conversation.summary,
+      characterSummary: !narratorMode && character
+        ? ((conversation.metadata as { characterSummaries?: Record<string, string> })
+            ?.characterSummaries?.[character.id] ?? null)
+        : null,
       groupCharacters: contextGroupChars,
       narratorMode,
       adventureMode: isAdventureMode,
@@ -1053,7 +1057,12 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       convRepo.incrementCounts(conversationId, finalTokens);
       onDone({ messageId: assistantMsg.id, userMessageId: userMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, locationUpdate, thinkContent: thinkAccumulated || undefined });
       // Fire-and-forget background tasks (non-blocking)
-      updateSummaryAsync(conversationId, provider, modelId);
+      // En modo personaje con grupo se actualiza además el resumen personal del
+      // personaje activo (su "memoria de lo presenciado").
+      updateSummaryAsync(
+        conversationId, provider, modelId,
+        !narratorMode && contextGroupChars.length > 0 ? character : null,
+      );
       const updatedConv = convRepo.findById(conversationId);
       if (updatedConv) void autoExtractContextAsync(conversationId, updatedConv.messageCount);
     }
@@ -1202,6 +1211,33 @@ async function analyzeExchangeAsync(
 // "remembers" the last ~6 messages worth of summarized story — everything
 // earlier evaporates from the context.
 
+// Etiqueta cada turno con su hablante REAL (nombre del personaje, Narrador o
+// Jugador). El etiquetado genérico ("Personaje" para todo turno assistant)
+// hacía que en conversaciones de grupo el resumen no supiera quién hizo o dijo
+// qué — y ese resumen es lo que el LLM ve como "Historia hasta ahora",
+// propagando la confusión de identidades a toda la conversación.
+function labelSpeakers(msgs: Message[]): string {
+  const nameCache = new Map<string, string>();
+  return msgs
+    .map((m) => {
+      let speaker = 'Jugador';
+      if (m.role !== 'user') {
+        if (m.metadata?.narrator || !m.characterId) {
+          speaker = 'Narrador';
+        } else {
+          const cached = nameCache.get(m.characterId);
+          if (cached) speaker = cached;
+          else {
+            speaker = charRepo.findById(m.characterId)?.name ?? 'Personaje';
+            nameCache.set(m.characterId, speaker);
+          }
+        }
+      }
+      return `${speaker}: ${m.content}`;
+    })
+    .join('\n\n');
+}
+
 async function generateRollingSummary(
   conversationId: string,
   provider: NonNullable<ReturnType<ProviderRepository['findById']>>,
@@ -1222,25 +1258,7 @@ async function generateRollingSummary(
   // the per-fragment setting (which still applies to manual range summaries).
   const maxFrasesTotal  = maxFrases * 3;
 
-  // Etiqueta cada turno con su hablante REAL (nombre del personaje, Narrador o
-  // Jugador). El etiquetado anterior ("Personaje" genérico para todo turno
-  // assistant) hacía que en conversaciones de grupo el resumen no supiera quién
-  // hizo o dijo qué — y ese resumen es lo que el LLM ve como "Historia hasta
-  // ahora", propagando la confusión de identidades a toda la conversación.
-  const nameCache = new Map<string, string>();
-  const speakerOf = (m: (typeof recentMessages)[number]): string => {
-    if (m.role === 'user') return 'Jugador';
-    if (m.metadata?.narrator || !m.characterId) return 'Narrador';
-    const cached = nameCache.get(m.characterId);
-    if (cached) return cached;
-    const name = charRepo.findById(m.characterId)?.name ?? 'Personaje';
-    nameCache.set(m.characterId, name);
-    return name;
-  };
-
-  const messagesText = recentMessages
-    .map((m) => `${speakerOf(m)}: ${m.content}`)
-    .join('\n\n');
+  const messagesText = labelSpeakers(recentMessages);
 
   const prompt = previousSummary
     ? `Eres el cronista de una historia colaborativa de rol. Mantienes un resumen acumulado de TODA la historia.
@@ -1301,10 +1319,113 @@ Responde SOLO con el texto del resumen.`;
   convRepo.update(conversationId, { summary: newSummary });
 }
 
+// ─── Resumen personal por personaje ───────────────────────────────────────────
+//
+// La "memoria personal" del personaje: resumen rodante generado SOLO con los
+// segmentos que el personaje presenció (filterWitnessedMessages — el mismo
+// filtro que aplica buildContext al historial). En modo personaje con grupo,
+// buildContext inyecta este resumen en lugar del global del cronista, que
+// revelaría escenas privadas del jugador con otros personajes.
+//
+// Se persiste en conversation.metadata.characterSummaries[charId] (merge con el
+// metadata existente para no pisar partyState u otros campos).
+
+async function generateCharacterSummary(
+  conversationId: string,
+  provider: NonNullable<ReturnType<ProviderRepository['findById']>>,
+  modelId: string,
+  character: Character,
+): Promise<void> {
+  const conv = convRepo.findById(conversationId);
+  if (!conv) return;
+
+  const allMessages = msgRepo.findByConversation(conversationId) as Message[];
+  const witnessed   = filterWitnessedMessages(allMessages, character)
+    .filter((m) => m.role !== 'system'); // fuera elipsis y mensajes de sistema
+  const recentMessages = witnessed.slice(-6);
+  if (recentMessages.length < 2) return;
+
+  const settings  = settingsService.getAll();
+  const maxFrases = settings.summaryMaxLength ?? 5;
+  // Ámbito personal (una sola relación) → presupuesto menor que el global (×3).
+  const maxFrasesTotal = maxFrases * 2;
+
+  const existing = (conv.metadata as { characterSummaries?: Record<string, string> })
+    ?.characterSummaries ?? {};
+  const previousSummary = existing[character.id]?.trim() ?? '';
+  const messagesText = labelSpeakers(recentMessages);
+
+  const prompt = previousSummary
+    ? `Eres la memoria personal de ${character.name} en una historia de rol. Mantienes un resumen acumulado de TODO lo que ${character.name} ha vivido y presenciado en primera persona — y SOLO eso.
+
+RESUMEN ACUMULADO DE SU EXPERIENCIA:
+---
+${previousSummary}
+---
+
+NUEVOS INTERCAMBIOS QUE ${character.name.toUpperCase()} HA PRESENCIADO:
+---
+${messagesText}
+---
+
+Escribe la versión ACTUALIZADA del resumen, integrando los nuevos intercambios:
+- Solo lo que ${character.name} vivió o presenció — nada de otras escenas
+- Conserva: nombres, lugares, objetos, promesas, decisiones y el estado de su relación con el jugador
+- Comprime lo antiguo y detalla lo reciente
+- Máximo ${maxFrasesTotal} frases, en pasado narrativo
+- Sin explicaciones ni frases introductorias
+
+Responde SOLO con el texto del resumen actualizado.`
+    : `Eres la memoria personal de ${character.name} en una historia de rol. Revisa estos intercambios que ${character.name} ha vivido:
+
+---
+${messagesText}
+---
+
+Escribe un resumen de lo que ${character.name} ha vivido. Debe ser:
+- Fiel a lo narrado y limitado a su experiencia directa
+- Conciso: máximo ${maxFrases} frases
+- En pasado narrativo
+- Sin explicaciones ni frases introductorias
+
+Responde SOLO con el texto del resumen.`;
+
+  const llm = createProvider(provider);
+  const response = await llm.generate({
+    messages: [
+      { role: 'system', content: `Eres la memoria personal del personaje ${character.name}: registras solo lo que él ha vivido.` },
+      { role: 'user', content: prompt },
+    ],
+    model: modelId,
+    temperature: 0.3,
+    stream: false,
+    disableFallbacks: settings.disableFallbacks,
+  });
+  const newSummary = response.content.trim();
+  if (!newSummary) return;
+
+  // Merge sobre el metadata FRESCO (releído) para minimizar la ventana de pisado
+  // con otras escrituras de metadata (p. ej. partyState desde el BattleModal).
+  const fresh = convRepo.findById(conversationId);
+  if (!fresh) return;
+  const freshSummaries = (fresh.metadata as { characterSummaries?: Record<string, string> })
+    ?.characterSummaries ?? {};
+  convRepo.update(conversationId, {
+    metadata: {
+      ...fresh.metadata,
+      characterSummaries: { ...freshSummaries, [character.id]: newSummary },
+    },
+  });
+  console.log(`[summary] Resumen personal actualizado para ${character.name} (${witnessed.length} msgs presenciados)`);
+}
+
 async function updateSummaryAsync(
   conversationId: string,
   provider: ReturnType<ProviderRepository['findById']>,
   modelId: string,
+  /** Personaje activo del turno (solo modo personaje con grupo) — dispara además
+   *  la actualización de su resumen personal. */
+  characterForPersonalSummary?: Character | null,
 ): Promise<void> {
   if (!provider) return;
   try {
@@ -1315,7 +1436,12 @@ async function updateSummaryAsync(
     // Only update every N messages
     if (conv.messageCount % SUMMARY_EVERY_N !== 0) return;
 
+    // El resumen global (cronista, omnisciente) se actualiza siempre: lo usa el
+    // modo narrador. El personal solo en turnos de personaje con grupo.
     await generateRollingSummary(conversationId, provider, modelId);
+    if (characterForPersonalSummary) {
+      await generateCharacterSummary(conversationId, provider, modelId, characterForPersonalSummary);
+    }
   } catch (err) {
     // Summary update is non-critical — log and continue
     console.error('[summary] Error updating summary:', err);
