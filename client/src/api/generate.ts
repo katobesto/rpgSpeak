@@ -189,6 +189,8 @@ export const generateApi = {
     selectedCharacterIds?: string[],
     includeUser?: boolean,
     messageCount?: number,
+    /** PNJs del contexto (índice de contexto / diálogo) seleccionados en el modal */
+    extraCharacters?: Array<{ name: string; description?: string }>,
   ) =>
     api.post<{ scenePrompt: string }>('/generate/build-scene-prompt', {
       conversationId,
@@ -196,6 +198,7 @@ export const generateApi = {
       selectedCharacterIds,
       includeUser,
       messageCount,
+      extraCharacters,
     }),
 
   /** Calls the default LLM with the given prompt and returns the text result. */

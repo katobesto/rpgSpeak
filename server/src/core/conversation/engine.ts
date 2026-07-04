@@ -403,6 +403,71 @@ async function fastLlmPreAnalysis(
   }
 }
 
+// ─── Guardián de voz narrativa ────────────────────────────────────────────────
+//
+// Detecta narración en PRIMERA persona ("*me quedo mirándote y me aparto un
+// mechón*") — el fallo de voz más común: el narrador "entra" en un personaje y
+// narra como "yo" en vez de en tercera persona. Es stateless: en cada turno se
+// examina la ÚLTIMA respuesta del asistente y, si rompió la voz, se inyecta una
+// directiva correctiva de un solo turno junto al último mensaje del usuario.
+// (No se reescribe el mensaje ya emitido — la corrección regex de conjugaciones
+// en español no es fiable; se corrige el rumbo del turno siguiente.)
+
+/** Extrae el texto que DEBE estar en tercera persona, descartando el diálogo. */
+function extractNarrationText(content: string, wasNarrator: boolean): string {
+  if (!wasNarrator) {
+    // Modo personaje: el diálogo es primera persona legítima; solo se examinan
+    // los gestos/acciones entre asteriscos simples (no los ** de negrita).
+    return [...content.matchAll(/(?<![*\w])\*([^*\n]+)\*(?![*\w])/g)]
+      .map((m) => m[1])
+      .join('\n');
+  }
+  // Modo narrador: todo es narración salvo las líneas de diálogo.
+  return content
+    .split('\n')
+    // Línea de diálogo canónica: **Nombre:** texto
+    .filter((l) => !/^\s*\*\*[^*\n]{1,60}?:?\*\*:?/.test(l))
+    // Línea de diálogo informal: Nombre: —texto / nombre: "texto" / Nombre: ¿texto?
+    .filter((l) => !/^\s*[\wáéíóúñÁÉÍÓÚÑ' ]{2,30}:\s*[-–—"«¿¡]/i.test(l))
+    .join('\n')
+    // Guiones de diálogo incrustados en la narración y citas entrecomilladas
+    .replace(/(?:^|\n)\s*[—–]\s?[^\n]*/g, '')
+    .replace(/["«“][^"»”\n]*["»”]/g, '');
+}
+
+// "me"/"yo" en narración = ruptura de voz con altísima precisión: el jugador es
+// "tú/te" y los personajes son "él/ella/se". Se omiten "mí/mis" (más ambiguos).
+const FIRST_PERSON_NARRATION_RE = /(?:^|[\s(*¡¿"“«])(?:me|yo)\b/i;
+
+/** Devuelve un fragmento con la infracción, o null si la voz es correcta.
+ *  Exportada para poder probarla de forma aislada. */
+export function detectFirstPersonNarration(content: string, wasNarrator: boolean): string | null {
+  const narration = extractNarrationText(content, wasNarrator);
+  const idx = narration.search(FIRST_PERSON_NARRATION_RE);
+  if (idx === -1) return null;
+  return narration.slice(idx, idx + 90).replace(/\s+/g, ' ').trim();
+}
+
+function buildVoiceCorrectionDirective(snippet: string, narratorMode: boolean): string {
+  const rules = narratorMode
+    ? `En esta respuesta, TODA la narración va en TERCERA persona con el nombre del personaje como sujeto. ` +
+      `La primera persona SOLO puede aparecer dentro de una línea de diálogo (**Nombre:** …).\n` +
+      `✗ INCORRECTO: *Me quedo mirándote fijamente y me aparto un mechón de pelo.*\n` +
+      `✓ CORRECTO: *Lala se queda mirándote fijamente y se aparta un mechón de pelo.*`
+    : `Tus gestos y acciones entre asteriscos van SIEMPRE en tercera persona; la primera persona solo en el diálogo hablado.\n` +
+      `✗ INCORRECTO: *me acaricio el pelo y sonrío*\n` +
+      `✓ CORRECTO: *se acaricia el pelo y sonríe*`;
+
+  return (
+    `[CORRECCIÓN DE VOZ NARRATIVA — SOLO PARA ESTE TURNO]\n` +
+    `Tu respuesta anterior rompió la voz narrativa: narró acciones de un personaje en PRIMERA persona.\n` +
+    `Fragmento infractor: «${snippet}»\n\n` +
+    `${rules}\n` +
+    `No repitas el error en esta respuesta.\n` +
+    `[FIN CORRECCIÓN]`
+  );
+}
+
 // ─── NSFW Content Guard ───────────────────────────────────────────────────────
 
 /**
@@ -693,19 +758,43 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       );
     }
 
-    if (turnDirective) {
-      // Insert as a system message immediately BEFORE the last user message.
-      // This is the most salient position — the LLM sees it right before responding.
+    // ── Corrección de voz narrativa (stateless, un solo turno) ────────────────
+    // Si la ÚLTIMA respuesta del asistente narró en primera persona, se inyecta
+    // una directiva correctiva. Solo cuando el modo del turno anterior coincide
+    // con el actual (corregir la voz del narrador no aplica si ahora habla un
+    // personaje, y viceversa).
+    let voiceDirective: string | null = null;
+    const lastAssistantMsg = [...historyForContext].reverse().find((m) => m.role === 'assistant');
+    if (lastAssistantMsg?.content) {
+      const wasNarrator = Boolean(lastAssistantMsg.metadata?.narrator);
+      if (wasNarrator === narratorMode) {
+        const snippet = detectFirstPersonNarration(lastAssistantMsg.content, wasNarrator);
+        if (snippet) {
+          voiceDirective = buildVoiceCorrectionDirective(snippet, narratorMode);
+          console.warn(`[voice-guard] Primera persona en la narración del turno anterior: "${snippet}" — inyectando corrección`);
+        }
+      }
+    }
+    // ──────────────────────────────────────────────────────────────────────────
+
+    const injectedDirectives = [voiceDirective, turnDirective].filter((d): d is string => d !== null);
+    if (injectedDirectives.length > 0) {
+      // Insert as system messages immediately BEFORE the last user message.
+      // This is the most salient position — the LLM sees them right before responding.
       const lastUserIdx = trimmedMessages.reduceRight(
         (found, msg, i) => (found === -1 && msg.role === 'user' ? i : found), -1
       );
-      if (lastUserIdx !== -1) {
-        trimmedMessages.splice(lastUserIdx, 0, { role: 'system', content: turnDirective });
-      } else {
-        trimmedMessages.push({ role: 'system', content: turnDirective });
+      for (const directive of injectedDirectives) {
+        if (lastUserIdx !== -1) {
+          trimmedMessages.splice(lastUserIdx, 0, { role: 'system', content: directive });
+        } else {
+          trimmedMessages.push({ role: 'system', content: directive });
+        }
       }
-      const source = playerAction ? `regex:${playerAction}` : 'fast-llm';
-      console.log(`[pre-turn] Injected behavioral directive (source: ${source})`);
+      if (turnDirective) {
+        const source = playerAction ? `regex:${playerAction}` : 'fast-llm';
+        console.log(`[pre-turn] Injected behavioral directive (source: ${source})`);
+      }
     }
     // ──────────────────────────────────────────────────────────────────────────
 
@@ -931,6 +1020,15 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       cleanContent = cleanContent.replace(EVENT_DONE_RE, '').trimEnd();
     }
     // ─────────────────────────────────────────────────────────────────────────
+
+    // Observabilidad del guardián de voz: avisa en cuanto una respuesta narra en
+    // primera persona (la directiva correctiva se inyectará en el turno siguiente).
+    if (!aborted && cleanContent) {
+      const voiceSnippet = detectFirstPersonNarration(cleanContent, narratorMode);
+      if (voiceSnippet) {
+        console.warn(`[voice-guard] La respuesta recién generada narra en primera persona: "${voiceSnippet}" — se corregirá en el siguiente turno`);
+      }
+    }
 
     // Always persist whatever content was generated (full or partial)
     msgRepo.update(assistantMsg.id, {

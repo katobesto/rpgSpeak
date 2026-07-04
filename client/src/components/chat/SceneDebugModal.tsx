@@ -4,9 +4,10 @@ import { createPortal } from 'react-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   X, Loader, Wand2, Image as ImageIcon, ChevronRight, ChevronDown,
-  User, AlertCircle, Minus, Plus, FlaskConical, Copy, Check,
+  User, UserPlus, AlertCircle, Minus, Plus, FlaskConical, Copy, Check,
 } from 'lucide-react';
 import { generateApi, streamSceneImage } from '../../api/generate.ts';
+import { contextApi } from '../../api/context.ts';
 import { settingsApi } from '../../api/settings.ts';
 import { useAuthStore } from '../../stores/auth.store.ts';
 import { useChatStore } from '../../stores/chat.store.ts';
@@ -24,6 +25,8 @@ interface SceneDebugModalProps {
 type Step = 'context' | 'prompts' | 'generate';
 
 const USER_SENTINEL = '__user__';
+const CTX_PREFIX = 'ctx:';
+const ctxId = (name: string) => `${CTX_PREFIX}${name.toLowerCase()}`;
 
 interface SelectableEntity {
   id: string;
@@ -31,6 +34,18 @@ interface SelectableEntity {
   avatar?: string | null;
   hasVisualDesc: boolean;
   isUser: boolean;
+}
+
+/** PNJ detectado en el contexto: no pertenece al roster de la conversación.
+ *  Fuentes: índice de contexto (tipo 'character', con descripción) y líneas de
+ *  diálogo `**Nombre:**` del narrador dentro del rango de mensajes elegido. */
+interface ContextCharacter {
+  name: string;
+  description?: string;
+  /** Tiene ficha en el índice de contexto (aporta descripción) */
+  fromIndex: boolean;
+  /** Habla o aparece en el rango de mensajes seleccionado */
+  inScene: boolean;
 }
 
 export function SceneDebugModal({
@@ -81,6 +96,81 @@ export function SceneDebugModal({
       .filter((m) => m.role !== 'system')
       .slice(-messageCount);
   }, [allMessages, messageId, messageCount]);
+
+  // ── Personajes del contexto (PNJs) ─────────────────────────────────────────
+  // Detecta personajes que NO están en el roster pero aparecen en el contexto:
+  //   1. Items del índice de contexto de tipo 'character' (traen descripción)
+  //   2. Nombres de diálogo `**Nombre:**` en los mensajes del rango elegido
+  const { data: contextItems = [] } = useQuery({
+    queryKey: ['context', conversationId],
+    queryFn: () => contextApi.list(conversationId),
+    staleTime: 60_000,
+  });
+
+  const contextCharacters = useMemo<ContextCharacter[]>(() => {
+    const allChars: Character[] = qc.getQueryData(['characters']) ?? [];
+    const convCharIds = new Set(activeConversation?.characters.map((l) => l.characterId) ?? []);
+    const known = new Set<string>(
+      allChars.filter((c) => convCharIds.has(c.id)).map((c) => c.name.toLowerCase()),
+    );
+    if (currentUser?.displayName) known.add(currentUser.displayName.toLowerCase());
+
+    const found = new Map<string, ContextCharacter>(); // key: nombre en minúsculas
+
+    for (const item of contextItems) {
+      if (item.type !== 'character') continue;
+      const name = item.title.trim();
+      if (!name || known.has(name.toLowerCase())) continue;
+      if (!found.has(name.toLowerCase())) {
+        found.set(name.toLowerCase(), {
+          name,
+          description: item.description?.trim() || undefined,
+          fromIndex: true,
+          inScene: false,
+        });
+      }
+    }
+
+    // Diálogo del narrador: líneas que empiezan con **Nombre:** (formato canónico).
+    // Se excluyen candidatos con dígitos, demasiado largos, o que empiezan por un
+    // rótulo común (falsos positivos tipo "**Nota:**" que no son nombres).
+    const DIALOGUE_RE = /^\s*\*\*([^*\n]{1,40}?):\*\*/gm;
+    const NOT_A_NAME_RE = /^(nota|importante|atención|atencion|aviso|advertencia|sistema|ubicación|ubicacion|resumen|recuerda|ooc|off)\b/i;
+    for (const m of previewMessages) {
+      if (m.role !== 'assistant') continue;
+      for (const match of m.content.matchAll(DIALOGUE_RE)) {
+        const name = match[1].trim();
+        if (!name || /\d/.test(name) || name.split(/\s+/).length > 4 || NOT_A_NAME_RE.test(name)) continue;
+        const key = name.toLowerCase();
+        if (known.has(key)) continue;
+        const existing = found.get(key);
+        if (existing) {
+          if (!existing.inScene) found.set(key, { ...existing, inScene: true });
+        } else {
+          found.set(key, { name, fromIndex: false, inScene: true });
+        }
+      }
+    }
+
+    return [...found.values()].sort((a, b) => Number(b.inScene) - Number(a.inScene));
+  }, [contextItems, previewMessages, activeConversation, currentUser, qc]);
+
+  // Auto-selección: los PNJs presentes en la escena actual entran marcados la
+  // primera vez que se detectan; los que solo están en el índice, desmarcados.
+  // offeredRef evita re-marcar un PNJ que el usuario ya desmarcó a mano cuando
+  // cambia el rango de mensajes.
+  const offeredRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const toAdd: string[] = [];
+    for (const c of contextCharacters) {
+      const id = ctxId(c.name);
+      if (!offeredRef.current.has(id)) {
+        offeredRef.current.add(id);
+        if (c.inScene) toAdd.push(id);
+      }
+    }
+    if (toAdd.length) setSelected((prev) => new Set([...prev, ...toAdd]));
+  }, [contextCharacters]);
 
   // ── Step ──────────────────────────────────────────────────────────────────
   const [step, setStep] = useState<Step>('context');
@@ -195,8 +285,15 @@ export function SceneDebugModal({
     });
   }
 
-  function selectedCharacterIds() { return [...selected].filter((id) => id !== USER_SENTINEL); }
-  function includeUser()          { return selected.has(USER_SENTINEL); }
+  function selectedCharacterIds() {
+    return [...selected].filter((id) => id !== USER_SENTINEL && !id.startsWith(CTX_PREFIX));
+  }
+  function includeUser() { return selected.has(USER_SENTINEL); }
+  function selectedExtraCharacters() {
+    return contextCharacters
+      .filter((c) => selected.has(ctxId(c.name)))
+      .map((c) => ({ name: c.name, description: c.description }));
+  }
 
   function copyPrompt() {
     if (!imagePrompt.trim()) return;
@@ -214,12 +311,14 @@ export function SceneDebugModal({
     setLlmPromptOpen(true);
     setImagePromptOpen(true);
     try {
+      const extras = selectedExtraCharacters();
       const data = await generateApi.buildScenePrompt(
         conversationId,
         messageId,
         selectedCharacterIds(),
         currentUser?.appearance?.trim() ? includeUser() : undefined,
         messageCount,
+        extras.length > 0 ? extras : undefined,
       );
       setLlmPrompt(data.scenePrompt);
       setStep('prompts');
@@ -325,7 +424,10 @@ export function SceneDebugModal({
   }, []);
 
   const selectedCount = selected.size;
-  const withVisualDesc = [...selected].filter((id) => entities.find((x) => x.id === id)?.hasVisualDesc).length;
+  const withVisualDesc = [...selected].filter((id) => {
+    if (id.startsWith(CTX_PREFIX)) return contextCharacters.some((c) => ctxId(c.name) === id && c.description);
+    return entities.find((x) => x.id === id)?.hasVisualDesc;
+  }).length;
 
   // ── Modal ─────────────────────────────────────────────────────────────────
   const modal = (
@@ -410,6 +512,52 @@ export function SceneDebugModal({
                       );
                     })}
                   </div>
+                )}
+                {/* Personajes del contexto (PNJs) — no están en el grupo */}
+                {contextCharacters.length > 0 && (
+                  <>
+                    <p className="text-[11px] text-text-muted pt-1">
+                      Detectados en el contexto (no pertenecen al grupo). Los que traen descripción del
+                      índice se describen con ella; el resto se describirá a partir de la propia escena.
+                    </p>
+                    <div className="space-y-1.5">
+                      {contextCharacters.map((c) => {
+                        const id = ctxId(c.name);
+                        const checked = selected.has(id);
+                        return (
+                          <button
+                            key={id}
+                            onClick={() => toggle(id)}
+                            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl border transition-all text-left ${
+                              checked ? 'border-accent/50 bg-accent/8' : 'border-border bg-transparent hover:border-border/80 hover:bg-white/3'
+                            }`}
+                          >
+                            <div className={`w-4 h-4 rounded flex-shrink-0 flex items-center justify-center border-2 transition-colors ${checked ? 'bg-accent border-accent' : 'border-border'}`}>
+                              {checked && (
+                                <svg viewBox="0 0 10 8" className="w-2.5 h-2.5 text-white fill-current">
+                                  <path d="M1 4l3 3 5-6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/>
+                                </svg>
+                              )}
+                            </div>
+                            <div className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 border border-border" style={{ background: 'var(--surface-2)' }}>
+                              <UserPlus size={13} className="text-text-muted" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <span className="text-sm text-text-primary font-medium truncate block">{c.name}</span>
+                            </div>
+                            {c.inScene && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent border border-accent/20 flex-shrink-0">en escena</span>
+                            )}
+                            {c.fromIndex && c.description ? (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-green-500/10 text-green-400 border border-green-500/20 flex-shrink-0">descripción del índice ✓</span>
+                            ) : (
+                              <span className="text-[10px] text-yellow-500/80 flex-shrink-0">apariencia inferida</span>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
                 )}
                 <p className="text-[11px] text-text-muted">
                   {selectedCount === 0

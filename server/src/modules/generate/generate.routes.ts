@@ -43,6 +43,14 @@ const generateSchema = z.object({
   }).optional(),
 });
 
+/** Personaje del contexto (PNJ) — no pertenece al roster de la conversación.
+ *  Detectado por el cliente (índice de contexto o diálogo del narrador) y
+ *  seleccionado explícitamente por el usuario en el modal de escena. */
+export interface ExtraSceneCharacter {
+  name: string;
+  description?: string;
+}
+
 // ── Shared helper: build the prompt text that gets sent to the LLM ──────────
 async function buildScenePromptText(
   conversationId: string,
@@ -51,6 +59,7 @@ async function buildScenePromptText(
   selectedCharacterIds?: string[], // undefined = include all conversation characters
   includeUser?: boolean,           // undefined = include user if they have appearance
   messageCount: number = 6,        // how many recent messages to include as context
+  extraCharacters?: ExtraSceneCharacter[], // PNJs del contexto seleccionados en el modal
 ): Promise<string> {
   const convRepo = new ConversationRepository();
   const msgRepo  = new MessageRepository();
@@ -92,6 +101,29 @@ async function buildScenePromptText(
         charBlocks.push(`Name: ${user.displayName} (the user)\nAppearance: ${user.appearance.trim()}`);
       }
     }
+  }
+
+  // Personajes del contexto (PNJs): no están en el roster de la conversación,
+  // pero aparecen en la escena (detectados en el índice de contexto o en el
+  // diálogo del narrador y seleccionados por el usuario en el modal). Si traen
+  // descripción se usa; si no, se instruye al LLM a inferir una apariencia
+  // coherente a partir de la propia escena en vez de omitir al personaje.
+  const dedupedExtras = (extraCharacters ?? []).filter(
+    (x, i, arr) =>
+      x.name.trim() &&
+      arr.findIndex((y) => y.name.trim().toLowerCase() === x.name.trim().toLowerCase()) === i &&
+      !characters.some((c) => c!.name.toLowerCase() === x.name.trim().toLowerCase()),
+  );
+  for (const extra of dedupedExtras) {
+    const lines = [`Name: ${extra.name.trim()} (secondary character from the scene)`];
+    if (extra.description?.trim()) {
+      lines.push(`Description: ${extra.description.trim()}`);
+    } else {
+      lines.push(
+        `Appearance: not defined — infer a plausible, consistent appearance from how this character is described, addressed or acts in the RECENT SCENE below`,
+      );
+    }
+    charBlocks.push(lines.join('\n'));
   }
 
   const charactersBlock = charBlocks.join('\n\n');
@@ -137,6 +169,7 @@ async function buildScenePromptText(
     const u = getUserById(userId);
     if (u?.appearance?.trim()) includedNames.push(u.displayName);
   }
+  includedNames.push(...dedupedExtras.map((x) => x.name.trim()));
 
   const constraintBlock = includedNames.length > 0
     ? `\n\nCRITICAL CONSTRAINT — CHARACTERS IN THE IMAGE:\nOnly portray the following characters: ${includedNames.join(', ')}.\nDo NOT portray any other person, character or figure, even if they appear in the dialogue above.`
@@ -438,17 +471,21 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
   // Returns the full prompt text that WOULD be sent to the LLM, without calling it.
   // Used by the debug modal so the user can review/edit before LLM call.
   app.post('/build-scene-prompt', async (req, reply) => {
-    const { conversationId, messageId, selectedCharacterIds, includeUser, messageCount } = z.object({
+    const { conversationId, messageId, selectedCharacterIds, includeUser, messageCount, extraCharacters } = z.object({
       conversationId:       z.string(),
       messageId:            z.string(),
       selectedCharacterIds: z.array(z.string()).optional(),
       includeUser:          z.boolean().optional(),
       messageCount:         z.number().int().min(1).max(30).optional(),
+      extraCharacters:      z.array(z.object({
+        name:        z.string().min(1).max(80),
+        description: z.string().max(2000).optional(),
+      })).max(10).optional(),
     }).parse(req.body);
 
     const userId = (req as any).authUser?.userId as string | undefined;
     const scenePrompt = await buildScenePromptText(
-      conversationId, messageId, userId, selectedCharacterIds, includeUser, messageCount,
+      conversationId, messageId, userId, selectedCharacterIds, includeUser, messageCount, extraCharacters,
     );
     return reply.send({ success: true, data: { scenePrompt } });
   });

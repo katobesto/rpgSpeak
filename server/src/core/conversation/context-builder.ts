@@ -141,7 +141,7 @@ const AFFINITY_SELF_REPORT_INSTRUCTION =
 // (ubicación + instrucción [UBICACION:...]) y de objetos establecidos. Un solo
 // bloque reduce la fatiga de directivas en el footer (menos bloques "REGLA
 // ABSOLUTA" compitiendo entre sí) y ahorra un mensaje del presupuesto.
-function buildSceneCoherenceBlock(currentLocation: string | null | undefined): string {
+function buildSceneCoherenceBlock(currentLocation: string | null | undefined, narratorMode = false): string {
   const locationPart = currentLocation?.trim()
     ? `### Ubicación actual\n` +
       `La acción transcurre en: **${currentLocation.trim()}**\n` +
@@ -168,7 +168,20 @@ function buildSceneCoherenceBlock(currentLocation: string | null | undefined): s
     `Si no recuerdas un detalle concreto, no inventes uno nuevo — deja la incógnita abierta o ` +
     `reutiliza lo último que se dijo.`;
 
-  return `## COHERENCIA DE ESCENA — REGLAS ABSOLUTAS\n\n${locationPart}\n\n${objectsPart}`;
+  // Voz narrativa (solo narrador): refuerzo cerca del punto de generación.
+  // El narratorPrompt (lejano, en el mensaje de sistema) ya lo prohíbe, pero los
+  // modelos flash obedecen mucho mejor la instrucción con ejemplo situada cerca
+  // del final del contexto. Estático → no afecta a la estabilidad del prefijo.
+  const voicePart = narratorMode
+    ? `\n\n### Voz narrativa — tercera persona SIEMPRE\n` +
+      `La narración describe a los personajes DESDE FUERA, en tercera persona, con el nombre del personaje como sujeto. ` +
+      `La primera persona solo puede existir dentro de una línea de diálogo (**Nombre:** …).\n` +
+      `✗ INCORRECTO: *Me quedo mirándote fijamente y me aparto un mechón de pelo.* **Lala:** ¿Entonces te parece bien?\n` +
+      `✓ CORRECTO: *Lala se queda mirándote fijamente y se aparta un mechón de pelo.* **Lala:** ¿Entonces te parece bien?\n` +
+      `Si notas que la narración ha empezado a hablar como "yo" (me acerco, me quedo, siento…), corrige de inmediato a tercera persona.`
+    : '';
+
+  return `## COHERENCIA DE ESCENA — REGLAS ABSOLUTAS\n\n${locationPart}\n\n${objectsPart}${voicePart}`;
 }
 
 // ── Estado del grupo (combate) — persistido desde el minijuego de combate ───
@@ -580,9 +593,10 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // and memories are all injected HERE (footer) so they never pollute that static
   // prefix and cause needless cache misses.
 
-  // Scene coherence (location + objects) is injected in all modes — the narrator
-  // needs the current location just as much as a single character.
-  const sceneCoherenceBlock   = buildSceneCoherenceBlock(currentLocation);
+  // Scene coherence (location + objects + narrator voice) is injected in all
+  // modes — the narrator needs the current location just as much as a single
+  // character; the voice section only applies in narrator mode.
+  const sceneCoherenceBlock   = buildSceneCoherenceBlock(currentLocation, narratorMode);
   const pendingEventsBlock    = buildPendingEventsBlock(stories, occurredEventIds);
   const occurredEventsBlock   = buildOccurredEventsBlock(stories, occurredEventIds);
   const partyStateBlock       = buildPartyStateBlock(partyState);
