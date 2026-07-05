@@ -919,6 +919,16 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
         const t = (meta as { tokens: { prompt: number; completion: number; total: number; cached?: number } }).tokens;
         finalTokens = t.total;
         tokenBreakdown = { prompt: t.prompt, completion: t.completion, cached: t.cached ?? 0 };
+        // Observabilidad del prefix-cache: % de tokens del prompt servidos desde
+        // caché en este turno. Permite verificar de un vistazo si un cambio en el
+        // orden del contexto rompió (o recuperó) el caché del provider.
+        if (tokenBreakdown.prompt > 0) {
+          const pct = Math.round((tokenBreakdown.cached / tokenBreakdown.prompt) * 100);
+          console.log(
+            `[cache] ${narratorMode ? 'narrador' : (character?.name ?? 'personaje')}: ` +
+            `${tokenBreakdown.cached}/${tokenBreakdown.prompt} tokens de prompt cacheados (${pct}%)`
+          );
+        }
       }
     }
 

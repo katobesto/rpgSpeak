@@ -366,6 +366,21 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // NOTE: affinity directive is injected AFTER the character block (see below),
   // so it overrides—rather than gets overridden by—the character's base description.
 
+  // ── Historias / mundo / lore — ANTES del bloque de personaje ────────────────
+  // ORDEN CRÍTICO PARA EL PREFIX-CACHE. El caché de prefijo del LLM (DeepSeek,
+  // OpenAI…) es lineal: en cuanto un token difiere respecto al turno anterior,
+  // todo lo que viene después deja de cachearse. El bloque de personaje ("eres
+  // X") CAMBIA cada vez que el jugador cambia de personaje interlocutor. Si las
+  // historias (compartidas por todos los personajes y potencialmente enormes —
+  // world lore, ubicaciones, eventos) van DESPUÉS del bloque de personaje, cada
+  // cambio de personaje reprocesa todo el lore. Colocándolas ANTES, el prefijo
+  // «global + identidad de jugador + mundo/lore» se mantiene cacheado aunque se
+  // cambie de personaje. buildStoryBlock es puramente estático → cache-safe.
+  for (const story of stories) {
+    const storyBlock = buildStoryBlock(story);
+    if (storyBlock) systemParts.push(storyBlock);
+  }
+
   if (narratorMode) {
     // En modo narrador siempre se usa narratorPrompt, independientemente de si hay
     // historia con adventureMode. El antiguo adventurePrompt (GM con mecánicas RPG)
@@ -393,13 +408,27 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     if (charBlocks.length > 0) systemParts.push(buildNarratorIdentityBlock(charBlocks.length > 1));
 
   } else {
-    // Single character definition
-    const charBlock = buildCharacterBlock(character);
-    if (charBlock) systemParts.push(charBlock);
-
+    // ── Bloques COMPARTIDOS entre personajes primero (prefix-cache) ──────────
+    // responseFormatPrompt, el formato de gestos, la nota de atribución del
+    // historial y el aviso de aventura son IDÉNTICOS para todos los personajes
+    // de la conversación. Colocados después de la ficha (que cambia al cambiar
+    // de interlocutor) se reprocesaban en cada cambio de personaje (~1k tokens);
+    // antes de ella quedan dentro del prefijo compartido «global + identidad +
+    // lore + formato». Las reglas de mayor autoridad conductual (afinidad,
+    // coherencia de escena, directivas de turno) siguen viviendo en el footer,
+    // junto al punto de generación, así que la pérdida de "recencia" de estos
+    // bloques es asumible frente al ahorro de caché.
+    if (responseFormatPrompt?.trim()) {
+      systemParts.push(responseFormatPrompt.trim());
+    }
+    systemParts.push(`${GESTURE_FORMAT_INSTRUCTION}\n\n${HISTORY_ATTRIBUTION_NOTE}`);
     if (adventureMode) {
       systemParts.push(ADVENTURE_CONTEXT_NOTICE);
     }
+
+    // ── A partir de aquí, contenido específico del personaje activo ──────────
+    const charBlock = buildCharacterBlock(character);
+    if (charBlock) systemParts.push(charBlock);
 
     // Other group characters
     if (groupCharacters.length > 0) {
@@ -418,15 +447,6 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       // no absorbe rasgos de los demás ni "lee" en el historial lo que no vivió.
       systemParts.push(buildSingleCharIdentityBlock(character.name));
     }
-
-    if (responseFormatPrompt?.trim()) {
-      systemParts.push(responseFormatPrompt.trim());
-    }
-
-    // Formato de gestos + convención de etiquetas del historial en una sola
-    // parte, al final del bloque de personaje para máxima autoridad sobre la
-    // descripción base del char.
-    systemParts.push(`${GESTURE_FORMAT_INSTRUCTION}\n\n${HISTORY_ATTRIBUTION_NOTE}`);
   }
 
   // ── Affinity + consent directive — built here, injected LATE (see below) ────
@@ -538,14 +558,9 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     }
   }
   // ─────────────────────────────────────────────────────────────────────────────
-
-  // Active story contexts (sorted by priority).
-  // buildStoryBlock is purely static — no dynamic params — so the system message
-  // remains cacheable across turns even as events occur or location changes.
-  for (const story of stories) {
-    const storyBlock = buildStoryBlock(story);
-    if (storyBlock) systemParts.push(storyBlock);
-  }
+  // NOTE: los bloques de historia/mundo/lore se ensamblan ANTES del bloque de
+  // personaje (ver arriba) para mantener el prefix-cache estable al cambiar de
+  // personaje interlocutor.
 
   // Build character name map for formatting (includes primary + group chars)
   const allKnownChars = [character, ...groupCharacters].filter(Boolean) as Character[];
