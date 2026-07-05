@@ -62,6 +62,7 @@ export const stories = sqliteTable('stories', {
   isActive: integer('is_active', { mode: 'boolean' }).notNull().default(false),
   adventureMode: integer('adventure_mode', { mode: 'boolean' }).default(false),
   openWorld: integer('open_world', { mode: 'boolean' }).default(false),
+  deathMode: integer('death_mode', { mode: 'boolean' }).default(false),
   userId: text('user_id'),  // owner; NULL = shared/legacy
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),

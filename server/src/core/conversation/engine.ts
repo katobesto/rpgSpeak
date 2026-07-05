@@ -1,4 +1,4 @@
-import type { GenerateRequest, Character, Story, Message, Conversation, MemoryEntry, PartyState } from '@rpgspeak/shared';
+import type { GenerateRequest, Character, Story, Message, Conversation, MemoryEntry, PartyState, DeathLoopState } from '@rpgspeak/shared';
 import { buildContext, filterWitnessedMessages } from './context-builder.js';
 import { trimContext } from './context-trimmer.js';
 import { createProvider } from '../llm/provider.factory.js';
@@ -9,7 +9,7 @@ import { MessageRepository } from '../../modules/messages/message.repository.js'
 import { ConversationRepository } from '../../modules/conversations/conversation.repository.js';
 import { SettingsService } from '../../modules/settings/settings.service.js';
 import { MemoryRepository } from '../memory/memory.repository.js';
-import { NotFoundError, ProviderError } from '../../shared/errors.js';
+import { NotFoundError, ProviderError, ValidationError } from '../../shared/errors.js';
 import { getUserById } from '../../modules/auth/auth.service.js';
 import { autoExtractContextAsync } from '../context/context-extractor.js';
 import { SummariesRepository } from '../../modules/summaries/summaries.repository.js';
@@ -51,7 +51,7 @@ export interface StreamOptions extends GenerateOptions {
   onToken: (token: string) => void;
   /** Called for each token inside a &lt;think&gt;...&lt;/think&gt; block (reasoning models). */
   onThinkToken?: (token: string) => void;
-  onDone: (response: { messageId: string; userMessageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null; thinkContent?: string }) => void;
+  onDone: (response: { messageId: string; userMessageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null; thinkContent?: string; deathLoop?: DeathLoopState | null }) => void;
   onError: (error: Error) => void;
 }
 
@@ -607,6 +607,12 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
 
     const isAdventureMode = linkedStories.some((s) => s.adventureMode);
 
+    // Modo "Regreso después de la muerte": activo si alguna historia vinculada
+    // lo tiene habilitado. El estado del bucle vive en conversation.metadata.
+    const deathModeActive = linkedStories.some((s) => s.deathMode);
+    const currentDeathLoop =
+      ((conversation.metadata as { deathLoop?: DeathLoopState | null } | null)?.deathLoop) ?? null;
+
     // Get all group characters
     const groupCharacters: Character[] = conversation.characters
       .map((c) => charRepo.findById(c.characterId))
@@ -706,6 +712,8 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       currentLocation:     conversation.currentLocation,
       partyState:          (conversation.metadata as { partyState?: PartyState } | null)?.partyState,
       occurredEventIds,
+      deathModeActive,
+      deathLoop: currentDeathLoop,
     });
 
     // The global "Ajustes → Contexto" value (settings.defaultContextLength) is the
@@ -982,6 +990,10 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       // <think> en vez de en la respuesta visible, se pierde — avisa en el log.
       if (tagMatches.length === 0 && thinkAccumulated && AFFINITY_RE.test(thinkAccumulated)) {
         console.warn('[affinity] El modelo emitió [AFINIDAD:...] dentro del bloque <think> — se ignora. Considera reforzar la instrucción o desactivar reasoning.');
+      } else if (tagMatches.length === 0) {
+        // Sin etiquetas este turno: normal en turnos triviales, sospechoso si se
+        // repite en turnos con carga emocional (instrucción ignorada por el modelo).
+        console.log('[affinity] Sin etiquetas [AFINIDAD] en la respuesta de este turno');
       }
       cleanContent = accumulated.replace(/\[AFINIDAD:[^\]]+\]/gi, '').trimEnd();
     }
@@ -1035,6 +1047,65 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
+    // ── Muerte del jugador: [MUERTE_JUGADOR:N:causa] / [MUERTE_SUPERADA] ──────
+    // Máquina de estados del bucle (conversation.metadata.deathLoop):
+    //   sin bucle + muerte      → 'dead' (count=1) — la UI ofrece rebobinar
+    //   'looping' + muerte      → 'dead' (count+1) — vuelve a rebobinar al MISMO ancla
+    //   'looping'/'dead' + [MUERTE_SUPERADA] → bucle cerrado (null)
+    //   'dead' + generación SIN etiqueta de muerte → revert: la muerte se
+    //     regeneró en otra cosa (con ancla → 'looping' con count-1; sin ancla →
+    //     null). Guard !aborted: un Stop a media respuesta no debe revertir.
+    // Las etiquetas se eliminan SIEMPRE del contenido visible, incluso con el
+    // modo desactivado (el modelo puede alucinarlas si conoce el formato).
+    const DEATH_RE = /\[MUERTE_JUGADOR:\s*(\d{1,2})\s*(?::\s*([^\]]{1,200}?))?\s*\]/gi;
+    const DEATH_OVERCOME_RE = /\[MUERTE_SUPERADA\]/gi;
+    const deathMatches = [...cleanContent.matchAll(DEATH_RE)];
+    const overcomeFound = DEATH_OVERCOME_RE.test(cleanContent);
+    if (deathMatches.length > 0 || overcomeFound) {
+      cleanContent = cleanContent.replace(DEATH_RE, '').replace(DEATH_OVERCOME_RE, '').trimEnd();
+    }
+
+    // undefined = sin cambios; null = bucle cerrado; objeto = nuevo estado
+    let deathLoopUpdate: DeathLoopState | null | undefined = undefined;
+    if (deathModeActive && !aborted) {
+      if (deathMatches.length > 0) {
+        const m = deathMatches[deathMatches.length - 1];
+        const depth = Math.min(20, Math.max(1, parseInt(m[1], 10) || 10));
+        const cause = m[2]?.trim() || 'causa desconocida';
+        if (currentDeathLoop?.status === 'dead') {
+          // Muerte regenerada en otra muerte: misma muerte, datos actualizados
+          deathLoopUpdate = { ...currentDeathLoop, deathMessageId: assistantMsg.id, rewindDepth: depth, lastDeathCause: cause };
+        } else if (currentDeathLoop?.status === 'looping') {
+          deathLoopUpdate = {
+            ...currentDeathLoop, status: 'dead', deathMessageId: assistantMsg.id,
+            rewindDepth: depth, deathCount: currentDeathLoop.deathCount + 1, lastDeathCause: cause,
+          };
+        } else {
+          deathLoopUpdate = { status: 'dead', deathCount: 1, deathMessageId: assistantMsg.id, rewindDepth: depth, lastDeathCause: cause };
+        }
+        console.log(`[death] Muerte del jugador (nº ${deathLoopUpdate.deathCount}, retroceso ${depth}): ${cause}`);
+      } else if (overcomeFound && currentDeathLoop) {
+        deathLoopUpdate = null;
+        console.log(`[death] ¡Muerte superada tras ${currentDeathLoop.deathCount} intento(s)! Bucle cerrado.`);
+      } else if (currentDeathLoop?.status === 'dead') {
+        deathLoopUpdate = currentDeathLoop.anchorMessageId
+          ? { ...currentDeathLoop, status: 'looping', deathCount: Math.max(1, currentDeathLoop.deathCount - 1), deathMessageId: undefined, rewindDepth: undefined }
+          : null;
+        console.log('[death] La muerte se regeneró sin etiqueta — estado revertido');
+      }
+    } else if (deathMatches.length > 0) {
+      console.warn('[death] Etiqueta [MUERTE_JUGADOR] emitida con el modo desactivado — ignorada');
+    }
+
+    if (deathLoopUpdate !== undefined) {
+      // Merge sobre metadata FRESCO para no pisar partyState/characterSummaries
+      const freshConv = convRepo.findById(conversationId);
+      if (freshConv) {
+        convRepo.update(conversationId, { metadata: { ...freshConv.metadata, deathLoop: deathLoopUpdate } });
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     // Observabilidad del guardián de voz: avisa en cuanto una respuesta narra en
     // primera persona (la directiva correctiva se inyectará en el turno siguiente).
     if (!aborted && cleanContent) {
@@ -1065,7 +1136,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
 
     if (!aborted) {
       convRepo.incrementCounts(conversationId, finalTokens);
-      onDone({ messageId: assistantMsg.id, userMessageId: userMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, locationUpdate, thinkContent: thinkAccumulated || undefined });
+      onDone({ messageId: assistantMsg.id, userMessageId: userMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, locationUpdate, thinkContent: thinkAccumulated || undefined, deathLoop: deathLoopUpdate });
       // Fire-and-forget background tasks (non-blocking)
       // En modo personaje con grupo se actualiza además el resumen personal del
       // personaje activo (su "memoria de lo presenciado").
@@ -1481,5 +1552,162 @@ export async function triggerSummaryUpdate(conversationId: string): Promise<Conv
     console.error('[summary] Error in triggerSummaryUpdate:', err);
   }
 
+  return convRepo.findById(conversationId)!;
+}
+
+// ─── Regreso después de la muerte ─────────────────────────────────────────────
+//
+// performDeathRewind ejecuta el "regreso a un punto del pasado" que la UI
+// ofrece cuando el jugador muere (deathLoop.status === 'dead'):
+//   1. Determina el ANCLA: en la primera muerte, N mensajes antes del mensaje
+//      de muerte (N = rewindDepth de la IA, 1-20); en muertes posteriores del
+//      mismo bucle, el MISMO ancla anterior (se repite el mismo tramo).
+//   2. Genera el "hilo fatal" (solo primera muerte): resumen LLM de la
+//      secuencia que llevó a la muerte, con fallback mecánico si el LLM falla.
+//   3. Borra todos los mensajes posteriores al ancla.
+//   4. Restaura el resumen global al último snapshot ANTERIOR al ancla (el
+//      resumen rodante puede contener hechos de la línea temporal borrada) y
+//      elimina los resúmenes personales por personaje (se regeneran solos).
+//   5. Deja el bucle en 'looping' → buildContext inyecta la directiva de
+//      repetición hasta que la IA emita [MUERTE_SUPERADA] (o el usuario lo
+//      cierre manualmente con clearDeathLoop).
+
+async function summarizeFatalThread(
+  segment: Message[],
+  conv: Conversation,
+): Promise<string> {
+  // Fallback mecánico: extracto etiquetado por hablante (siempre disponible)
+  const excerpt = segment
+    .slice(-16)
+    .map((m) => {
+      const label = m.role === 'user' ? 'Jugador' : (m.metadata?.narrator || !m.characterId
+        ? 'Narrador'
+        : (charRepo.findById(m.characterId)?.name ?? 'Personaje'));
+      return `${label}: ${m.content.slice(0, 180)}${m.content.length > 180 ? '…' : ''}`;
+    })
+    .join('\n');
+
+  // Intento LLM (mismo esquema de resolución que el resumen rodante)
+  try {
+    const settings = settingsService.getAll();
+    const firstCharId = conv.characters[0]?.characterId;
+    const firstChar = firstCharId ? charRepo.findById(firstCharId) : null;
+    const providerId = settings.defaultProviderId ?? firstChar?.providerId ?? 'default-ollama';
+    const provider = providerRepo.findById(providerId);
+    if (!provider?.isEnabled) return excerpt;
+    const modelId = settings.defaultModelId ?? firstChar?.modelId ?? provider.defaultModel;
+    if (!modelId) return excerpt;
+
+    const llm = createProvider(provider);
+    const prompt =
+      `Eres el director de un bucle temporal en una historia de rol. El jugador ha muerto y la historia va a rebobinarse. ` +
+      `Resume la SECUENCIA FATAL para que pueda repetirse fielmente:\n\n---\n${labelSpeakers(segment)}\n---\n\n` +
+      `Escribe 5-8 frases en pasado narrativo cubriendo: la situación de partida, el lugar o lugares, los personajes ` +
+      `y amenazas presentes, las decisiones del jugador, y el momento exacto de la muerte con su causa. ` +
+      `Sin explicaciones ni introducciones — responde SOLO con el resumen.`;
+
+    const timeout = new Promise<null>((r) => setTimeout(() => r(null), 30_000));
+    const result = await Promise.race([
+      llm.generate({
+        messages: [
+          { role: 'system', content: 'Eres un cronista que resume secuencias narrativas con precisión.' },
+          { role: 'user', content: prompt },
+        ],
+        model: modelId,
+        temperature: 0.3,
+        maxTokens: 500,
+        stream: false,
+        disableFallbacks: settings.disableFallbacks,
+      }),
+      timeout,
+    ]);
+    const text = (result as import('@rpgspeak/shared').GenerateResponse | null)?.content?.trim();
+    return text || excerpt;
+  } catch (err) {
+    console.error('[death] Error resumiendo el hilo fatal, usando extracto:', err);
+    return excerpt;
+  }
+}
+
+export async function performDeathRewind(
+  conversationId: string,
+): Promise<{ conversation: Conversation; deleted: number }> {
+  const conv = convRepo.findById(conversationId);
+  if (!conv) throw new NotFoundError('Conversation', conversationId);
+
+  const loop = (conv.metadata as { deathLoop?: DeathLoopState | null })?.deathLoop ?? null;
+  if (!loop || loop.status !== 'dead') {
+    throw new ValidationError('No hay ninguna muerte pendiente de rebobinar en esta conversación.');
+  }
+
+  const allMessages = msgRepo.findByConversation(conversationId); // rama main
+  if (allMessages.length === 0) throw new ValidationError('La conversación no tiene mensajes.');
+
+  // Mensaje de la muerte: por id; si fue borrado/editado, la última respuesta
+  const deathIdxById = loop.deathMessageId
+    ? allMessages.findIndex((m) => m.id === loop.deathMessageId)
+    : -1;
+  const deathIdx = deathIdxById !== -1
+    ? deathIdxById
+    : allMessages.map((m) => m.role).lastIndexOf('assistant');
+  if (deathIdx <= 0) {
+    // Muerte en el primer mensaje (o sin mensajes assistant): no hay pasado.
+    convRepo.update(conversationId, { metadata: { ...conv.metadata, deathLoop: null } });
+    throw new ValidationError('No hay pasado al que regresar — el bucle se ha cancelado.');
+  }
+
+  // Ancla: la del bucle si sigue existiendo antes de la muerte; si no, N atrás
+  const anchorIdxFromLoop = loop.anchorMessageId
+    ? allMessages.findIndex((m) => m.id === loop.anchorMessageId)
+    : -1;
+  const depth = Math.min(20, Math.max(1, loop.rewindDepth ?? 10));
+  const anchorIdx = (anchorIdxFromLoop !== -1 && anchorIdxFromLoop < deathIdx)
+    ? anchorIdxFromLoop
+    : Math.max(0, deathIdx - depth);
+  const anchor = allMessages[anchorIdx];
+
+  // Hilo fatal: solo se genera en la primera muerte del bucle (el tramo es el mismo)
+  const threadSummary = loop.threadSummary?.trim()
+    ? loop.threadSummary
+    : await summarizeFatalThread(allMessages.slice(anchorIdx + 1, deathIdx + 1), conv);
+
+  // Borra la línea temporal condenada (todo lo posterior al ancla)
+  const deleted = msgRepo.deleteAfter(anchor.id);
+
+  // Restaura el resumen global al último snapshot anterior al ancla — el
+  // resumen rodante actual puede narrar hechos que "ya no han ocurrido".
+  const snapshots = summariesRepo.findByConversation(conversationId); // desc por fecha
+  const snapshot = snapshots.find((s) => s.messageIndexTo <= anchorIdx);
+  convRepo.update(conversationId, { summary: snapshot?.content ?? null });
+
+  // Metadata: bucle a 'looping' + fuera resúmenes personales (contienen la
+  // línea borrada; se regeneran solos con el juego).
+  const fresh = convRepo.findById(conversationId)!;
+  const newMeta = { ...fresh.metadata } as Record<string, unknown>;
+  delete newMeta.characterSummaries;
+  newMeta.deathLoop = {
+    status: 'looping',
+    deathCount: loop.deathCount,
+    anchorMessageId: anchor.id,
+    threadSummary,
+    lastDeathCause: loop.lastDeathCause,
+  } satisfies DeathLoopState;
+  convRepo.update(conversationId, { metadata: newMeta });
+
+  console.log(
+    `[death] Rebobinado a "${anchor.content.slice(0, 50)}…" — ${deleted} mensajes eliminados ` +
+    `(muerte nº ${loop.deathCount}, ancla ${anchor.id})`
+  );
+
+  return { conversation: convRepo.findById(conversationId)!, deleted };
+}
+
+/** Cierra el bucle de muerte manualmente (el usuario lo da por superado o lo
+ *  abandona). También limpia un estado 'dead' huérfano. */
+export function clearDeathLoop(conversationId: string): Conversation {
+  const conv = convRepo.findById(conversationId);
+  if (!conv) throw new NotFoundError('Conversation', conversationId);
+  convRepo.update(conversationId, { metadata: { ...conv.metadata, deathLoop: null } });
+  console.log(`[death] Bucle de muerte cerrado manualmente en conv ${conversationId}`);
   return convRepo.findById(conversationId)!;
 }

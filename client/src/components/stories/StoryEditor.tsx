@@ -40,6 +40,7 @@ const DEFAULT_STORY: CreateStoryDto = {
   isActive: false,
   adventureMode: false,
   openWorld: false,
+  deathMode: false,
   characters: [],
 };
 
@@ -217,6 +218,27 @@ export function StoryEditor({ story, open, onClose }: StoryEditorProps) {
                 <p className="text-xs text-text-muted mt-0.5">
                   Activado: el narrador puede crear ubicaciones nuevas coherentes con el mundo (las registra automáticamente como ubicación de escena).
                   Desactivado: mapa cerrado — solo existen las ubicaciones definidas en la pestaña Ubicaciones.
+                </p>
+              </div>
+            </div>
+            <div className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${
+              form.deathMode ? 'border-red-500/60 bg-red-500/10' : 'border-border hover:border-red-500/40'
+            }`} onClick={() => set('deathMode', !form.deathMode)}>
+              <input
+                type="checkbox"
+                checked={form.deathMode ?? false}
+                onChange={(e) => set('deathMode', e.target.checked)}
+                className="w-4 h-4 rounded mt-0.5 accent-red-600 flex-shrink-0"
+                onClick={(e) => e.stopPropagation()}
+              />
+              <div>
+                <span className={`text-sm font-medium ${form.deathMode ? 'text-red-400' : 'text-text-primary'}`}>
+                  ☠ Regreso después de la muerte
+                </span>
+                <p className="text-xs text-text-muted mt-0.5">
+                  El jugador puede morir en situaciones letales (combates, trampas, explosiones…). Al morir, la interfaz
+                  ofrece regresar a un punto del pasado (la IA elige cuántos mensajes rebobinar, máx. 20) y la historia
+                  repite la secuencia fatal — con los personajes sin recuerdos — hasta que consigas sobrevivirla.
                 </p>
               </div>
             </div>

@@ -81,7 +81,7 @@ export interface TokenBreakdown {
 export interface StreamCallbacks {
   onToken: (token: string) => void;
   onThinkToken?: (token: string) => void;
-  onDone: (result: { messageId: string; userMessageId: string; tokens: number; tokenBreakdown?: TokenBreakdown; promptMessages?: unknown[]; affinityUpdates?: AffinityUpdate[]; fastLlmDebug?: string; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null; thinkContent?: string }) => void;
+  onDone: (result: { messageId: string; userMessageId: string; tokens: number; tokenBreakdown?: TokenBreakdown; promptMessages?: unknown[]; affinityUpdates?: AffinityUpdate[]; fastLlmDebug?: string; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null; thinkContent?: string; deathLoop?: import('@rpgspeak/shared').DeathLoopState | null }) => void;
   onError: (err: Error) => void;
 }
 
@@ -141,6 +141,7 @@ export async function streamGenerate(
               characterId?: string | null;
               content?: string;
               locationUpdate?: string | null;
+              deathLoop?: import('@rpgspeak/shared').DeathLoopState | null;
               thinkContent?: string;
               error?: string;
             };
@@ -150,7 +151,7 @@ export async function streamGenerate(
             } else if (event.type === 'think' && event.token) {
               callbacks.onThinkToken?.(event.token);
             } else if (event.type === 'done') {
-              callbacks.onDone({ messageId: event.messageId!, userMessageId: event.userMessageId!, tokens: event.tokens!, tokenBreakdown: event.tokenBreakdown, promptMessages: event.promptMessages, affinityUpdates: event.affinityUpdates, fastLlmDebug: event.fastLlmDebug, narrator: event.narrator, characterId: event.characterId, content: event.content, locationUpdate: event.locationUpdate, thinkContent: event.thinkContent });
+              callbacks.onDone({ messageId: event.messageId!, userMessageId: event.userMessageId!, tokens: event.tokens!, tokenBreakdown: event.tokenBreakdown, promptMessages: event.promptMessages, affinityUpdates: event.affinityUpdates, fastLlmDebug: event.fastLlmDebug, narrator: event.narrator, characterId: event.characterId, content: event.content, locationUpdate: event.locationUpdate, thinkContent: event.thinkContent, deathLoop: event.deathLoop });
             } else if (event.type === 'error') {
               callbacks.onError(new Error(event.error ?? 'Unknown stream error'));
             }

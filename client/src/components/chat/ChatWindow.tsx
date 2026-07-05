@@ -43,9 +43,11 @@ import {
   Navigation,
   MapPin,
   ImagePlus,
+  Skull,
+  RotateCcw,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar.tsx';
-import type { Character, Story, Conversation, User, ConversationBackground, PartyState } from '@rpgspeak/shared';
+import type { Character, Story, Conversation, User, ConversationBackground, PartyState, DeathLoopState } from '@rpgspeak/shared';
 
 export function ChatWindow() {
   const {
@@ -73,6 +75,41 @@ export function ChatWindow() {
   const [backgroundModalOpen, setBackgroundModalOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [battleOpen, setBattleOpen] = useState(false);
+
+  // ── Regreso después de la muerte ─────────────────────────────────────────
+  const deathLoop =
+    ((activeConversation?.metadata as { deathLoop?: DeathLoopState | null } | undefined)?.deathLoop) ?? null;
+  const [deathRewinding, setDeathRewinding] = useState(false);
+  const [deathClearing, setDeathClearing]   = useState(false);
+
+  async function handleDeathRewind() {
+    const id = activeConversation?.id;
+    if (!id || deathRewinding) return;
+    setDeathRewinding(true);
+    try {
+      const { conversation } = await conversationsApi.deathRewind(id);
+      setActiveConversation(conversation);
+      setMessages(await messagesApi.list(id));
+    } catch (err) {
+      console.error('[death] Error al rebobinar:', err);
+    } finally {
+      setDeathRewinding(false);
+    }
+  }
+
+  async function handleDeathClear() {
+    const id = activeConversation?.id;
+    if (!id || deathClearing) return;
+    if (!window.confirm('¿Dar la muerte por superada y cerrar el bucle? La IA dejará de forzar la repetición de la secuencia fatal.')) return;
+    setDeathClearing(true);
+    try {
+      setActiveConversation(await conversationsApi.clearDeathLoop(id));
+    } catch (err) {
+      console.error('[death] Error al cerrar el bucle:', err);
+    } finally {
+      setDeathClearing(false);
+    }
+  }
   const [highlightedMessageId, setHighlightedMessageId] = useState<string | null>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
   // Narration prompt queued during onBattleEnd, fired once the modal is confirmed closed
@@ -456,18 +493,63 @@ export function ChatWindow() {
         </div>
       </div>
 
-      <MessageInput
-        characters={characters.length > 0 ? characters : allCharacters}
-        activeCharacterId={activeCharacterId}
-        onCharacterChange={handleCharacterChange}
-        onGameCommand={() => setBattleOpen(true)}
-        rightSlot={
-          <ContinueStoryButton
-            activeCharacterId={activeCharacterId}
-            narratorMode={activeConversation.characters.length === 0}
-          />
-        }
-      />
+      {/* ── Bucle de muerte activo: chip informativo con cierre manual ────── */}
+      {deathLoop?.status === 'looping' && (
+        <div className="flex items-center gap-2 px-4 py-1.5 border-t border-red-500/20" style={{ background: 'rgba(220,38,38,0.06)' }}>
+          <Skull size={13} className="text-red-400 flex-shrink-0" />
+          <span className="text-[11px] text-red-300/90 flex-1 truncate">
+            Bucle de muerte activo — muerte nº {deathLoop.deathCount}
+            {deathLoop.lastDeathCause ? ` · ${deathLoop.lastDeathCause}` : ''}. La historia repite la secuencia fatal hasta que la superes.
+          </span>
+          <button
+            onClick={handleDeathClear}
+            disabled={deathClearing}
+            className="text-[11px] px-2 py-0.5 rounded-lg border border-red-500/30 text-red-300 hover:bg-red-500/10 disabled:opacity-50 transition-colors flex-shrink-0"
+            title="Cierra el bucle manualmente si la IA no lo detecta como superado"
+          >
+            Dar por superada
+          </button>
+        </div>
+      )}
+
+      {/* ── Muerto: el banner de regreso sustituye al composer ────────────── */}
+      {deathLoop?.status === 'dead' ? (
+        <div className="px-4 py-4 border-t border-red-500/30" style={{ background: 'rgba(220,38,38,0.10)' }}>
+          <div className="flex items-center gap-3 max-w-2xl mx-auto">
+            <div className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 border border-red-500/40" style={{ background: 'rgba(220,38,38,0.15)' }}>
+              <Skull size={20} className="text-red-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-red-300">Has muerto</p>
+              <p className="text-xs text-text-muted truncate">
+                {deathLoop.lastDeathCause ? `Causa: ${deathLoop.lastDeathCause}. ` : ''}
+                Puedes regresar a un punto del pasado y volver a vivir la secuencia — quizá esta vez sobrevivas.
+              </p>
+            </div>
+            <button
+              onClick={handleDeathRewind}
+              disabled={deathRewinding}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-semibold bg-red-600 text-white hover:bg-red-500 disabled:opacity-60 transition-colors flex-shrink-0"
+            >
+              <RotateCcw size={13} className={deathRewinding ? 'animate-spin' : ''} />
+              {deathRewinding ? 'Rebobinando…' : 'Regresar a un punto del pasado'}
+            </button>
+          </div>
+        </div>
+      ) : (
+        <MessageInput
+          characters={characters.length > 0 ? characters : allCharacters}
+          activeCharacterId={activeCharacterId}
+          onCharacterChange={handleCharacterChange}
+          onGameCommand={() => setBattleOpen(true)}
+          rightSlot={
+            <ContinueStoryButton
+              activeCharacterId={activeCharacterId}
+              narratorMode={activeConversation.characters.length === 0}
+            />
+          }
+        />
+      )}
 
       <GroupPanel
         open={groupPanelOpen}

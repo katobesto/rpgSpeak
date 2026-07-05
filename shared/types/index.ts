@@ -128,9 +128,36 @@ export interface Story {
   /** true = mundo abierto: el narrador puede crear ubicaciones nuevas coherentes con el mundo;
    *  false = mapa cerrado: solo existen las ubicaciones definidas en la historia */
   openWorld: boolean;
+  /** Modo "Regreso después de la muerte": el jugador puede morir en situaciones
+   *  letales; al morir, la interfaz ofrece rebobinar la historia (máx. 20
+   *  mensajes) y la IA fuerza la repetición del hilo fatal hasta superarlo. */
+  deathMode: boolean;
   characters: StoryCharacterLink[];
   createdAt: string;
   updatedAt: string;
+}
+
+// ─── Death Loop (modo "Regreso después de la muerte") ─────────────────────────
+
+/** Estado del bucle de muerte, persistido en conversation.metadata.deathLoop.
+ *  null/ausente = sin bucle activo. */
+export interface DeathLoopState {
+  /** 'dead' = el jugador acaba de morir y la UI ofrece rebobinar;
+   *  'looping' = línea temporal rebobinada, la IA repite el hilo fatal. */
+  status: 'dead' | 'looping';
+  /** Nº total de muertes en el bucle actual (≥1). */
+  deathCount: number;
+  /** Mensaje assistant donde se narró la última muerte (solo status 'dead'). */
+  deathMessageId?: string;
+  /** Retroceso solicitado por la IA para la última muerte (1-20 mensajes). */
+  rewindDepth?: number;
+  /** Ancla del bucle: mensaje al que se rebobina. Se fija en el primer regreso
+   *  y se reutiliza en muertes posteriores del mismo bucle. */
+  anchorMessageId?: string;
+  /** Hilo narrativo de la secuencia fatal — lo que la IA debe hacer repetir. */
+  threadSummary?: string;
+  /** Causa breve de la última muerte (la emite la IA en la etiqueta). */
+  lastDeathCause?: string;
 }
 
 export interface StoryEvent {

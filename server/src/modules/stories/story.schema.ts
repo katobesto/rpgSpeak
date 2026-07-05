@@ -43,6 +43,7 @@ export const createStorySchema = z.object({
   isActive: z.boolean().default(false),
   adventureMode: z.boolean().default(false),
   openWorld: z.boolean().default(false),
+  deathMode: z.boolean().default(false),
   characters: storyCharacterLinkSchema.default([]),
 });
 

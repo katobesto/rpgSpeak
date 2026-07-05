@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Conversation, Message } from '@rpgspeak/shared';
+import type { Conversation, Message, DeathLoopState } from '@rpgspeak/shared';
 import { streamGenerate, type AffinityUpdate } from '../api/client.ts';
 import { messagesApi } from '../api/conversations.ts';
 
@@ -27,6 +27,7 @@ interface ChatState extends StreamingState {
   setActiveConversation: (conv: Conversation | null) => void;
   updateCharacterAffinities: (updates: AffinityUpdate[]) => void;
   updateCurrentLocation: (location: string | null) => void;
+  setDeathLoop: (deathLoop: DeathLoopState | null) => void;
   setMessages: (messages: Message[]) => void;
   addMessage: (message: Message) => void;
   updateMessage: (id: string, updates: Partial<Message>) => void;
@@ -120,6 +121,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
         return u ? { ...link, affinity: u.newAffinity } : link;
       });
       return { activeConversation: { ...s.activeConversation, characters: updatedChars } };
+    }),
+
+  // Estado del bucle de muerte llegado por SSE: se refleja en el metadata de la
+  // conversación activa, de donde lo lee la UI (banner / chip del bucle).
+  setDeathLoop: (deathLoop) =>
+    set((s) => {
+      if (!s.activeConversation) return s;
+      return {
+        activeConversation: {
+          ...s.activeConversation,
+          metadata: { ...s.activeConversation.metadata, deathLoop },
+        },
+      };
     }),
 
   updateCurrentLocation: (location) =>
@@ -228,7 +242,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             };
           });
         },
-        onDone: ({ messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent }) => {
+        onDone: ({ messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent, deathLoop }) => {
           set((s) => ({
             isStreaming: false,
             streamingContent: '',
@@ -268,6 +282,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }));
           if (affinityUpdates?.length) get().updateCharacterAffinities(affinityUpdates);
           if (locationUpdate !== undefined) get().updateCurrentLocation(locationUpdate);
+          if (deathLoop !== undefined) get().setDeathLoop(deathLoop);
         },
         onError: (err) => {
           // Show error as assistant bubble — no silent failure
@@ -411,7 +426,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             };
           });
         },
-        onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId: doneCharId, content, locationUpdate, thinkContent }) => {
+        onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId: doneCharId, content, locationUpdate, thinkContent, deathLoop }) => {
           set((s) => ({
             isStreaming: false,
             streamingContent: '',
@@ -441,6 +456,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }));
           if (affinityUpdates?.length) get().updateCharacterAffinities(affinityUpdates);
           if (locationUpdate !== undefined) get().updateCurrentLocation(locationUpdate);
+          if (deathLoop !== undefined) get().setDeathLoop(deathLoop);
         },
         onError: (err) => {
           set((s) => ({

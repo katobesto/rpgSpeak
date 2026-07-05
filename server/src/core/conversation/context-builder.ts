@@ -1,4 +1,4 @@
-import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem, PartyState } from '@rpgspeak/shared';
+import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem, PartyState, DeathLoopState } from '@rpgspeak/shared';
 import { MemoryRepository } from '../memory/memory.repository.js';
 import { ContextRepository, type ContextItemWithEmbedding } from '../../modules/context/context.repository.js';
 import { ProviderRepository } from '../../modules/providers/provider.repository.js';
@@ -47,6 +47,12 @@ export interface BuildContextOptions {
   /** IDs de eventos de historia (persistentEvents) ya ocurridos en esta conversación.
    *  Los eventos con trigger no ocurridos se inyectan como "trama pendiente" (destinos). */
   occurredEventIds?: Set<string>;
+  /** true si alguna historia vinculada tiene el modo "Regreso después de la muerte":
+   *  inyecta el bloque estático de letalidad + etiqueta [MUERTE_JUGADOR:...]. */
+  deathModeActive?: boolean;
+  /** Estado del bucle de muerte (conversation.metadata.deathLoop). Con status
+   *  'looping' se inyecta la directiva de repetición del hilo fatal. */
+  deathLoop?: DeathLoopState | null;
 }
 
 // ── Aviso de aventura para modo personaje individual (sin narrador) ─────────
@@ -215,15 +221,83 @@ const HISTORY_ATTRIBUTION_NOTE =
 // versión anterior ("cuando algo cambie significativamente… N entre 1 y 15")
 // era demasiado vaga y el modelo casi nunca la emitía. Magnitudes contenidas
 // para que el vínculo suba despacio y el romance no sea prematuro.
+// Reescrita tras observar que el modelo dejó de emitir etiquetas: las reglas
+// anti-adulación ("la calibración JAMÁS se dice en voz alta") y la coda de
+// "contexto silencioso" de las memorias le hacían tratar [AFINIDAD:...] como
+// una verbalización prohibida de sentimientos. La instrucción ahora (1) declara
+// la etiqueta como marcador TÉCNICO exento de esas reglas (el sistema la borra
+// antes de mostrarla), y (2) invierte el sesgo de emisión: en turnos con carga
+// emocional lo normal es emitir ±1/±2; omitir queda para turnos triviales.
+// Antes ("si nada relevante cambió, NO pongas etiqueta") el modelo casi nunca
+// la emitía y la relación quedaba congelada.
 const AFFINITY_SELF_REPORT_INSTRUCTION =
-  `## ACTUALIZACIÓN DE AFINIDAD — OBLIGATORIO\n` +
-  `No hay analizador externo: ERES TÚ quien registra los cambios de afinidad. Al FINAL de tu respuesta visible (NUNCA dentro de tu razonamiento interno), si este intercambio ha movido de verdad cómo se siente el personaje hacia el jugador, añade en una línea propia:\n` +
+  `## ACTUALIZACIÓN DE AFINIDAD — MARCADOR TÉCNICO OBLIGATORIO\n` +
+  `No hay analizador externo: ERES TÚ quien registra los cambios de afinidad emitiendo una etiqueta técnica.\n` +
+  `IMPORTANTE — la etiqueta NO es diálogo, narración ni adulación: el sistema la extrae y la BORRA antes de mostrar tu respuesta al jugador. Las reglas de "calibración interna", "contexto silencioso" y anti-adulación NO se aplican a esta etiqueta — emitirla nunca las viola. Es la ÚNICA vía por la que la relación puede evolucionar: si no la emites, la afinidad queda congelada aunque la escena la haya movido.\n` +
+  `Al FINAL de tu respuesta visible (NUNCA dentro del razonamiento interno), en una línea propia:\n` +
   `[AFINIDAD:NombreExacto:+N]   (usa -N si empeora)\n` +
-  `Reglas:\n` +
-  `- Nombre EXACTO del personaje; una etiqueta por personaje afectado.\n` +
-  `- Magnitudes CONTENIDAS, el afecto sube DESPACIO: +1 o +2 para un gesto amable o una charla que acerca; +3 a +5 para un momento significativo (confianza real, ayuda genuina); +6 a +10 SOLO para hechos excepcionales (salvar la vida, sacrificio, confesión sincera y correspondida). Negativos simétricos para frialdad, ofensas, traición o avances no deseados.\n` +
-  `- Prioriza incrementos pequeños (+1/+2): subir mucho de golpe rompe la naturalidad de la relación.\n` +
-  `- Si nada relevante cambió, NO pongas etiqueta. No la menciones ni la expliques en la narrativa.`;
+  `CALIBRACIÓN:\n` +
+  `- La relación se mueve a pasos PEQUEÑOS, pero SE MUEVE: en un turno con carga emocional real (ayuda, regalo, confianza compartida, humor cómplice, roce, decepción o conflicto), lo normal es emitir ±1 o ±2. Reservar la etiqueta solo para momentos épicos es un ERROR — congelaría la relación.\n` +
+  `- +3 a +5 para un momento significativo (confianza real, ayuda genuina); +6 a +10 SOLO para hechos excepcionales (salvar la vida, sacrificio, confesión sincera y correspondida). Negativos simétricos para frialdad, ofensas, traición o avances no deseados.\n` +
+  `- Omite la etiqueta SOLO en turnos triviales sin carga emocional (saludos, logística, preguntas neutras al mundo).\n` +
+  `- Nombre EXACTO del personaje; una etiqueta por personaje afectado. No menciones ni expliques la etiqueta en la narrativa.`;
+
+// ── Muerte del jugador — modo "Regreso después de la muerte" ─────────────────
+//
+// Bloque ESTÁTICO (system message, cache-safe) inyectado cuando alguna historia
+// vinculada tiene deathMode activo: declara que el jugador puede morir y define
+// la etiqueta técnica [MUERTE_JUGADOR:N:causa] con la que la IA señala la
+// muerte y cuántos mensajes retroceder (1-20).
+const DEATH_MODE_BLOCK =
+  `## MUERTE DEL JUGADOR — MODO ACTIVO\n` +
+  `En esta historia el jugador PUEDE MORIR. El mundo es letal de verdad: en situaciones de peligro ` +
+  `(combate, batallas, trampas, explosiones, caídas, venenos, persecuciones…), si el jugador actúa de forma ` +
+  `temeraria, ignora advertencias claras o fracasa en el momento crítico, la muerte es un desenlace legítimo ` +
+  `y debes narrarla sin suavizarla ni ofrecer salvaciones milagrosas de última hora.\n` +
+  `- La muerte NO es gratuita ni arbitraria: debe ser la consecuencia lógica y narrativamente justa de la ` +
+  `situación y de las decisiones del jugador. El peligro se telegrafía antes: la narración da señales claras ` +
+  `de que la situación puede ser mortal.\n` +
+  `- Una acción razonable del jugador ante el peligro merece una oportunidad real; la muerte llega cuando ` +
+  `la ignora, la desafía sin recursos o falla de forma decisiva.\n` +
+  `- Cuando narres la MUERTE del jugador, termina la respuesta con esta etiqueta en una línea propia:\n` +
+  `[MUERTE_JUGADOR:N:causa muy breve]\n` +
+  `donde N (1-20) es cuántos mensajes atrás debería retroceder la historia para dar al jugador una ` +
+  `oportunidad real de cambiar su destino — elige el punto donde empezó la secuencia fatal (la entrada a la ` +
+  `cueva, el inicio del combate, la decisión equivocada…).\n` +
+  `- La etiqueta es un marcador técnico: el sistema la procesa y la borra antes de mostrar tu respuesta. ` +
+  `No la menciones ni la expliques en la narración.`;
+
+// Directiva del BUCLE activo (footer): tras rebobinar, obliga a la IA a
+// reconstruir la misma secuencia fatal hasta que el jugador la supere.
+function buildDeathLoopDirective(loop: DeathLoopState): string {
+  const causes = loop.lastDeathCause ? `Última causa de muerte: ${loop.lastDeathCause}.` : '';
+  const thread = loop.threadSummary?.trim()
+    ? `EL HILO QUE DEBE REPETIRSE — estos hechos volverán a ocurrir si nada cambia:\n${loop.threadSummary.trim()}\n\n`
+    : '';
+  return (
+    `## BUCLE DE MUERTE — LÍNEA TEMPORAL REBOBINADA (muerte nº ${loop.deathCount})\n` +
+    `El jugador MURIÓ más adelante en esta historia y la línea temporal ha retrocedido hasta este punto. ` +
+    `${causes}\n\n` +
+    thread +
+    `REGLAS DEL BUCLE — MÁXIMA PRIORIDAD NARRATIVA:\n` +
+    `- Reconduce la historia hacia ESA MISMA secuencia: mismos lugares, personajes, amenazas y orden de ` +
+    `acontecimientos. NO inventes una trama alternativa que la esquive: el destino empuja de nuevo hacia el ` +
+    `mismo punto fatal.\n` +
+    `- NADIE recuerda nada: para los personajes y el mundo es la primera vez que ocurre. Solo el JUGADOR ` +
+    `conserva su memoria. Si demuestra conocimiento imposible ("sé que hay una trampa ahí"), los personajes ` +
+    `reaccionan con la extrañeza lógica — no lo confirman como recuerdo compartido.\n` +
+    `- El jugador puede decidir DIFERENTE y el mundo responde con su lógica normal: la secuencia es la misma, ` +
+    `pero el desenlace no está escrito.\n` +
+    `- El peligro sigue siendo LETAL: si el jugador vuelve a fallar en el momento crítico (por el mismo error ` +
+    `u otro equivalente), muere otra vez → emite de nuevo [MUERTE_JUGADOR:N:causa].\n` +
+    `- La muerte se considera SUPERADA únicamente cuando el jugador sobrevive con claridad al momento que lo ` +
+    `mató: neutraliza la amenaza, escapa de verdad, o la historia avanza inequívocamente más allá del punto ` +
+    `fatal. En ESE momento (y solo entonces) añade al final de tu respuesta, en línea propia:\n` +
+    `[MUERTE_SUPERADA]\n` +
+    `- NO emitas [MUERTE_SUPERADA] antes de tiempo: mientras la amenaza fatal siga pendiente, el bucle sigue ` +
+    `activo. Ambas etiquetas son marcadores técnicos que el sistema borra — no las menciones en la narración.`
+  );
+}
 
 // ── Bloque de coherencia de escena — inyectado en todos los modos ───────────
 // Consolida en UN solo mensaje de sistema las reglas de coherencia espacial
@@ -349,6 +423,8 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     currentLocation,
     partyState,
     occurredEventIds = new Set<string>(),
+    deathModeActive = false,
+    deathLoop = null,
   } = opts;
 
   const systemParts: string[] = [];
@@ -379,6 +455,12 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   for (const story of stories) {
     const storyBlock = buildStoryBlock(story);
     if (storyBlock) systemParts.push(storyBlock);
+  }
+
+  // Muerte del jugador — bloque estático junto al lore (compartido entre
+  // personajes y modos → dentro del prefijo cacheable).
+  if (deathModeActive) {
+    systemParts.push(DEATH_MODE_BLOCK);
   }
 
   if (narratorMode) {
@@ -460,6 +542,10 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // its authority: LLMs weight content closer to the generation point more heavily,
   // so it overrides the character's base description even more effectively than before.
   let affinityBlock: string | null = null;
+  // Instrucción de auto-reporte [AFINIDAD:...] — solo sin LLM rápido. Se inyecta
+  // como bloque propio al FINAL del footer (justo antes del último mensaje del
+  // usuario) para máxima obediencia del modelo.
+  let affinitySelfReportBlock: string | null = null;
   // En modo personaje, el estado emocional inyectado es SOLO el del personaje que
   // habla — no el de todo el reparto — para que no "lea" su relación con los demás.
   // En modo narrador (omnisciente) sí se muestran todas las afinidades.
@@ -546,13 +632,15 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       `(un matiz, una condición, un cambio de ritmo) — no como un freno seco que rompe la continuidad ya aceptada.`;
 
     // consentDirective (estado + gradación romántica + contacto físico) SIEMPRE.
-    // Cuando el LLM rápido está OFF añadimos, al final (máxima autoridad):
-    //   · la guía de tramos editable (affinitySystemPrompt), y
-    //   · la instrucción concreta de auto-reporte de etiquetas [AFINIDAD:...].
+    // Cuando el LLM rápido está OFF añadimos la guía de tramos editable
+    // (affinitySystemPrompt) y activamos el bloque de auto-reporte, que se
+    // inyecta APARTE, como último bloque antes del mensaje del usuario (máxima
+    // salience) — enterrado al final de este mega-bloque el modelo lo ignoraba.
     // Cuando está ON, el analizador externo gestiona la afinidad → no pedimos tags.
     if (!fastLlmEnabled) {
-      const tierGuide = affinitySystemPrompt?.trim() ? `${affinitySystemPrompt.trim()}\n\n---\n\n` : '';
-      affinityBlock = `${consentDirective}\n\n---\n\n${tierGuide}${AFFINITY_SELF_REPORT_INSTRUCTION}`;
+      const tierGuide = affinitySystemPrompt?.trim() ? `\n\n---\n\n${affinitySystemPrompt.trim()}` : '';
+      affinityBlock = `${consentDirective}${tierGuide}`;
+      affinitySelfReportBlock = AFFINITY_SELF_REPORT_INSTRUCTION;
     } else {
       affinityBlock = consentDirective;
     }
@@ -700,6 +788,9 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   //   7. Affinity block     — current relationship state + consent rules (changes often)
   //   8. Narration style    — user preference for verbosity
   //   9. Summary            — "Historia hasta ahora" (rolling, changes every ~6 messages)
+  //   9b. Affinity self-report — [AFINIDAD:...] tag instruction (fast-LLM off only);
+  //       último bloque para máxima obediencia — el footer entero queda tras el
+  //       historial creciente, así que su posición no afecta al prefix-cache
   //  10. [Last user msg]    ← generation starts here
   //
   // Ordered so that the blocks most likely to change between consecutive turns
@@ -782,6 +873,15 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   history.push({ role: 'system', content: sceneCoherenceBlock });
   footerCount++;
 
+  // 6b. Bucle de muerte activo — directiva de repetición del hilo fatal.
+  // Cambia solo cuando hay una nueva muerte en el bucle; cerca del punto de
+  // generación porque debe imponerse a la trama pendiente y a la inercia de la
+  // conversación (el footer completo queda fuera del prefijo cacheado).
+  if (deathModeActive && deathLoop?.status === 'looping') {
+    history.push({ role: 'system', content: buildDeathLoopDirective(deathLoop) });
+    footerCount++;
+  }
+
   // 7. Affinity + consent directive — placed AFTER scene coherence because
   // affinity values can change every turn; keeping the more static coherence
   // block earlier preserves more of the cacheable prefix.
@@ -812,6 +912,15 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       ? `## Historia hasta ahora (lo que TÚ has vivido)`
       : `## Historia hasta ahora`;
     history.push({ role: 'system', content: `${header}\n${summaryForContext.trim()}` });
+    footerCount++;
+  }
+
+  // 9b. Auto-reporte de afinidad — último bloque antes del mensaje del usuario.
+  // Separado del mega-bloque de afinidad (#7), donde quedaba enterrado y el
+  // modelo no lo obedecía. Estático → no penaliza nada (el footer completo va
+  // tras el historial creciente y nunca forma parte del prefijo cacheado).
+  if (affinitySelfReportBlock && needsSplit) {
+    history.push({ role: 'system', content: affinitySelfReportBlock });
     footerCount++;
   }
 

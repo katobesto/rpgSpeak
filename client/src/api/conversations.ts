@@ -35,6 +35,12 @@ export const conversationsApi = {
     api.patch<{ location: string | null }>(`/conversations/${convId}/location`, { location }),
   updatePartyState: (convId: string, partyState: PartyState) =>
     api.patch<Conversation>(`/conversations/${convId}/party-state`, partyState),
+  /** Regreso después de la muerte: rebobina la historia al ancla del bucle. */
+  deathRewind: (id: string) =>
+    api.post<{ conversation: Conversation; deleted: number }>(`/conversations/${id}/death-rewind`, {}),
+  /** Cierra el bucle de muerte manualmente (darlo por superado). */
+  clearDeathLoop: (id: string) =>
+    api.post<Conversation>(`/conversations/${id}/death-clear`, {}),
 };
 
 export const messagesApi = {

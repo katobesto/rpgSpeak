@@ -60,6 +60,22 @@ export const conversationRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({ success: true, data: updated });
   });
 
+  // POST /api/conversations/:id/death-rewind — "Regresar a un punto del pasado"
+  // tras la muerte del jugador (modo Regreso después de la muerte). Borra la
+  // línea temporal condenada y deja el bucle en 'looping'.
+  app.post<{ Params: { id: string } }>('/:id/death-rewind', async (req, reply) => {
+    const { performDeathRewind } = await import('../../core/conversation/engine.js');
+    const result = await performDeathRewind(req.params.id);
+    return reply.send({ success: true, data: result });
+  });
+
+  // POST /api/conversations/:id/death-clear — cierra el bucle de muerte
+  // manualmente (darlo por superado / abandonarlo).
+  app.post<{ Params: { id: string } }>('/:id/death-clear', async (req, reply) => {
+    const { clearDeathLoop } = await import('../../core/conversation/engine.js');
+    return reply.send({ success: true, data: clearDeathLoop(req.params.id) });
+  });
+
   // PATCH /api/conversations/:id/location — set / clear the current scene location
   app.patch<{ Params: { id: string } }>('/:id/location', async (req, reply) => {
     const result = z.object({ location: z.string().max(300).nullable() }).safeParse(req.body);

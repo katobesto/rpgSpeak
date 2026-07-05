@@ -206,6 +206,9 @@ export function runMigrations(db: Db): void {
   // ─── Stories — open world toggle (0 = mapa cerrado, comportamiento previo) ──
   try { db.run(sql`ALTER TABLE stories ADD COLUMN open_world INTEGER DEFAULT 0`); } catch { /* already exists */ }
 
+  // ─── Stories — modo "Regreso después de la muerte" (0 = desactivado) ────────
+  try { db.run(sql`ALTER TABLE stories ADD COLUMN death_mode INTEGER DEFAULT 0`); } catch { /* already exists */ }
+
   // ─── Conversation Story Events — eventos de historia ya ocurridos por chat ──
   // Una fila = el evento (stories.persistent_events[].id) ya ocurrió
   // narrativamente en esa conversación; sin fila = pendiente.
