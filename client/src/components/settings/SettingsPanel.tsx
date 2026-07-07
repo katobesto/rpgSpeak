@@ -3301,10 +3301,11 @@ function StatCard({
 function BackupSection() {
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
-  // Por defecto SIN imágenes: la carpeta data/images puede pesar cientos de MB y
-  // hacer que el navegador no complete la descarga (el blob se bufferiza en RAM).
+  const [downloadProgress, setDownloadProgress] = useState<import('../../api/backup.ts').BackupProgress | null>(null);
+  // Por defecto SIN imágenes: la carpeta data/images puede pesar cientos de MB.
   // El backup solo-BD (personajes, historias, conversaciones, ajustes) pesa unos
-  // MB y es lo esencial. El usuario puede marcar la casilla para el backup completo.
+  // MB. El usuario puede marcar la casilla para el backup completo (ya robusto
+  // ante timeouts: se descarga por trozos con barra de progreso).
   const [includeImages, setIncludeImages] = useState(false);
 
   const [restoreFile, setRestoreFile]   = useState<File | null>(null);
@@ -3321,8 +3322,9 @@ function BackupSection() {
   async function handleDownload() {
     setDownloading(true);
     setDownloadError(null);
+    setDownloadProgress(null);
     try {
-      const { filename, url } = await backupApi.download(includeImages);
+      const { filename, url } = await backupApi.download(includeImages, setDownloadProgress);
       const a = document.createElement('a');
       a.href = url;
       a.download = filename;
@@ -3334,6 +3336,7 @@ function BackupSection() {
       setDownloadError(err instanceof Error ? err.message : 'Error al descargar');
     } finally {
       setDownloading(false);
+      setDownloadProgress(null);
     }
   }
 
@@ -3343,7 +3346,10 @@ function BackupSection() {
     setRestoreError(null);
     try {
       setRestoreProgress(0);
-      const result = await backupApi.restore(restoreFile, (pct) => setRestoreProgress(pct));
+      const result = await backupApi.restore(restoreFile, (p) => {
+        // uploading → % real; restoring → 100 (la UI muestra "Restaurando datos…")
+        setRestoreProgress(p.phase === 'uploading' ? (p.pct ?? 0) : 100);
+      });
       setRestoreDone(true);
       setRestoreNeedsRestart(result.requiresRestart);
       setRestoreMsg(result.message);
@@ -3401,15 +3407,34 @@ function BackupSection() {
             <AlertCircle size={11} /> {downloadError}
           </p>
         )}
-        <button
-          onClick={handleDownload}
-          disabled={downloading}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-accent/80 disabled:opacity-50 transition-colors"
-        >
-          {downloading
-            ? <><Loader size={14} className="animate-spin" /> Generando…</>
-            : <><HardDriveDownload size={14} /> {includeImages ? 'Descargar backup completo' : 'Descargar backup (sin imágenes)'}</>}
-        </button>
+
+        {downloading && downloadProgress ? (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2 text-sm text-text-muted">
+              <Loader size={14} className="animate-spin text-accent" />
+              {downloadProgress.phase === 'preparing'
+                ? `Preparando en el servidor… ${downloadProgress.bytes ? (downloadProgress.bytes / 1024 / 1024).toFixed(0) + ' MB' : ''}`
+                : `Descargando… ${downloadProgress.pct ?? 0}%${downloadProgress.total ? ` (${(downloadProgress.bytes! / 1024 / 1024).toFixed(0)}/${(downloadProgress.total / 1024 / 1024).toFixed(0)} MB)` : ''}`}
+            </div>
+            <div className="w-full h-1.5 rounded-full bg-white/10 overflow-hidden">
+              <div
+                className={`h-full rounded-full bg-accent transition-all duration-300 ${downloadProgress.pct === null ? 'animate-pulse w-1/3' : ''}`}
+                style={downloadProgress.pct === null ? undefined : { width: `${downloadProgress.pct}%` }}
+              />
+            </div>
+            <p className="text-[10px] text-text-muted">No cierres esta pestaña hasta que termine.</p>
+          </div>
+        ) : (
+          <button
+            onClick={handleDownload}
+            disabled={downloading}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-accent text-white hover:bg-accent/80 disabled:opacity-50 transition-colors"
+          >
+            {downloading
+              ? <><Loader size={14} className="animate-spin" /> Iniciando…</>
+              : <><HardDriveDownload size={14} /> {includeImages ? 'Descargar backup completo' : 'Descargar backup (sin imágenes)'}</>}
+          </button>
+        )}
       </div>
 
       {/* Restore card */}
