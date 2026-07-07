@@ -3,6 +3,7 @@ import { MemoryRepository } from '../memory/memory.repository.js';
 import { ContextRepository, type ContextItemWithEmbedding } from '../../modules/context/context.repository.js';
 import { ProviderRepository } from '../../modules/providers/provider.repository.js';
 import { createProvider } from '../llm/provider.factory.js';
+import { OOC_CONVENTION_BLOCK } from './ooc.js';
 
 const memRepo  = new MemoryRepository();
 const ctxRepo  = new ContextRepository();
@@ -57,7 +58,7 @@ export interface BuildContextOptions {
 
 // ── Aviso de aventura para modo personaje individual (sin narrador) ─────────
 const ADVENTURE_CONTEXT_NOTICE = `## Contexto de aventura activa
-Eres consciente de tu ficha RPG (stats, habilidades, inventario). Actúa de forma coherente con ellos en situaciones de combate, reto o tensión. Si tu formato de respuesta permite describir acciones o gestos, hazlo brevemente entre paréntesis y en tercera persona antes de hablar; si tu formato es solo diálogo, transmite la tensión física del momento a través del tono y las palabras, sin añadir descripciones de acción.`;
+Eres consciente de tu ficha RPG (stats, habilidades, inventario). Actúa de forma coherente con ellos en situaciones de combate, reto o tensión. Si tu formato de respuesta permite describir acciones o gestos, hazlo brevemente entre asteriscos y en tercera persona antes de hablar; si tu formato es solo diálogo, transmite la tensión física del momento a través del tono y las palabras, sin añadir descripciones de acción.`;
 
 // ── Identidad del jugador — candado anti-confusión ───────────────────────────
 // El nombre del usuario pertenece EXCLUSIVAMENTE al jugador (la persona real).
@@ -113,11 +114,12 @@ function buildSingleCharIdentityBlock(activeName: string): string {
 const GESTURE_FORMAT_INSTRUCTION =
   `## Formato de acciones y gestos físicos (solo si tu formato de respuesta incluye acciones)\n` +
   `Si tu formato de respuesta es estrictamente diálogo, esta sección no aplica — no añadas gestos ni acciones.\n` +
-  `Cuando sí incluyas descripciones de acciones o gestos (entre asteriscos, paréntesis o como narración entre turnos de diálogo), escríbelas siempre en TERCERA PERSONA, nunca en primera:\n` +
+  `Cuando sí incluyas descripciones de acciones o gestos (entre asteriscos o como narración entre turnos de diálogo), escríbelas siempre en TERCERA PERSONA, nunca en primera:\n` +
   `- ✗ INCORRECTO: *me acaricio el pelo mirándote a los ojos y sonrío de forma pícara*\n` +
   `- ✓ CORRECTO: *se acaricia el pelo mirándote a los ojos y sonríe de forma pícara*\n` +
   `El diálogo hablado (lo que el personaje dice en voz alta) sí va en primera persona.\n` +
-  `Si el personaje describe acciones del jugador/usuario, también en tercera persona ("se acerca", "alza la vista", "te toma de la mano").`;
+  `Si el personaje describe acciones del jugador/usuario, también en tercera persona ("se acerca", "alza la vista", "te toma de la mano").\n` +
+  `NO uses paréntesis para acciones ni gestos: en esta historia los paréntesis del jugador son notas fuera de personaje (OOC) y los tuyos podrían confundirse con ellas. Usa asteriscos.`;
 
 // ── Filtrado de historial por testigo (modo personaje) ──────────────────────
 //
@@ -438,6 +440,11 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   if (userDisplayName?.trim()) {
     systemParts.push(buildUserIdentityBlock(userDisplayName.trim()));
   }
+
+  // Convención OOC: los paréntesis del jugador son notas de dirección solo para
+  // la IA. Estático y compartido entre todos los personajes/modos → prefijo
+  // cacheable. El enrutado (que los analizadores NO vean el OOC) vive en engine.
+  systemParts.push(OOC_CONVENTION_BLOCK);
 
   // NOTE: affinity directive is injected AFTER the character block (see below),
   // so it overrides—rather than gets overridden by—the character's base description.

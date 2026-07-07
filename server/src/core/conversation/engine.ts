@@ -14,6 +14,7 @@ import { getUserById } from '../../modules/auth/auth.service.js';
 import { autoExtractContextAsync } from '../context/context-extractor.js';
 import { SummariesRepository } from '../../modules/summaries/summaries.repository.js';
 import { EventStatusRepository } from '../../modules/stories/event-status.repository.js';
+import { stripOocNotes } from './ooc.js';
 
 const providerRepo   = new ProviderRepository();
 const charRepo       = new CharacterRepository();
@@ -560,6 +561,13 @@ async function checkNsfwContent(
 export async function generateStream(opts: StreamOptions): Promise<void> {
   const { conversationId, userMessage, branchId = 'main', onToken, onDone, onError } = opts;
 
+  // Mensaje SIN las notas OOC (paréntesis): lo que ven los analizadores de
+  // afinidad, memoria y detección de acciones — para que la nota de dirección
+  // del jugador no altere relaciones ni conocimiento de los personajes. El
+  // mensaje íntegro (con OOC) se guarda y llega a la IA principal como contexto,
+  // y la moderación NSFW también lo examina íntegro (no evasible por paréntesis).
+  const userMessageForAnalysis = stripOocNotes(userMessage);
+
   try {
     const conversation = convRepo.findById(conversationId);
     if (!conversation) throw new NotFoundError('Conversation', conversationId);
@@ -744,8 +752,8 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     //     an offense, manipulation attempts, guilt-tripping, etc.
     const hasNonConsentingChars = characterAffinities.some((a) => a.affinity < 80);
 
-    const playerAction = detectPlayerAction(userMessage);
-    let turnDirective = buildTurnDirective(playerAction, userMessage, characterAffinities);
+    const playerAction = detectPlayerAction(userMessageForAnalysis);
+    let turnDirective = buildTurnDirective(playerAction, userMessageForAnalysis, characterAffinities);
 
     if (!turnDirective && hasNonConsentingChars && useFastLlm) {
       // Fetch recent offense/trauma memories for context
@@ -761,7 +769,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
         .slice(-8);
 
       turnDirective = await fastLlmPreAnalysis(
-        userMessage,
+        userMessageForAnalysis,
         characterAffinities,
         recentHistory,
         recentMemories,
@@ -952,7 +960,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       cleanContent = accumulated.replace(/\[AFINIDAD:[^\]]+\]/gi, '').trimEnd();
       const result = await analyzeExchangeAsync(
         conversationId,
-        userMessage,
+        userMessageForAnalysis,
         cleanContent,
         allCharsInConv,
         characterAffinities,
@@ -1301,6 +1309,11 @@ function labelSpeakers(msgs: Message[]): string {
   const nameCache = new Map<string, string>();
   return msgs
     .map((m) => {
+      // Las notas OOC del jugador (paréntesis) NO entran en los resúmenes: no
+      // deben cristalizar como hechos que los personajes acaben "conociendo".
+      const content = m.role === 'user' ? stripOocNotes(m.content) : m.content;
+      if (!content.trim()) return null; // turno que era SOLO nota OOC → se omite
+
       let speaker = 'Jugador';
       if (m.role !== 'user') {
         if (m.metadata?.narrator || !m.characterId) {
@@ -1314,8 +1327,9 @@ function labelSpeakers(msgs: Message[]): string {
           }
         }
       }
-      return `${speaker}: ${m.content}`;
+      return `${speaker}: ${content}`;
     })
+    .filter((line): line is string => line !== null)
     .join('\n\n');
 }
 

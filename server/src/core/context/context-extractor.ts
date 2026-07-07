@@ -8,6 +8,7 @@
  */
 
 import { ContextRepository }      from '../../modules/context/context.repository.js';
+import { stripOocNotes }          from '../conversation/ooc.js';
 import { MessageRepository }      from '../../modules/messages/message.repository.js';
 import { ConversationRepository } from '../../modules/conversations/conversation.repository.js';
 import { CharacterRepository }    from '../../modules/characters/character.repository.js';
@@ -69,11 +70,12 @@ function buildPrompt(
         ? (charNameMap.get(m.characterId) ?? 'Personaje')
         : 'Narrador';
     }
-    const content = m.content
+    let content = m.content
       .replace(/\[AFINIDAD:[^\]]+\]/g, '')
-      .replace(/\[MEMORIA:[^\]]+\]/g,  '')
-      .trim()
-      .slice(0, MAX_MSG_CHARS);
+      .replace(/\[MEMORIA:[^\]]+\]/g,  '');
+    // Notas OOC del jugador (paréntesis): no son hechos del mundo → fuera del índice.
+    if (m.role === 'user') content = stripOocNotes(content);
+    content = content.trim().slice(0, MAX_MSG_CHARS);
     return `${speaker}: ${content}`;
   });
 
