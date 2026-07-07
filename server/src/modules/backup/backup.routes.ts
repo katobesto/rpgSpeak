@@ -65,20 +65,32 @@ async function performRestore(archivePath: string, app: FastifyInstance): Promis
 export async function backupRoutes(app: FastifyInstance) {
 
   // ── GET /api/backup/download ────────────────────────────────────────────────
-  // Streams the entire data/ folder as a .tar.gz archive.
+  // Streams the data/ folder as a .tar.gz archive.
+  // Query: includeImages=false → excluye data/images (que puede pesar cientos de
+  // MB y hacer inviable la descarga; el cliente la bufferiza en un blob). Sin
+  // imágenes el backup es solo la BD + workflows + TTS (unos MB), rápido y fiable.
   app.get('/download', { preHandler: requireAdmin }, async (req, reply) => {
-    const date     = new Date().toISOString().split('T')[0];
-    const filename = `rpgspeak-backup-${date}.tar.gz`;
+    const { includeImages } = req.query as { includeImages?: string };
+    const excludeImages = includeImages === 'false';
 
-    app.log.info(`[backup] download requested by ${(req as any).user?.username}`);
+    const date     = new Date().toISOString().split('T')[0];
+    const filename = `rpgspeak-backup-${date}${excludeImages ? '-sin-imagenes' : ''}.tar.gz`;
+
+    app.log.info(`[backup] download requested by ${(req as any).user?.username} (imágenes: ${excludeImages ? 'excluidas' : 'incluidas'})`);
 
     reply.header('Content-Type', 'application/gzip');
     reply.header('Content-Disposition', `attachment; filename="${filename}"`);
     reply.header('Transfer-Encoding', 'chunked');
 
-    // tar -czf - -C <project_root> data
+    // tar -czf - -C <project_root> [--exclude=data/images] data
+    // El --exclude va ANTES del operando `data` (obligatorio en BSD tar/macOS;
+    // GNU tar lo acepta en cualquier posición). Excluye el subárbol completo.
+    const tarArgs = ['-czf', '-', '-C', PROJECT_ROOT];
+    if (excludeImages) tarArgs.push('--exclude=data/images');
+    tarArgs.push('data');
+
     // stdout is a Readable stream → Fastify will pipe it to the response
-    const tar = spawn('tar', ['-czf', '-', '-C', PROJECT_ROOT, 'data'], {
+    const tar = spawn('tar', tarArgs, {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 

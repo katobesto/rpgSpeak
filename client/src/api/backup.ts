@@ -2,15 +2,16 @@ import { getAuthHeader } from './client.ts';
 
 export const backupApi = {
   /**
-   * Downloads the full data/ folder as a .tar.gz archive.
+   * Downloads the data/ folder as a .tar.gz archive.
    * Uses fetch (not a plain link) so the Authorization header is sent.
-   * Returns a { filename, url } where url is a temporary blob URL.
+   * `includeImages=false` excluye data/images (que puede pesar cientos de MB y
+   * hacer que el navegador no complete el blob). Returns { filename, url }.
    */
-  async download(): Promise<{ filename: string; url: string }> {
+  async download(includeImages = true): Promise<{ filename: string; url: string }> {
     const date     = new Date().toISOString().split('T')[0];
-    const filename = `rpgspeak-backup-${date}.tar.gz`;
+    const filename = `rpgspeak-backup-${date}${includeImages ? '' : '-sin-imagenes'}.tar.gz`;
 
-    const resp = await fetch('/api/backup/download', {
+    const resp = await fetch(`/api/backup/download?includeImages=${includeImages}`, {
       method: 'GET',
       headers: { ...getAuthHeader() },
     });

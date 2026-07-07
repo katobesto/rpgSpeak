@@ -3301,6 +3301,11 @@ function StatCard({
 function BackupSection() {
   const [downloading, setDownloading] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
+  // Por defecto SIN imágenes: la carpeta data/images puede pesar cientos de MB y
+  // hacer que el navegador no complete la descarga (el blob se bufferiza en RAM).
+  // El backup solo-BD (personajes, historias, conversaciones, ajustes) pesa unos
+  // MB y es lo esencial. El usuario puede marcar la casilla para el backup completo.
+  const [includeImages, setIncludeImages] = useState(false);
 
   const [restoreFile, setRestoreFile]   = useState<File | null>(null);
   const [confirming, setConfirming]     = useState(false);
@@ -3317,7 +3322,7 @@ function BackupSection() {
     setDownloading(true);
     setDownloadError(null);
     try {
-      const { filename, url } = await backupApi.download();
+      const { filename, url } = await backupApi.download(includeImages);
       const a = document.createElement('a');
       a.href = url;
       a.download = filename;
@@ -3369,10 +3374,28 @@ function BackupSection() {
           <span className="text-sm font-semibold text-text-primary">Descargar backup</span>
         </div>
         <p className="text-xs text-text-muted leading-relaxed">
-          Genera un archivo <code className="bg-white/8 px-1 rounded text-[11px]">.tar.gz</code> con todo
-          el contenido de <code className="bg-white/8 px-1 rounded text-[11px]">data/</code>.
-          El tamaño depende de cuántas imágenes y voces TTS tengas almacenadas.
+          Genera un archivo <code className="bg-white/8 px-1 rounded text-[11px]">.tar.gz</code> con
+          la base de datos (personajes, historias, conversaciones y ajustes), workflows y voces TTS.
         </p>
+
+        {/* Toggle: incluir imágenes */}
+        <label className="flex items-start gap-2.5 cursor-pointer select-none rounded-lg border border-border p-2.5 hover:bg-white/3 transition-colors">
+          <input
+            type="checkbox"
+            checked={includeImages}
+            onChange={(e) => setIncludeImages(e.target.checked)}
+            className="w-4 h-4 rounded mt-0.5 accent-violet-600 flex-shrink-0"
+          />
+          <div>
+            <span className="text-sm font-medium text-text-primary">Incluir imágenes</span>
+            <p className="text-[11px] text-text-muted mt-0.5 leading-relaxed">
+              La carpeta de imágenes (avatares, escenas, fondos) puede pesar <strong>cientos de MB</strong>.
+              Con muchas imágenes, la descarga completa puede fallar o tardar mucho. Desmárcalo para un
+              backup ligero solo con la base de datos.
+            </p>
+          </div>
+        </label>
+
         {downloadError && (
           <p className="text-[11px] text-red-400 flex items-center gap-1">
             <AlertCircle size={11} /> {downloadError}
@@ -3385,7 +3408,7 @@ function BackupSection() {
         >
           {downloading
             ? <><Loader size={14} className="animate-spin" /> Generando…</>
-            : <><HardDriveDownload size={14} /> Descargar backup</>}
+            : <><HardDriveDownload size={14} /> {includeImages ? 'Descargar backup completo' : 'Descargar backup (sin imágenes)'}</>}
         </button>
       </div>
 
