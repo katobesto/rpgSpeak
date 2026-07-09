@@ -356,12 +356,13 @@ INSTRUCCIONES:
 - Cada evento debe encajar de forma natural en el mundo y tono de la historia
 - El campo "disparador" describe QUÉ CONDICIÓN o ACCIÓN desencadena el evento (puede ser una decisión del jugador, llegar a un lugar, un umbral de tiempo, etc.)
 - El campo "descripción" narra QUÉ OCURRE cuando el evento se activa (2-4 frases vívidas y concretas)
+- El campo "ubicación" indica DÓNDE ocurre el evento (nombre del lugar) — permite al narrador guiar al jugador hacia allí. Reparte los eventos entre distintas ubicaciones
 - La importancia (1-10) refleja el impacto narrativo: 8-10 para eventos cruciales de trama, 5-7 para subtramas, 1-4 para eventos de ambiente
 - Varía los tipos: incluye conflictos, revelaciones, encuentros, cambios de estado del mundo, consecuencias de elecciones
 
 Responde ÚNICAMENTE con etiquetas en este formato exacto, una por línea. Sin texto adicional antes ni después.
 
-[EVENTO:título corto y evocador|disparador que activa el evento|descripción de lo que ocurre cuando se activa|importancia del 1 al 10]`,
+[EVENTO:título corto y evocador|disparador que activa el evento|descripción de lo que ocurre cuando se activa|importancia del 1 al 10|ubicación donde ocurre]`,
   // Generación de ubicaciones de historia
   storyLocationGenerationPrompt: `Eres un diseñador de mundos para juegos de rol. A partir del contexto de la historia que se te proporciona, genera exactamente {{NUM_UBICACIONES}} ubicaciones concretas y detalladas que existen en este mundo.
 
@@ -428,7 +429,7 @@ TAGS: <3-5 etiquetas separadas por comas>
 ===FIN PERSONAJE===
 
 (Después, {{NUM_EVENTOS}} eventos, una etiqueta por línea:)
-[EVENTO:título corto|disparador que lo activa|qué ocurre cuando se activa|importancia del 1 al 10]
+[EVENTO:título corto|disparador que lo activa|qué ocurre cuando se activa|importancia del 1 al 10|ubicación donde ocurre (nombre de una de las ubicaciones generadas)]
 
 (Después, {{NUM_UBICACIONES}} ubicaciones, una etiqueta por línea:)
 [UBICACION:nombre|descripción|contenido|salidas|atmósfera]`,

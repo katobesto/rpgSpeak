@@ -28,7 +28,10 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    // Respeta el PORT que asigne el entorno (p. ej. el harness de preview con
+    // autoPort); si no está, usa 5173. dev.sh usa CLIENT_PORT y no exporta PORT,
+    // así que ahí sigue arrancando en 5173 como siempre.
+    port: Number(process.env.PORT) || 5173,
     host: '0.0.0.0',
     allowedHosts: ['katobest.ddns.net'],
     proxy: {

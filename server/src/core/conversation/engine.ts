@@ -958,12 +958,29 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       console.log(`[fast-llm] Analyzing exchange for conversation ${conversationId} (provider: ${settings.fastLlmProviderId}, model: ${settings.fastLlmModelId})`);
       // Strip any [AFINIDAD:...] tags the main LLM may have emitted — fast LLM handles affinity separately
       cleanContent = accumulated.replace(/\[AFINIDAD:[^\]]+\]/gi, '').trimEnd();
+      // Acota el análisis a los personajes que realmente intervienen en este
+      // intercambio: el que responde (modo personaje) + cualquiera nombrado en la
+      // respuesta o en el mensaje del jugador. Evita que personajes vinculados a
+      // la conversación pero AUSENTES de la escena reciban afinidad/memoria.
+      const sceneChars = charsInScene(
+        allCharsInConv,
+        narratorMode ? null : character,
+        cleanContent,
+        userMessageForAnalysis,
+      );
+      const sceneAffinities = characterAffinities.filter((a) =>
+        sceneChars.some((c) => c.id === a.characterId),
+      );
+      if (sceneChars.length < allCharsInConv.length) {
+        const excluded = allCharsInConv.filter((c) => !sceneChars.some((s) => s.id === c.id)).map((c) => c.name);
+        console.log(`[fast-llm] Escena acotada a ${sceneChars.length}/${allCharsInConv.length} personaje(s); excluidos (ausentes): ${excluded.join(', ') || '—'}`);
+      }
       const result = await analyzeExchangeAsync(
         conversationId,
         userMessageForAnalysis,
         cleanContent,
-        allCharsInConv,
-        characterAffinities,
+        sceneChars,
+        sceneAffinities,
         settings.fastLlmProviderId!,
         settings.fastLlmModelId!,
         settings.fastLlmAnalysisPrompt,
@@ -1162,6 +1179,34 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
 }
 
 // ─── Fast LLM Analysis ────────────────────────────────────────────────────────
+
+/**
+ * Restringe el análisis del fast LLM a los personajes presentes en el intercambio:
+ * el que responde (`responder`, null en modo narrador) más cualquiera cuyo nombre
+ * aparezca en la respuesta del asistente o en el mensaje del jugador. Así el modelo
+ * no recibe siquiera a los personajes ausentes y no puede asignarles afinidad ni
+ * memoria.
+ */
+function charsInScene(
+  allChars:          Character[],
+  responder:         Character | null,
+  assistantResponse: string,
+  playerMessage:     string,
+): Character[] {
+  const haystack = `${assistantResponse}\n${playerMessage}`;
+  const isMentioned = (name: string): boolean => {
+    const trimmed = name.trim();
+    if (!trimmed) return false;
+    const escaped = trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    try {
+      // Límite por "no-letra" (soporta acentos) para no casar dentro de otra palabra.
+      return new RegExp(`(?<!\\p{L})${escaped}(?!\\p{L})`, 'iu').test(haystack);
+    } catch {
+      return haystack.toLowerCase().includes(trimmed.toLowerCase());
+    }
+  };
+  return allChars.filter((c) => c.id === responder?.id || isMentioned(c.name));
+}
 
 async function analyzeExchangeAsync(
   conversationId: string,

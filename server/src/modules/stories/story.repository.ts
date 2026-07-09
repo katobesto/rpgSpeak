@@ -6,7 +6,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 /** Normaliza eventos persistidos antes de añadir el campo trigger (evita undefined.trim()). */
 function normalizeEvents(events: StoryEvent[]): StoryEvent[] {
-  return events.map((e) => ({ ...e, trigger: e.trigger ?? '' }));
+  return events.map((e) => ({ ...e, trigger: e.trigger ?? '', location: e.location ?? '' }));
 }
 
 /** Normaliza ubicaciones persistidas con campos antiguos/incompletos. */

@@ -47,6 +47,13 @@ export class OpenAIProvider implements LLMProvider {
 
   private buildBody(request: GenerateRequest, stream: boolean) {
     const reasoning = request.reasoning?.enabled;
+    // Los modelos híbridos de DeepSeek (p.ej. deepseek-v4-flash) tienen el thinking
+    // activado por defecto en su API si el campo se omite — no basta con no enviar
+    // el parámetro para desactivarlo, hay que mandar { type: 'disabled' } explícito.
+    // Detectado por nombre de modelo: "thinking" no es un parámetro OpenAI estándar
+    // y otros backends (OpenAI real, LM Studio, MLX, Oobabooga) pueden rechazarlo
+    // si es un campo desconocido, así que no se envía fuera de DeepSeek.
+    const isDeepSeek = /deepseek/i.test(request.model ?? '');
     return {
       model: request.model ?? '',
       messages: this.normalizeMessages(request.messages),
@@ -65,10 +72,9 @@ export class OpenAIProvider implements LLMProvider {
       // OpenRouter: prevent automatic fallback to alternative (potentially paid) providers.
       ...(request.disableFallbacks ? { allow_fallbacks: false } : {}),
       // DeepSeek V4 thinking mode
-      ...(reasoning ? {
-        thinking: { type: 'enabled' },
-        reasoning_effort: request.reasoning?.effort ?? 'high',
-      } : {}),
+      ...(reasoning ? { thinking: { type: 'enabled' }, reasoning_effort: request.reasoning?.effort ?? 'high' }
+        : isDeepSeek ? { thinking: { type: 'disabled' } }
+        : {}),
     };
   }
 

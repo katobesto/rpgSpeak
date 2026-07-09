@@ -8,9 +8,12 @@ import { StoryAssistant } from '../components/stories/StoryAssistant.tsx';
 import { Avatar } from '../components/ui/Avatar.tsx';
 import { Button } from '../components/ui/Button.tsx';
 import { Modal } from '../components/ui/Modal.tsx';
-import { Plus, Edit2, Trash2, BookOpen, ToggleLeft, ToggleRight, UserCircle, Lock, Eye, Users, X, Search, FileText, Filter, Wand2 } from 'lucide-react';
+import { Plus, Edit2, Trash2, BookOpen, ToggleLeft, ToggleRight, UserCircle, Lock, Eye, Users, X, Search, FileText, Filter, Wand2, Play } from 'lucide-react';
 import type { Story, User } from '@rpgspeak/shared';
 import { useAuthStore } from '../stores/auth.store.ts';
+import { useChatStore } from '../stores/chat.store.ts';
+import { conversationsApi } from '../api/conversations.ts';
+import { useNavigate } from 'react-router-dom';
 
 function useDebounce<T>(value: T, delay = 350): T {
   const [debounced, setDebounced] = useState(value);
@@ -39,6 +42,29 @@ export function StoriesPage() {
   const qc = useQueryClient();
   const isAdmin = useAuthStore((s) => s.isAdmin);
   const currentUserId = useAuthStore((s) => s.user?.id);
+  const navigate = useNavigate();
+  const setActiveConversation = useChatStore((s) => s.setActiveConversation);
+  const setPendingAutoStart   = useChatStore((s) => s.setPendingAutoStart);
+
+  // Comenzar historia: crea una conversación nueva con la historia y sus
+  // personajes vinculados, la marca para auto-iniciar la narración de apertura,
+  // y navega al chat (donde ChatWindow disparará la narración al cargar vacía).
+  const startStory = useMutation({
+    mutationFn: (story: Story) =>
+      conversationsApi.create({
+        title:        story.name,
+        mode:         'story',
+        storyIds:     [story.id],
+        characterIds: story.characters.map((c) => c.characterId),
+      }),
+    onSuccess: (conv) => {
+      setActiveConversation(conv);
+      setPendingAutoStart(conv.id);
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+      setPreviewStory(null);
+      navigate('/');
+    },
+  });
 
   const { data: allCharacters = [] } = useQuery({
     queryKey: ['characters'],
@@ -324,6 +350,14 @@ export function StoriesPage() {
                     >
                       <Eye size={13} />
                     </button>
+                    <Button
+                      size="sm"
+                      onClick={() => startStory.mutate(story)}
+                      disabled={startStory.isPending}
+                      title="Crear un chat nuevo y comenzar la historia"
+                    >
+                      <Play size={12} /> Comenzar
+                    </Button>
                   </div>
                 </div>
               </div>
@@ -394,6 +428,16 @@ export function StoriesPage() {
                   </span>
                 </>
               )}
+            </div>
+
+            {/* Comenzar historia — acción principal del modal */}
+            <div className="flex justify-end pt-2">
+              <Button
+                onClick={() => startStory.mutate(previewStory)}
+                disabled={startStory.isPending}
+              >
+                <Play size={14} /> {startStory.isPending ? 'Creando…' : 'Comenzar historia'}
+              </Button>
             </div>
           </div>
         )}

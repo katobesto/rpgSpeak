@@ -1095,32 +1095,59 @@ function buildLocationsSection(story: Story): string {
 // narrativos. Se inyecta en el footer (cerca del punto de generación) y cambia
 // solo cuando un evento ocurre — el LLM lo marca emitiendo [EVENTO_OCURRIDO:...],
 // que engine.ts parsea y persiste por conversación.
+//
+// Rediseñado como DIRECTOR ACTIVO: la versión anterior listaba 6 eventos en pie
+// de igualdad con la instrucción pasiva "cuando la situación se acerque al
+// disparador, oriéntala" — con un modelo flash eso degeneraba en deriva: nada
+// empujaba al jugador hacia los eventos. Ahora se designa UN destino inmediato
+// (el pendiente de mayor importancia), se destaca su UBICACIÓN, y se exige
+// sembrar un gancho hacia él en cada respuesta, con el resto de eventos como
+// horizonte. Guiar sin railroading: ganchos, no teletransportes.
 function buildPendingEventsBlock(stories: Story[], occurredEventIds: Set<string>): string | null {
   const pending = stories.flatMap((story) =>
     story.persistentEvents.filter((e) => e.trigger.trim() && !occurredEventIds.has(e.id)),
   );
   if (pending.length === 0) return null;
 
-  const top = pending.sort((a, b) => b.importance - a.importance).slice(0, 6);
-  const lines = top.map(
-    (e) =>
-      `- «${e.title}» (importancia ${e.importance}/10)\n` +
-      `  Disparador: ${e.trigger.trim()}\n` +
-      `  Qué ocurre: ${e.description.trim()}`,
-  );
+  const sorted = pending.sort((a, b) => b.importance - a.importance).slice(0, 6);
+  const [next, ...horizon] = sorted;
+
+  const fmtEvent = (e: Story['persistentEvents'][number]) =>
+    `«${e.title}» (importancia ${e.importance}/10)\n` +
+    (e.location?.trim() ? `  Ocurre en: ${e.location.trim()}\n` : '') +
+    `  Disparador: ${e.trigger.trim()}\n` +
+    `  Qué ocurre: ${e.description.trim()}`;
+
+  const nextLocation = next.location?.trim();
+  const horizonPart = horizon.length > 0
+    ? `\n\nEN EL HORIZONTE (después del destino inmediato, no los fuerces aún):\n` +
+      horizon.map((e) => `- «${e.title}»${e.location?.trim() ? ` — en ${e.location.trim()}` : ''}: ${e.trigger.trim()}`).join('\n')
+    : '';
 
   return (
-    `## TRAMA PENDIENTE — DESTINOS NARRATIVOS\n\n` +
-    `Los siguientes eventos de la historia AÚN NO HAN OCURRIDO. Son destinos hacia los que ` +
-    `debe avanzar la narración — no una ruta fija, y NUNCA hechos del pasado:\n\n` +
-    `${lines.join('\n\n')}\n\n` +
-    `CÓMO USARLOS:\n` +
-    `- NO los menciones ni narres como si ya hubieran pasado\n` +
-    `- Cuando la situación se acerque al disparador de un evento, orienta la escena hacia él de forma natural\n` +
-    `- Como mucho UN evento puede ocurrir por respuesta, y solo si su disparador se ha cumplido\n` +
-    `- Cuando narres efectivamente uno de estos eventos, añade al final de tu respuesta (línea separada):\n` +
+    `## TRAMA PENDIENTE — TU TRABAJO COMO DIRECTOR\n\n` +
+    `Estos eventos AÚN NO HAN OCURRIDO. No son una ruta fija, pero la historia debe AVANZAR hacia ellos — ` +
+    `tu trabajo es que el jugador los encuentre, no esperar a que tropiece con ellos.\n\n` +
+    `▶ DESTINO INMEDIATO:\n${fmtEvent(next)}\n\n` +
+    `CÓMO CONDUCIR HACIA EL DESTINO (sin railroading):\n` +
+    `- En CADA respuesta siembra al menos un gancho que apunte hacia el destino inmediato: un rumor, un PNJ ` +
+    `que menciona ${nextLocation ? `«${nextLocation}»` : 'el lugar'}, una señal sensorial, un camino que se abre, una necesidad práctica que ` +
+    `empuja hacia allí.\n` +
+    (nextLocation
+      ? `- El evento ocurre en «${nextLocation}»: si la escena transcurre en otro sitio, da al jugador razones ` +
+        `crecientes para viajar hasta allí. Narra el desplazamiento cuando lo emprenda — nada de teletransportes.\n`
+      : '') +
+    `- Si el jugador ignora los ganchos, NO lo fuerces: sube la intensidad gradualmente (el rumor se convierte ` +
+    `en encargo, el encargo en urgencia, la urgencia en consecuencia que le alcanza donde esté). El mundo se ` +
+    `mueve hacia el evento aunque él se entretenga.\n` +
+    `- Los desvíos del jugador son bienvenidos: atiéndelos con interés y, al agotarse, teje el regreso hacia el ` +
+    `destino con naturalidad.\n` +
+    `- NO menciones ni narres los eventos como si ya hubieran pasado. Como mucho UN evento puede ocurrir por ` +
+    `respuesta, y solo si su disparador se ha cumplido de verdad.\n` +
+    `- Cuando narres efectivamente un evento, añade al final de tu respuesta (línea separada):\n` +
     `[EVENTO_OCURRIDO:título exacto del evento]\n` +
-    `- No emitas esa etiqueta si el evento aún no ha sucedido en tu narración`
+    `- No emitas esa etiqueta si el evento aún no ha sucedido en tu narración.` +
+    horizonPart
   );
 }
 

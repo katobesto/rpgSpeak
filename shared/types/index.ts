@@ -165,6 +165,10 @@ export interface StoryEvent {
   title: string;
   description: string;
   trigger: string;   // What triggers this event (optional, may be empty string)
+  /** Dónde ocurre el evento (nombre de ubicación, texto libre; opcional).
+   *  Permite al narrador GUIAR al jugador hacia el lugar del evento en vez de
+   *  esperar pasivamente a que el disparador se cumpla. */
+  location?: string;
   timestamp: string;
   importance: number;
 }

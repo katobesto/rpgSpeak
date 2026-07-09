@@ -10,7 +10,7 @@ import { ChatSearchModal } from './ChatSearchModal.tsx';
 import { ImageGalleryModal } from './ImageGalleryModal.tsx';
 import { BackgroundGeneratorModal } from './BackgroundGeneratorModal.tsx';
 import { BattleModal } from './BattleModal.tsx';
-import { useChatStore } from '../../stores/chat.store.ts';
+import { useChatStore, STORY_KICKOFF_MSG } from '../../stores/chat.store.ts';
 import { useAuthStore } from '../../stores/auth.store.ts';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { messagesApi, conversationsApi } from '../../api/conversations.ts';
@@ -53,6 +53,7 @@ export function ChatWindow() {
   const {
     activeConversation, setMessages, messages, setActiveConversation,
     addMessage, updateCurrentLocation, sendMessage,
+    pendingAutoStart, setPendingAutoStart, isStreaming,
   } = useChatStore();
   const isAdmin = useAuthStore((s) => s.isAdmin);
   const user = useAuthStore((s) => s.user);
@@ -141,6 +142,13 @@ export function ChatWindow() {
   useBackHandler(anyModalOpen, closeTopModal);
   const messageListRef = useRef<MessageListHandle>(null);
 
+  // El mensaje de arranque de historia se oculta de la vista (dispara la
+  // narración de apertura pero no debe verse como un turno del jugador).
+  const visibleMessages = React.useMemo(
+    () => messages.filter((m) => !(m.role === 'user' && m.content === STORY_KICKOFF_MSG)),
+    [messages],
+  );
+
   const convId = activeConversation?.id;
 
   const { data: fetchedMessages } = useQuery({
@@ -170,6 +178,20 @@ export function ChatWindow() {
       setTitleValue(activeConversation.title);
     }
   }, [activeConversation]);
+
+  // ── Auto-inicio de historia ────────────────────────────────────────────────
+  // Al "Comenzar historia" se crea la conversación y se marca pendingAutoStart.
+  // Cuando su lista de mensajes ha cargado y está VACÍA, se dispara la narración
+  // de apertura en modo narrador. Se consume el flag primero para no repetir.
+  useEffect(() => {
+    if (!activeConversation || !pendingAutoStart) return;
+    if (activeConversation.id !== pendingAutoStart) return;
+    if (isStreaming) return;
+    if (fetchedMessages === undefined) return;           // aún cargando
+    if (fetchedMessages.length > 0) { setPendingAutoStart(null); return; } // no es nueva
+    setPendingAutoStart(null);
+    void sendMessage({ message: STORY_KICKOFF_MSG, forceNarratorMode: true });
+  }, [activeConversation, pendingAutoStart, fetchedMessages, isStreaming, setPendingAutoStart, sendMessage]);
 
   // Close more menu on outside click
   useEffect(() => {
@@ -486,7 +508,7 @@ export function ChatWindow() {
         <div className="relative flex-1 flex flex-col min-h-0">
           <MessageList
             ref={messageListRef}
-            messages={messages}
+            messages={visibleMessages}
             characters={characters}
             highlightedMessageId={highlightedMessageId}
           />

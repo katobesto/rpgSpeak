@@ -120,7 +120,7 @@ export function StoryEditor({ story, open, onClose }: StoryEditorProps) {
   function addEvent() {
     set('persistentEvents', [
       ...form.persistentEvents,
-      { id: randomId(), title: '', description: '', trigger: '', timestamp: new Date().toISOString(), importance: 5 },
+      { id: randomId(), title: '', description: '', trigger: '', location: '', timestamp: new Date().toISOString(), importance: 5 },
     ]);
   }
 
@@ -306,6 +306,10 @@ export function StoryEditor({ story, open, onClose }: StoryEditorProps) {
                 <Button size="sm" variant="outline" onClick={addEvent}><Plus size={13} /> Add Event</Button>
               </div>
             </div>
+            {/* Sugerencias de ubicación para los eventos: las definidas en la pestaña Ubicaciones */}
+            <datalist id="story-location-names">
+              {form.locations.map((l) => l.name.trim()).filter(Boolean).map((n) => <option key={n} value={n} />)}
+            </datalist>
             {form.persistentEvents.map((ev, i) => (
               <div key={ev.id} className="rounded-xl border border-border p-4 space-y-3">
                 <div className="flex justify-between items-center">
@@ -320,6 +324,16 @@ export function StoryEditor({ story, open, onClose }: StoryEditorProps) {
                   onChange={(e) => updateEvent(i, 'trigger', e.target.value)}
                   placeholder="¿Qué condición activa este evento? (acción del jugador, lugar, tiempo...)"
                 />
+                <div className="flex flex-col gap-1">
+                  <label className="text-xs font-medium text-text-secondary">Ubicación</label>
+                  <input
+                    list="story-location-names"
+                    value={ev.location ?? ''}
+                    onChange={(e) => updateEvent(i, 'location', e.target.value)}
+                    placeholder="¿Dónde ocurre? El narrador guiará al jugador hacia este lugar"
+                    className="rounded-lg px-3 py-2 text-sm bg-surface-2 border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+                  />
+                </div>
                 <Textarea label="Description" value={ev.description} onChange={(e) => updateEvent(i, 'description', e.target.value)} rows={2} />
                 <div className="flex flex-col gap-1">
                   <label className="text-xs font-medium text-text-secondary">Importance: {ev.importance}</label>

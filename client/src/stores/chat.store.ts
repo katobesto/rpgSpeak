@@ -3,6 +3,12 @@ import type { Conversation, Message, DeathLoopState } from '@rpgspeak/shared';
 import { streamGenerate, type AffinityUpdate } from '../api/client.ts';
 import { messagesApi } from '../api/conversations.ts';
 
+/** Mensaje oculto que dispara la narración de apertura al comenzar una historia.
+ *  Se filtra de la vista por su contenido (así también queda oculto tras recargar,
+ *  ya que el servidor lo persiste como cualquier mensaje de usuario). */
+export const STORY_KICKOFF_MSG =
+  'Narrador, comienza la historia: presenta la escena de apertura —el momento y el lugar donde arranca— y sitúame en ella. No esperes mi intervención.';
+
 interface StreamingState {
   isStreaming: boolean;
   streamingContent: string;
@@ -23,6 +29,11 @@ interface ChatState extends StreamingState {
   // Narrator mode
   narratorMode: boolean;
   setNarratorMode: (v: boolean) => void;
+
+  // Id de la conversación que debe auto-iniciar su narración de apertura al
+  // abrirse vacía (fijado al "Comenzar historia"). Se consume una sola vez.
+  pendingAutoStart: string | null;
+  setPendingAutoStart: (conversationId: string | null) => void;
 
   setActiveConversation: (conv: Conversation | null) => void;
   updateCharacterAffinities: (updates: AffinityUpdate[]) => void;
@@ -89,7 +100,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
   selectedProviderId: null,
   selectedModelId: null,
   narratorMode: false,
+  pendingAutoStart: null,
   lastAttemptedMessage: null,
+
+  setPendingAutoStart: (conversationId) => set({ pendingAutoStart: conversationId }),
 
   setProviderModel: (providerId, modelId) =>
     set({ selectedProviderId: providerId, selectedModelId: modelId }),

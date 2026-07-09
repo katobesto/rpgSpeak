@@ -12,7 +12,8 @@ const service = new StoryService();
 
 // ─── Parser for generated events ─────────────────────────────────────────────
 
-const EVENT_TAG_RE = /\[EVENTO:([^\]|]+)\|([^\]|]+)\|([^\]|]+)\|(\d+)\]/g;
+// 5º campo (ubicación) opcional — retrocompatible con etiquetas de 4 campos.
+const EVENT_TAG_RE = /\[EVENTO:([^\]|]+)\|([^\]|]+)\|([^\]|]+)\|(\d+)(?:\|([^\]|]*))?\]/g;
 
 // ─── Parser for generated locations ──────────────────────────────────────────
 
@@ -39,10 +40,31 @@ function parseGeneratedEvents(text: string): Omit<StoryEvent, 'id' | 'timestamp'
     const trigger     = m[2].trim();
     const description = m[3].trim();
     const importance  = Math.min(10, Math.max(1, parseInt(m[4], 10)));
+    const location    = (m[5] ?? '').trim();
     if (!title) continue;
-    events.push({ title, trigger, description, importance });
+    events.push({ title, trigger, description, importance, location });
   }
   return events;
+}
+
+/** Refuerzo de formato añadido EN CÓDIGO tras la plantilla (que vive en BD y
+ *  puede ser antigua): pide el 5º campo (ubicación) anclado a las ubicaciones
+ *  definidas de la historia, para que el narrador pueda GUIAR al jugador hacia
+ *  el lugar de cada evento. */
+function eventLocationFormatAppendix(locations: StoryLocation[]): string {
+  const names = locations.map((l) => l.name.trim()).filter(Boolean);
+  const anchor = names.length > 0
+    ? `Usa PREFERENTEMENTE una de las ubicaciones definidas de la historia: ${names.join(' · ')}. ` +
+      `Solo si ningún lugar definido encaja, describe brevemente uno nuevo coherente con el mundo.`
+    : `Describe brevemente el lugar (aún no hay ubicaciones definidas en la historia).`;
+  return (
+    `\n\nFORMATO OBLIGATORIO DE LAS ETIQUETAS DE EVENTO — 5 campos:\n` +
+    `[EVENTO:título|disparador|descripción|importancia|ubicación donde ocurre]\n` +
+    `El 5º campo (ubicación) es OBLIGATORIO: indica DÓNDE ocurre el evento, para que el narrador pueda ` +
+    `conducir la historia hacia ese lugar. ${anchor}\n` +
+    `Reparte los eventos entre DISTINTAS ubicaciones cuando tenga sentido: eso crea un recorrido por el mundo, ` +
+    `no una sucesión de escenas en el mismo sitio.`
+  );
 }
 
 // ─── Story-assistant helpers ─────────────────────────────────────────────────
@@ -170,7 +192,8 @@ export const storyRoutes: FastifyPluginAsync = async (app) => {
     const promptTemplate = settings.get('storyEventGenerationPrompt') as string;
     const prompt = promptTemplate
       .replace('{{NUM_EVENTOS}}',      String(numEvents))
-      .replace('{{CONTEXTO_HISTORIA}}', storyContext);
+      .replace('{{CONTEXTO_HISTORIA}}', storyContext)
+      + eventLocationFormatAppendix(story.locations ?? []);
 
     const llmResult = await llm.generate({
       messages: [
@@ -311,7 +334,14 @@ export const storyRoutes: FastifyPluginAsync = async (app) => {
       .replace(/\{\{NUM_EVENTOS\}\}/g,     String(briefing.numEvents))
       .replace(/\{\{NUM_UBICACIONES\}\}/g, String(briefing.numLocations))
       .replace('{{PERSONAJES_SUGERIDOS}}', hintsText)
-      .replace('{{EXTRA}}',                briefing.extra.trim() || '(ninguna)');
+      .replace('{{EXTRA}}',                briefing.extra.trim() || '(ninguna)')
+      // El asistente genera eventos Y ubicaciones a la vez: los eventos deben
+      // anclarse a las ubicaciones que él mismo crea (mismos nombres).
+      + `\n\nFORMATO OBLIGATORIO DE LOS EVENTOS — 5 campos:\n` +
+      `[EVENTO:título|disparador|descripción|importancia|ubicación donde ocurre]\n` +
+      `El 5º campo (ubicación) es OBLIGATORIO y debe coincidir con el NOMBRE de una de las ubicaciones que ` +
+      `generes en este mismo diseño — así el narrador podrá conducir al jugador hacia el lugar de cada evento. ` +
+      `Reparte los eventos entre distintas ubicaciones para que la historia recorra el mundo.`;
 
     const llmResult = await llm.generate({
       messages: [
