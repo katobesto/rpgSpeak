@@ -77,6 +77,8 @@ export function ChatWindow() {
   const [backgroundModalOpen, setBackgroundModalOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [battleOpen, setBattleOpen] = useState(false);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [exporting, setExporting] = useState(false);
 
   // ── Regreso después de la muerte ─────────────────────────────────────────
   const deathLoop =
@@ -127,8 +129,10 @@ export function ChatWindow() {
 
   // Close topmost open modal/panel on mobile swipe-back
   const anyModalOpen = groupPanelOpen || summaryModalOpen || statsModalOpen ||
-    contextModalOpen || galleryOpen || anchorModalOpen || locationsModalOpen || searchOpen || battleOpen;
+    contextModalOpen || galleryOpen || anchorModalOpen || locationsModalOpen || searchOpen || battleOpen ||
+    exportDialogOpen;
   const closeTopModal = useCallback(() => {
+    if (exportDialogOpen)   { setExportDialogOpen(false);   return; }
     if (battleOpen)         { setBattleOpen(false);         return; }
     if (searchOpen)         { setSearchOpen(false);         return; }
     if (galleryOpen)        { setGalleryOpen(false);        return; }
@@ -139,7 +143,7 @@ export function ChatWindow() {
     if (statsModalOpen)     { setStatsModalOpen(false);     return; }
     if (contextModalOpen)   { setContextModalOpen(false);   return; }
   }, [battleOpen, searchOpen, galleryOpen, anchorModalOpen, locationsModalOpen,
-      groupPanelOpen, summaryModalOpen, statsModalOpen, contextModalOpen]);
+      groupPanelOpen, summaryModalOpen, statsModalOpen, contextModalOpen, exportDialogOpen]);
   useBackHandler(anyModalOpen, closeTopModal);
   const messageListRef = useRef<MessageListHandle>(null);
 
@@ -308,23 +312,23 @@ export function ChatWindow() {
     updateActiveChar.mutate(id);
   }
 
-  const [exporting, setExporting] = useState(false);
-  async function handleExportChat() {
+  async function handleExportChat(includeImages: boolean) {
     if (!activeConversation || exporting) return;
     setExporting(true);
     try {
-      const pkg = await conversationsApi.exportChat(activeConversation.id);
+      const pkg = await conversationsApi.exportChat(activeConversation.id, includeImages);
       const blob = new Blob([JSON.stringify(pkg)], { type: 'application/json' });
       const url  = URL.createObjectURL(blob);
       const safeTitle = (activeConversation.title || 'chat').replace(/[^\w-]+/g, '_').slice(0, 40) || 'chat';
       const date = new Date().toISOString().split('T')[0];
       const a = document.createElement('a');
       a.href = url;
-      a.download = `rpgspeak-chat-${safeTitle}-${date}.json`;
+      a.download = `rpgspeak-chat-${safeTitle}-${date}${includeImages ? '' : '-sin-imagenes'}.json`;
       document.body.appendChild(a);
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
+      setExportDialogOpen(false);
     } catch (err) {
       console.error('[export] Error al exportar el chat:', err);
       window.alert('No se pudo exportar el chat.');
@@ -509,14 +513,11 @@ export function ChatWindow() {
                 </button>
                 <div className="my-1 h-px" style={{ background: 'var(--border)' }} />
                 <button
-                  onClick={() => { setMoreMenuOpen(false); void handleExportChat(); }}
-                  disabled={exporting}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-white/5 text-left disabled:opacity-50"
+                  onClick={() => { setMoreMenuOpen(false); setExportDialogOpen(true); }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-white/5 text-left"
                 >
                   <Download size={13} className="text-text-muted" />
-                  <span className="text-xs text-text-primary">
-                    {exporting ? 'Exportando…' : 'Exportar chat (con personajes e historias)'}
-                  </span>
+                  <span className="text-xs text-text-primary">Exportar chat (con personajes e historias)</span>
                 </button>
               </div>
             )}
@@ -720,7 +721,87 @@ export function ChatWindow() {
           }}
         />
       )}
+
+      {exportDialogOpen && (
+        <ExportChatDialog
+          exporting={exporting}
+          onClose={() => setExportDialogOpen(false)}
+          onExport={(includeImages) => void handleExportChat(includeImages)}
+        />
+      )}
     </div>
+  );
+}
+
+// ─── Export Chat Dialog ───────────────────────────────────────────────────────
+
+function ExportChatDialog({ exporting, onClose, onExport }: {
+  exporting: boolean;
+  onClose: () => void;
+  onExport: (includeImages: boolean) => void;
+}) {
+  const [includeImages, setIncludeImages] = useState(true);
+
+  return (
+    <ConfirmOverlay onClose={onClose}>
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+        <div className="flex items-center gap-2">
+          <Download size={15} className="text-accent" />
+          <p className="font-semibold text-sm">Exportar chat</p>
+        </div>
+        <button onClick={onClose} className="p-1 rounded-lg hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors">
+          <X size={15} />
+        </button>
+      </div>
+
+      {/* Body */}
+      <div className="p-5 space-y-4">
+        <p className="text-xs text-text-muted leading-relaxed">
+          Se descargará un archivo con la conversación y todo lo necesario para restaurarla en otra
+          instancia: personajes e historias completos, mensajes, memoria y contexto.
+        </p>
+
+        <button
+          onClick={() => setIncludeImages((v) => !v)}
+          className={`w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left ${
+            includeImages ? 'border-accent/50 bg-accent/5' : 'border-border hover:border-border/80'
+          }`}
+        >
+          <div className={`w-4 h-4 rounded border flex-shrink-0 flex items-center justify-center transition-colors ${
+            includeImages ? 'border-accent bg-accent' : 'border-border'
+          }`}>
+            {includeImages && <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1.5 5l2.5 2.5 4.5-4.5" stroke="white" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round"/></svg>}
+          </div>
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-text-primary">Incluir imágenes</p>
+            <p className="text-[10px] text-text-muted leading-relaxed mt-0.5">
+              Avatares, galerías y fondos. Da un archivo fiel pero mucho más grande; sin ellas el
+              archivo es ligero (recomendado si el chat pesa mucho o vas a importarlo en producción).
+            </p>
+          </div>
+        </button>
+      </div>
+
+      {/* Footer */}
+      <div className="flex gap-2 px-5 pb-5">
+        <button
+          onClick={onClose}
+          className="flex-1 py-2 rounded-xl text-sm border border-border text-text-secondary hover:text-text-primary transition-colors"
+        >
+          Cancelar
+        </button>
+        <button
+          onClick={() => onExport(includeImages)}
+          disabled={exporting}
+          className="flex-1 py-2 rounded-xl text-sm font-medium transition-colors disabled:opacity-60"
+          style={{ background: 'var(--accent)', color: '#fff' }}
+        >
+          <Download size={14} className="inline mr-1.5 -mt-0.5" />
+          {exporting ? 'Exportando…' : 'Exportar'}
+        </button>
+      </div>
+    </ConfirmOverlay>
   );
 }
 
