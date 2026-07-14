@@ -33,7 +33,6 @@ import {
   Clock,
   MessagesSquare,
   ChevronRight,
-  ChevronDown,
   Images,
   SlidersHorizontal,
   UserCircle,
@@ -45,6 +44,8 @@ import {
   ImagePlus,
   Skull,
   RotateCcw,
+  Download,
+  Upload,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar.tsx';
 import type { Character, Story, Conversation, User, ConversationBackground, PartyState, DeathLoopState } from '@rpgspeak/shared';
@@ -307,6 +308,31 @@ export function ChatWindow() {
     updateActiveChar.mutate(id);
   }
 
+  const [exporting, setExporting] = useState(false);
+  async function handleExportChat() {
+    if (!activeConversation || exporting) return;
+    setExporting(true);
+    try {
+      const pkg = await conversationsApi.exportChat(activeConversation.id);
+      const blob = new Blob([JSON.stringify(pkg)], { type: 'application/json' });
+      const url  = URL.createObjectURL(blob);
+      const safeTitle = (activeConversation.title || 'chat').replace(/[^\w-]+/g, '_').slice(0, 40) || 'chat';
+      const date = new Date().toISOString().split('T')[0];
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `rpgspeak-chat-${safeTitle}-${date}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('[export] Error al exportar el chat:', err);
+      window.alert('No se pudo exportar el chat.');
+    } finally {
+      setExporting(false);
+    }
+  }
+
   if (!activeConversation) {
     return (
       <EmptyState
@@ -480,6 +506,17 @@ export function ChatWindow() {
                 >
                   <BarChart2 size={13} className="text-text-muted" />
                   <span className="text-xs text-text-primary">Estadísticas</span>
+                </button>
+                <div className="my-1 h-px" style={{ background: 'var(--border)' }} />
+                <button
+                  onClick={() => { setMoreMenuOpen(false); void handleExportChat(); }}
+                  disabled={exporting}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-white/5 text-left disabled:opacity-50"
+                >
+                  <Download size={13} className="text-text-muted" />
+                  <span className="text-xs text-text-primary">
+                    {exporting ? 'Exportando…' : 'Exportar chat (con personajes e historias)'}
+                  </span>
                 </button>
               </div>
             )}
@@ -1280,47 +1317,6 @@ function relativeTime(iso: string): string {
   return new Date(iso).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' });
 }
 
-function SectionHeader({
-  icon, title, count, isOpen, onToggle,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  count?: number;
-  isOpen?: boolean;
-  onToggle?: () => void;
-}) {
-  const inner = (
-    <div className="flex items-center gap-2.5 mb-0 w-full">
-      <div className="text-accent">{icon}</div>
-      <h2 className="text-sm font-semibold text-text-primary tracking-tight">{title}</h2>
-      {count !== undefined && (
-        <span className="ml-1 text-[11px] text-text-muted bg-surface-2 border border-border px-1.5 py-0.5 rounded-full tabular-nums">
-          {count}
-        </span>
-      )}
-      <div className="flex-1 h-px ml-2" style={{ background: 'var(--border)' }} />
-      {onToggle !== undefined && (
-        <ChevronDown
-          size={15}
-          className={`text-text-muted flex-shrink-0 transition-transform duration-200 ${isOpen ? '' : '-rotate-90'}`}
-        />
-      )}
-    </div>
-  );
-
-  if (onToggle) {
-    return (
-      <button
-        onClick={onToggle}
-        className="w-full flex items-center mb-4 hover:opacity-80 transition-opacity text-left"
-      >
-        {inner}
-      </button>
-    );
-  }
-  return <div className="flex items-center mb-4">{inner}</div>;
-}
-
 // ─── Empty state / Home screen ────────────────────────────────────────────────
 
 type StartParams = { title: string; characterIds: string[]; storyIds: string[] };
@@ -1346,10 +1342,38 @@ function EmptyState({
   const [confirmChar,  setConfirmChar]  = useState<Character | null>(null);
   const [confirmStory, setConfirmStory] = useState<Story | null>(null);
 
-  // ── Acordeón — sección 1 abierta, 2 y 3 cerradas por defecto ──────────────
-  const [sec1Open, setSec1Open] = useState(true);
-  const [sec2Open, setSec2Open] = useState(false);
-  const [sec3Open, setSec3Open] = useState(false);
+  // ── Pestaña activa ───────────────────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<'chats' | 'characters' | 'stories'>('chats');
+
+  // ── Importar chat ────────────────────────────────────────────────────────
+  const qc = useQueryClient();
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+
+  async function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ''; // permite reimportar el mismo fichero
+    if (!file || importing) return;
+    setImporting(true);
+    try {
+      const pkg = JSON.parse(await file.text());
+      const created = await conversationsApi.importChat(pkg);
+      // Import es aditivo: refresca conversaciones, personajes e historias.
+      qc.invalidateQueries({ queryKey: ['conversations'] });
+      qc.invalidateQueries({ queryKey: ['characters'] });
+      qc.invalidateQueries({ queryKey: ['stories'] });
+      onSelectConversation(created); // abre el chat recién importado
+    } catch (err) {
+      console.error('[import] Error al importar el chat:', err);
+      window.alert(
+        err instanceof SyntaxError
+          ? 'El archivo no es un paquete de chat válido (JSON ilegible).'
+          : 'No se pudo importar el chat. Comprueba que el archivo es un export de rpgSpeak.',
+      );
+    } finally {
+      setImporting(false);
+    }
+  }
 
   // ── Filtros ────────────────────────────────────────────────────────────────
   const [search, setSearch]           = useState('');
@@ -1366,57 +1390,145 @@ function EmptyState({
   const activeFilters = !!(search || charFilter || storyFilter || userFilter);
   function clearFilters() { setSearch(''); setCharFilter(''); setStoryFilter(''); setUserFilter(''); }
 
-  // Sort + filter conversations (client-side sobre los datos ya cargados)
+  const q = search.trim().toLowerCase();
+
+  // Nombres de los personajes de una conversación (para poder buscar por ellos)
+  const convCharNames = useCallback((c: Conversation) =>
+    c.characters
+      .map((l) => allCharacters.find((ch) => ch.id === l.characterId)?.name ?? '')
+      .join(' ')
+      .toLowerCase(),
+  [allCharacters]);
+
+  // Sort + filter conversations (client-side sobre los datos ya cargados).
+  // La búsqueda de texto cubre título, resumen y nombres de personajes.
   const sortedConvs = [...conversations]
     .filter((c) => !c.isArchived)
-    .filter((c) => !search     || c.title.toLowerCase().includes(search.toLowerCase()))
+    .filter((c) => !q ||
+      c.title.toLowerCase().includes(q) ||
+      (c.summary?.toLowerCase().includes(q) ?? false) ||
+      convCharNames(c).includes(q))
     .filter((c) => !charFilter  || c.characters.some((l) => l.characterId === charFilter))
     .filter((c) => !storyFilter || c.stories.some((l) => l.storyId === storyFilter))
     .filter((c) => !userFilter  || c.userId === userFilter)
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
 
+  // La misma búsqueda de texto aplica a personajes e historias (por nombre y descripción)
+  const filteredChars = characters.filter((c) =>
+    !q || c.name.toLowerCase().includes(q) || (c.description?.toLowerCase().includes(q) ?? false));
+  const filteredStories = stories.filter((s) =>
+    !q || s.name.toLowerCase().includes(q) || (s.description?.toLowerCase().includes(q) ?? false));
+
+  const completelyEmpty = characters.length === 0 && stories.length === 0 &&
+    [...conversations].filter((c) => !c.isArchived).length === 0;
+
+  const tabs = [
+    { id: 'chats'      as const, icon: <MessagesSquare size={15} />, label: 'Chats',       count: sortedConvs.length },
+    { id: 'characters' as const, icon: <Users size={15} />,          label: 'Personajes',  count: filteredChars.length },
+    { id: 'stories'    as const, icon: <BookOpen size={15} />,       label: 'Historias',   count: filteredStories.length },
+  ];
+
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-4xl mx-auto px-6 py-8 space-y-10">
+      <div className="max-w-4xl mx-auto px-6 py-8">
 
-        {/* ── 1. Historias comenzadas ──────────────────────────────────────── */}
-        <section>
-          <SectionHeader
-            icon={<MessagesSquare size={16} />}
-            title="Historias comenzadas"
-            count={sortedConvs.length}
-            isOpen={sec1Open}
-            onToggle={() => setSec1Open((v) => !v)}
-          />
+        {/* Input oculto para importar — compartido por ambos estados */}
+        <input
+          ref={importInputRef}
+          type="file"
+          accept=".json,application/json"
+          className="hidden"
+          onChange={handleImportFile}
+        />
 
-          {sec1Open && (<>
-          {/* Barra de filtros */}
-          <div className="flex flex-wrap items-center gap-2 mb-4 p-3 rounded-xl border border-border"
-            style={{ background: 'var(--surface-2)' }}>
-            {/* Búsqueda por título */}
-            <div className="relative flex items-center flex-1 min-w-[160px]">
-              <Search size={13} className="absolute left-2.5 text-text-muted pointer-events-none" />
-              <input
-                type="text"
-                placeholder="Buscar por título..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-7 pr-6 py-1.5 rounded-lg text-xs border border-border bg-transparent text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
-              />
-              {search && (
-                <button onClick={() => setSearch('')} className="absolute right-2 text-text-muted hover:text-text-primary">
-                  <X size={11} />
-                </button>
-              )}
+        {completelyEmpty ? (
+          /* Estado completamente vacío */
+          <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
+            <Zap size={36} className="text-accent opacity-60" />
+            <div>
+              <h2 className="text-lg font-bold mb-1">Bienvenido a rpgSpeak</h2>
+              <p className="text-sm text-text-muted max-w-xs">
+                Crea personajes y mundos en las páginas de Personajes e Historias para comenzar a jugar.
+              </p>
             </div>
+            <button
+              onClick={() => importInputRef.current?.click()}
+              disabled={importing}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm border border-border text-text-secondary hover:text-accent hover:border-accent/50 transition-colors disabled:opacity-50"
+            >
+              <Upload size={15} />
+              {importing ? 'Importando…' : 'Importar un chat'}
+            </button>
+          </div>
+        ) : (<>
 
+        {/* ── Buscador global (afecta a las tres pestañas) + importar ──────── */}
+        <div className="flex items-center gap-2 mb-4">
+          <div className="relative flex items-center flex-1">
+            <Search size={15} className="absolute left-3 text-text-muted pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Buscar en chats, personajes e historias..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-9 pr-8 py-2.5 rounded-xl text-sm border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:ring-1 focus:ring-accent"
+              style={{ background: 'var(--surface-2)' }}
+            />
+            {search && (
+              <button onClick={() => setSearch('')} className="absolute right-3 text-text-muted hover:text-text-primary">
+                <X size={14} />
+              </button>
+            )}
+          </div>
+          <button
+            onClick={() => importInputRef.current?.click()}
+            disabled={importing}
+            title="Importar un chat exportado (con sus personajes e historias)"
+            className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm border border-border text-text-secondary hover:text-accent hover:border-accent/50 transition-colors disabled:opacity-50 flex-shrink-0"
+          >
+            <Upload size={15} />
+            <span className="hidden sm:inline">{importing ? 'Importando…' : 'Importar'}</span>
+          </button>
+        </div>
+
+        {/* ── Pestañas ─────────────────────────────────────────────────────── */}
+        <div className="flex items-center gap-1 p-1 mb-6 rounded-xl border border-border w-full sm:w-fit"
+          style={{ background: 'var(--surface-2)' }}>
+          {tabs.map((t) => {
+            const active = activeTab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => setActiveTab(t.id)}
+                className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                  active ? 'text-white' : 'text-text-muted hover:text-text-primary'
+                }`}
+                style={active ? { background: 'var(--accent)' } : undefined}
+              >
+                {t.icon}
+                <span>{t.label}</span>
+                <span className={`text-[11px] px-1.5 py-0.5 rounded-full tabular-nums ${
+                  active ? 'bg-white/20' : 'bg-surface-1 border border-border'
+                }`}>
+                  {t.count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* ── Pestaña: Chats ───────────────────────────────────────────────── */}
+        {activeTab === 'chats' && (
+        <section>
+          {/* Filtros adicionales de conversaciones */}
+          <div className="flex flex-wrap items-center gap-2 mb-4">
             {/* Historia */}
             <div className="relative flex items-center">
               <select
                 value={storyFilter}
                 onChange={(e) => setStoryFilter(e.target.value)}
                 className="pl-2.5 pr-6 py-1.5 rounded-lg text-xs border border-border appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-accent"
-                style={{ background: 'var(--surface-1)', color: storyFilter ? 'var(--text-primary)' : 'var(--text-muted)', minWidth: '140px' }}
+                style={{ background: 'var(--surface-2)', color: storyFilter ? 'var(--text-primary)' : 'var(--text-muted)', minWidth: '140px' }}
               >
                 <option value="">📖 Todas las historias</option>
                 {stories.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
@@ -1432,7 +1544,7 @@ function EmptyState({
                 value={charFilter}
                 onChange={(e) => setCharFilter(e.target.value)}
                 className="pl-2.5 pr-6 py-1.5 rounded-lg text-xs border border-border appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-accent"
-                style={{ background: 'var(--surface-1)', color: charFilter ? 'var(--text-primary)' : 'var(--text-muted)', minWidth: '140px' }}
+                style={{ background: 'var(--surface-2)', color: charFilter ? 'var(--text-primary)' : 'var(--text-muted)', minWidth: '140px' }}
               >
                 <option value="">👤 Todos los personajes</option>
                 {allCharacters.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -1449,7 +1561,7 @@ function EmptyState({
                   value={userFilter}
                   onChange={(e) => setUserFilter(e.target.value)}
                   className="pl-2.5 pr-6 py-1.5 rounded-lg text-xs border border-border appearance-none cursor-pointer focus:outline-none focus:ring-1 focus:ring-accent"
-                  style={{ background: 'var(--surface-1)', color: userFilter ? 'var(--text-primary)' : 'var(--text-muted)', minWidth: '130px' }}
+                  style={{ background: 'var(--surface-2)', color: userFilter ? 'var(--text-primary)' : 'var(--text-muted)', minWidth: '130px' }}
                 >
                   <option value="">🧑‍💻 Todos los usuarios</option>
                   {allUsers.map((u) => <option key={u.id} value={u.id}>{u.displayName || u.username}</option>)}
@@ -1480,7 +1592,7 @@ function EmptyState({
                 <>
                   <p className="text-sm text-text-muted">Aún no has comenzado ninguna historia.</p>
                   <p className="text-xs text-text-muted opacity-70">
-                    Elige un personaje o una historia de las secciones de abajo para empezar.
+                    Elige un personaje o una historia en las otras pestañas para empezar.
                   </p>
                 </>
               )}
@@ -1582,22 +1694,27 @@ function EmptyState({
               })}
             </div>
           )}
-          </>)}
         </section>
+        )}
 
-        {/* ── 2. Personajes para comenzar una charla ──────────────────────── */}
-        {characters.length > 0 && (
+        {/* ── Pestaña: Personajes ──────────────────────────────────────────── */}
+        {activeTab === 'characters' && (
           <section>
-            <SectionHeader
-              icon={<Users size={16} />}
-              title="Personajes para comenzar una charla"
-              count={characters.length}
-              isOpen={sec2Open}
-              onToggle={() => setSec2Open((v) => !v)}
-            />
-            {sec2Open && (
+            {filteredChars.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border px-6 py-10 text-center space-y-2">
+                <Users size={28} className="text-text-muted mx-auto mb-1 opacity-40" />
+                {q ? (
+                  <>
+                    <p className="text-sm text-text-muted">Ningún personaje coincide con la búsqueda.</p>
+                    <button onClick={() => setSearch('')} className="text-xs text-accent hover:underline">Limpiar búsqueda</button>
+                  </>
+                ) : (
+                  <p className="text-sm text-text-muted">Aún no hay personajes. Créalos en la página de Personajes.</p>
+                )}
+              </div>
+            ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {characters.map((char) => (
+              {filteredChars.map((char) => (
                 <button
                   key={char.id}
                   onClick={() => setConfirmChar(char)}
@@ -1623,19 +1740,24 @@ function EmptyState({
           </section>
         )}
 
-        {/* ── 3. Historias para empezar algo nuevo ────────────────────────── */}
-        {stories.length > 0 && (
+        {/* ── Pestaña: Historias ───────────────────────────────────────────── */}
+        {activeTab === 'stories' && (
           <section>
-            <SectionHeader
-              icon={<BookOpen size={16} />}
-              title="Historias para empezar algo nuevo"
-              count={stories.length}
-              isOpen={sec3Open}
-              onToggle={() => setSec3Open((v) => !v)}
-            />
-            {sec3Open && (
+            {filteredStories.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border px-6 py-10 text-center space-y-2">
+                <BookOpen size={28} className="text-text-muted mx-auto mb-1 opacity-40" />
+                {q ? (
+                  <>
+                    <p className="text-sm text-text-muted">Ninguna historia coincide con la búsqueda.</p>
+                    <button onClick={() => setSearch('')} className="text-xs text-accent hover:underline">Limpiar búsqueda</button>
+                  </>
+                ) : (
+                  <p className="text-sm text-text-muted">Aún no hay historias. Créalas en la página de Historias.</p>
+                )}
+              </div>
+            ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {stories.map((story) => (
+              {filteredStories.map((story) => (
                 <button
                   key={story.id}
                   onClick={() => setConfirmStory(story)}
@@ -1671,18 +1793,7 @@ function EmptyState({
           </section>
         )}
 
-        {/* Estado completamente vacío */}
-        {characters.length === 0 && stories.length === 0 && sortedConvs.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-24 gap-4 text-center">
-            <Zap size={36} className="text-accent opacity-60" />
-            <div>
-              <h2 className="text-lg font-bold mb-1">Bienvenido a rpgSpeak</h2>
-              <p className="text-sm text-text-muted max-w-xs">
-                Crea personajes y mundos en las páginas de Personajes e Historias para comenzar a jugar.
-              </p>
-            </div>
-          </div>
-        )}
+        </>)}
 
       </div>
 

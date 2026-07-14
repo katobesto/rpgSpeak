@@ -7,6 +7,7 @@ import { MessageRepository } from '../messages/message.repository.js';
 import { createConversationSchema, updateConversationSchema, partyStateSchema } from './conversation.schema.js';
 import { ValidationError, NotFoundError } from '../../shared/errors.js';
 import { getDb } from '../../db/index.js';
+import { exportConversation, importConversation, type ChatPackage } from '../chat-transfer/chat-transfer.service.js';
 
 const service = new ConversationService();
 const convRepo = new ConversationRepository();
@@ -52,6 +53,24 @@ export const conversationRoutes: FastifyPluginAsync = async (app) => {
   app.delete<{ Params: { id: string } }>('/:id', async (req, reply) => {
     service.delete(req.params.id);
     return reply.status(204).send();
+  });
+
+  // GET /api/conversations/:id/export — paquete portable (chat + personajes +
+  // historias + imágenes) para restaurar en otra instancia.
+  app.get<{ Params: { id: string } }>('/:id/export', async (req, reply) => {
+    const { userId, role } = (req as any).authUser ?? {};
+    const { includeImages } = req.query as { includeImages?: string };
+    const pkg = exportConversation(req.params.id, { userId, role }, includeImages !== 'false');
+    return reply.send({ success: true, data: pkg });
+  });
+
+  // POST /api/conversations/import — restaura un paquete (aditivo). Personajes e
+  // historias existentes se sobreescriben con lo importado; la conversación se
+  // crea con id nuevo, propiedad del importador.
+  app.post('/import', async (req, reply) => {
+    const { userId } = (req as any).authUser ?? {};
+    const created = importConversation(req.body as ChatPackage, userId ?? null);
+    return reply.status(201).send({ success: true, data: created });
   });
 
   // POST /api/conversations/:id/summarize — fuerza actualización manual del resumen

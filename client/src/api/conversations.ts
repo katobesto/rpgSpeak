@@ -41,6 +41,11 @@ export const conversationsApi = {
   /** Cierra el bucle de muerte manualmente (darlo por superado). */
   clearDeathLoop: (id: string) =>
     api.post<Conversation>(`/conversations/${id}/death-clear`, {}),
+  /** Exporta un chat (con personajes, historias e imágenes) como paquete portable. */
+  exportChat: (id: string, includeImages = true) =>
+    api.get<unknown>(`/conversations/${id}/export?includeImages=${includeImages}`),
+  /** Importa un paquete de chat en esta instancia (aditivo). Devuelve la nueva conversación. */
+  importChat: (pkg: unknown) => api.post<Conversation>('/conversations/import', pkg),
 };
 
 export const messagesApi = {
