@@ -1,5 +1,6 @@
 import type { FastifyPluginAsync } from 'fastify';
 import type { MemoryEntry, BackgroundImage, ConversationBackground } from '@rpgspeak/shared';
+import { matchCharacterName } from '@rpgspeak/shared';
 import { generateStream } from '../../core/conversation/engine.js';
 import { ValidationError, NotFoundError } from '../../shared/errors.js';
 import { z } from 'zod';
@@ -645,7 +646,7 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
     for (const match of [...responseText.matchAll(AFFINITY_RE)]) {
       const name  = match[1].trim();
       let delta   = parseInt(match[2], 10);
-      const found = allCharsInConv.find((c) => c.name.toLowerCase() === name.toLowerCase());
+      const found = matchCharacterName(name, allCharsInConv);
       if (!found) continue;
       if (Math.abs(delta) < 8) continue; // ignore micro-deltas
       const current = characterAffinities.find((a) => a.characterId === found.id)?.affinity ?? 50;

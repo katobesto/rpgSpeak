@@ -1,4 +1,5 @@
 import type { GenerateRequest, Character, Story, Message, Conversation, MemoryEntry, PartyState, DeathLoopState } from '@rpgspeak/shared';
+import { matchCharacterName } from '@rpgspeak/shared';
 import { buildContext, filterWitnessedMessages } from './context-builder.js';
 import { trimContext } from './context-trimmer.js';
 import { createProvider } from '../llm/provider.factory.js';
@@ -996,29 +997,43 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       // antes hacían fallar el match exacto — la etiqueta se emitía pero el
       // cambio de afinidad se descartaba en silencio.
       const AFFINITY_RE = /\[AFINIDAD:\s*([^\]:\n]+?)\s*:\s*([+-]?\d+)\s*\]/gi;
-      const tagMatches = [...accumulated.matchAll(AFFINITY_RE)];
+      // Los modelos de razonamiento (DeepSeek V4, Qwen3…) casi siempre emiten la
+      // etiqueta DENTRO de su razonamiento <think> pese a la instrucción de no
+      // hacerlo — el proveedor envuelve `reasoning_content` en <think>…</think> y
+      // el router del engine lo deriva a `thinkAccumulated`. Como [AFINIDAD] es un
+      // marcador TÉCNICO (no diálogo, se borra antes de mostrarse), lo honramos
+      // venga de donde venga: primero la respuesta visible y, si ahí no hay ninguna,
+      // como fallback el bloque de razonamiento. Antes se ignoraba la del <think> →
+      // con un modelo reasoning la afinidad quedaba CONGELADA para siempre.
+      let tagMatches = [...accumulated.matchAll(AFFINITY_RE)];
+      let tagSource: 'visible' | 'think' = 'visible';
+      if (tagMatches.length === 0 && thinkAccumulated) {
+        const thinkMatches = [...thinkAccumulated.matchAll(AFFINITY_RE)];
+        if (thinkMatches.length > 0) { tagMatches = thinkMatches; tagSource = 'think'; }
+      }
       for (const match of tagMatches) {
         const name  = match[1].replace(/[*_]/g, '').trim();
         const delta = parseInt(match[2], 10);
-        const found = allCharsInConv.find((c) => c.name.toLowerCase() === name.toLowerCase());
+        // Emparejado tolerante (nombre de pila, artículo omitido, markdown) —
+        // ver matchCharacterName en @rpgspeak/shared. Con match exacto estas
+        // etiquetas se descartaban en silencio y la afinidad quedaba congelada.
+        const found = matchCharacterName(name, allCharsInConv);
         if (found) {
           const currentAffinity = conversation.characters.find((l) => l.characterId === found.id)?.affinity ?? 50;
           const newAffinity = Math.max(1, Math.min(100, currentAffinity + delta));
           convRepo.updateCharacterAffinity(conversationId, found.id, newAffinity);
           affinityUpdates.push({ characterId: found.id, newAffinity, previousAffinity: currentAffinity });
-          console.log(`[affinity] ${found.name}: ${currentAffinity} → ${newAffinity} (delta ${delta >= 0 ? '+' : ''}${delta})`);
+          console.log(`[affinity] ${found.name}: ${currentAffinity} → ${newAffinity} (delta ${delta >= 0 ? '+' : ''}${delta})${tagSource === 'think' ? ' [desde <think>]' : ''}`);
         } else {
           console.warn(`[affinity] Etiqueta [AFINIDAD] con nombre desconocido: "${name}" (personajes válidos: ${allCharsInConv.map((c) => c.name).join(', ')})`);
         }
       }
-      // Diagnóstico: si el modelo puso la etiqueta dentro de su razonamiento
-      // <think> en vez de en la respuesta visible, se pierde — avisa en el log.
-      if (tagMatches.length === 0 && thinkAccumulated && AFFINITY_RE.test(thinkAccumulated)) {
-        console.warn('[affinity] El modelo emitió [AFINIDAD:...] dentro del bloque <think> — se ignora. Considera reforzar la instrucción o desactivar reasoning.');
-      } else if (tagMatches.length === 0) {
+      if (tagMatches.length === 0) {
         // Sin etiquetas este turno: normal en turnos triviales, sospechoso si se
         // repite en turnos con carga emocional (instrucción ignorada por el modelo).
         console.log('[affinity] Sin etiquetas [AFINIDAD] en la respuesta de este turno');
+      } else if (tagSource === 'think') {
+        console.log(`[affinity] ${tagMatches.length} etiqueta(s) recuperada(s) del razonamiento <think> (modelo reasoning)`);
       }
       cleanContent = accumulated.replace(/\[AFINIDAD:[^\]]+\]/gi, '').trimEnd();
     }

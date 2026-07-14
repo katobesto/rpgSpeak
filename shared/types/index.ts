@@ -719,3 +719,52 @@ export interface BzWorkflow {
   hasPowerLora?: boolean;
   powerLoras?: BzPowerLora[];
 }
+
+// ─── Resolución tolerante de nombres de personaje ────────────────────────────
+// Los modelos mencionan a los personajes de forma laxa en el texto libre: sueltan
+// el artículo ("Conserje" por "El conserje"), usan solo el nombre de pila ("Yumi"
+// por "Yumi Kanzaki") o añaden énfasis markdown. Un emparejado exacto descartaba
+// esas menciones en silencio → etiquetas [AFINIDAD] perdidas y avatares del que
+// habla sin foto. Esta utilidad centraliza la resolución para todos esos usos.
+
+/** Minúsculas, sin markdown ni artículo inicial en español. */
+export function normalizeCharacterName(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[*_`~]/g, '')
+    .replace(/^(el|la|los|las|un|una)\s+/i, '')
+    .trim();
+}
+
+/**
+ * Empareja un nombre mencionado en texto con uno de los personajes dados.
+ * Estrategias, de más a menos estricta (para en la primera que acierta):
+ *   1. Exacto (case-insensitive).
+ *   2. Normalizado: sin artículo inicial ni markdown ("Conserje" ↔ "El conserje").
+ *   3. Primer token, SOLO si es inequívoco ("Yumi" ↔ "Yumi Kanzaki").
+ * Devuelve el personaje o `undefined` si no hay match seguro (nunca adivina si es ambiguo).
+ */
+export function matchCharacterName<T extends { name: string }>(
+  rawName: string,
+  characters: readonly T[],
+): T | undefined {
+  const cleaned = rawName.replace(/[*_`~]/g, '').trim();
+  if (!cleaned) return undefined;
+  const lc = cleaned.toLowerCase();
+
+  const exact = characters.find((c) => c.name.toLowerCase() === lc);
+  if (exact) return exact;
+
+  const norm = normalizeCharacterName(cleaned);
+  if (!norm) return undefined;
+
+  const normMatch = characters.find((c) => normalizeCharacterName(c.name) === norm);
+  if (normMatch) return normMatch;
+
+  const first = norm.split(/\s+/)[0];
+  if (first) {
+    const byFirst = characters.filter((c) => normalizeCharacterName(c.name).split(/\s+/)[0] === first);
+    if (byFirst.length === 1) return byFirst[0];
+  }
+  return undefined;
+}

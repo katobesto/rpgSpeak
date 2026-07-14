@@ -3,6 +3,7 @@ import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 import { Copy, Edit2, RefreshCw, Trash2, Check, Bug, X, Pin, Volume2, VolumeX, Loader, Wand2, Image as ImageIcon, Zap, ChevronDown, RotateCcw, Rewind, Play, Square, Pause, Download, Share2, Upload, Brain, AlertTriangle } from 'lucide-react';
 import type { Message, ChatMessage } from '@rpgspeak/shared';
+import { matchCharacterName } from '@rpgspeak/shared';
 import { Avatar } from '../ui/Avatar.tsx';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { messagesApi } from '../../api/conversations.ts';
@@ -108,14 +109,12 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
   const isError = Boolean(message.metadata?.isError);
   const isNarrator = !isUser && Boolean(message.metadata?.narrator);
 
-  // Name → character lookup for speaker-avatar injection
-  const charNameMap = useMemo(() => {
-    const map = new Map<string, { name: string; avatar?: string | null }>();
-    for (const c of groupCharacters ?? []) {
-      map.set(c.name.toLowerCase(), { name: c.name, avatar: c.avatar });
-    }
-    return map;
-  }, [groupCharacters]);
+  // Personajes candidatos para asociar la línea de diálogo "**Nombre:**" con su
+  // avatar. El emparejado (más abajo) es tolerante — ver matchCharacterName.
+  const speakerCandidates = useMemo(
+    () => (groupCharacters ?? []).map((c) => ({ name: c.name, avatar: c.avatar })),
+    [groupCharacters],
+  );
 
   const html = useMemo(() => {
     if (!message.content) return '';
@@ -174,14 +173,14 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
       /<p(?:\s[^>]*)?>[ \t]*<strong>([^<:]+?)(?::<\/strong>|<\/strong>:)/gi,
       (match, rawName) => {
         const name = rawName.trim();
-        const char = charNameMap.get(name.toLowerCase());
+        const char = matchCharacterName(name, speakerCandidates);
         const avatarEl = char?.avatar
           ? `<img src="${char.avatar}" alt="${char.name}" />`
           : `<span class="speaker-initials">${name.charAt(0).toUpperCase()}</span>`;
         return `<p class="speaker-line"><span class="speaker-tag">${avatarEl}<strong>${char?.name ?? name}:</strong></span>`;
       }
     );
-  }, [message.content, isNarrator, charNameMap]);
+  }, [message.content, isNarrator, speakerCandidates]);
 
   const updateMutation = useMutation({
     mutationFn: () => messagesApi.update(message.id, editContent),
