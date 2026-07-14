@@ -12,4 +12,6 @@ export const settingsApi = {
   bzComfyLoras: () => api.get<string[]>('/settings/bzcomfy-loras'),
   comfyUiResolutionOptions: () =>
     api.get<{ megapixels: string[]; aspectRatios: string[] }>('/settings/comfyui-resolution-options'),
+  bzComfyResolutionOptions: () =>
+    api.get<{ megapixels: string[]; aspectRatios: string[] }>('/settings/bzcomfy-resolution-options'),
 };

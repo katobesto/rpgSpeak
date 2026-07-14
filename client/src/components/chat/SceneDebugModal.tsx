@@ -231,12 +231,13 @@ export function SceneDebugModal({
     staleTime: 60_000,
   });
 
-  // Fetch the actual combo values from ComfyUI's object_info so they always
-  // match the installed node version exactly (no hardcoded strings).
+  // Fetch the actual combo values from the active provider's FluxResolutionNode so
+  // they always match the installed node version exactly (no hardcoded strings).
+  // bzComfy exposes them at /api/resolution-options; local ComfyUI via object_info.
   const { data: resolutionOptions } = useQuery({
-    queryKey: ['comfyui-resolution-options'],
-    queryFn: settingsApi.comfyUiResolutionOptions,
-    enabled: !isBzComfy && workflowHasResolution,
+    queryKey: [isBzComfy ? 'bzcomfy-resolution-options' : 'comfyui-resolution-options'],
+    queryFn: isBzComfy ? settingsApi.bzComfyResolutionOptions : settingsApi.comfyUiResolutionOptions,
+    enabled: settings != null && workflowHasResolution,
     staleTime: 5 * 60_000,
   });
 
