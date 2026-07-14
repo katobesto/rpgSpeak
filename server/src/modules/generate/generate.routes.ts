@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { ConversationRepository } from '../conversations/conversation.repository.js';
 import { MessageRepository } from '../messages/message.repository.js';
 import { CharacterRepository } from '../characters/character.repository.js';
+import { StoryRepository } from '../stories/story.repository.js';
 import { ProviderRepository } from '../providers/provider.repository.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { createProvider } from '../../core/llm/provider.factory.js';
@@ -145,23 +146,57 @@ async function buildScenePromptText(
     : true;
 
   const charNameMap  = new Map(characters.filter(Boolean).map((c) => [c!.id, c!.name]));
-  const messagesBlock = contextSlice
-    .map((m) => {
-      if (m.role === 'user') {
-        // When user is excluded from the image, label their lines as off-screen narrative
-        // so the LLM doesn't place them physically in the scene
-        const speaker = userExcluded ? 'Narrator (off-screen)' : 'User';
-        return `${speaker}: ${m.content}`;
-      }
-      const charName = m.characterId ? (charNameMap.get(m.characterId) ?? 'Character') : 'Character';
-      return `${charName}: ${m.content}`;
-    })
-    .join('\n\n');
+  const fmtMessage = (m: (typeof contextSlice)[number]): string => {
+    if (m.role === 'user') {
+      // When user is excluded from the image, label their lines as off-screen narrative
+      // so the LLM doesn't place them physically in the scene
+      const speaker = userExcluded ? 'Narrator (off-screen)' : 'User';
+      return `${speaker}: ${m.content}`;
+    }
+    const charName = m.characterId ? (charNameMap.get(m.characterId) ?? 'Character') : 'Character';
+    return `${charName}: ${m.content}`;
+  };
+
+  // Ancla ponderada: el mensaje pinchado es EL instante a representar; los previos
+  // solo aportan continuidad (lugar, vestuario, ánimo), no son beats a dibujar.
+  // Sin esto, los N mensajes entraban planos y el director no sabía qué momento
+  // componer → escenas genéricas.
+  const anchorMsg = contextSlice[contextSlice.length - 1];
+  const leadUp    = contextSlice.slice(0, -1);
+  const messagesBlock = [
+    leadUp.length
+      ? `LEAD-UP (context only — for continuity of setting, wardrobe and mood; do NOT depict these earlier beats):\n${leadUp.map(fmtMessage).join('\n\n')}`
+      : '',
+    anchorMsg
+      ? `>>> THE MOMENT TO DEPICT — build the whole image around THIS beat:\n${fmtMessage(anchorMsg)}`
+      : '',
+  ].filter(Boolean).join('\n\n');
 
   const promptTemplate = settings.get('sceneImagePrompt') as string;
   const filledPrompt = promptTemplate
     .replace('{{characters}}', charactersBlock || '(no character info available)')
     .replace('{{messages}}',   messagesBlock   || '(no messages)');
+
+  // ── Setting / ubicación (continuidad de fondo) ───────────────────────────
+  // La escena hereda la ubicación actual de la conversación; si una historia
+  // vinculada define esa localización, se añade su atmósfera para un fondo estable.
+  let locationBlock = '';
+  const currentLoc = conversation.currentLocation?.trim();
+  if (currentLoc) {
+    let atmosphere = '';
+    try {
+      const storyRepo = new StoryRepository();
+      for (const sl of conversation.stories) {
+        const story = storyRepo.findById(sl.storyId);
+        const loc = story?.locations?.find((l) => l.name.trim().toLowerCase() === currentLoc.toLowerCase());
+        if (loc) {
+          atmosphere = [loc.description, loc.atmosphere].map((s) => s?.trim()).filter(Boolean).join(' — ');
+          break;
+        }
+      }
+    } catch { /* la ubicación por nombre ya es suficiente */ }
+    locationBlock = `\n\nSETTING — where this scene takes place (keep the background consistent with it):\n${currentLoc}${atmosphere ? `\n${atmosphere}` : ''}`;
+  }
 
   // ── Explicit character constraint (appended AFTER the template) ──────────
   // This overrides any inference the LLM might make from the message context.
@@ -176,7 +211,20 @@ async function buildScenePromptText(
     ? `\n\nCRITICAL CONSTRAINT — CHARACTERS IN THE IMAGE:\nOnly portray the following characters: ${includedNames.join(', ')}.\nDo NOT portray any other person, character or figure, even if they appear in the dialogue above.`
     : '';
 
-  return filledPrompt + constraintBlock;
+  // ── Dirección de dinamismo (apéndice en código → aplica con CUALQUIER
+  //    plantilla, también las personalizadas). Ataca las posturas estáticas y
+  //    las "miradas perdidas": pose desde la acción, lenguaje corporal desde la
+  //    emoción, mirada dirigida a un objetivo concreto, interacción y cámara.
+  const dynamismBlock =
+    `\n\nDYNAMISM & DIRECTION — MANDATORY (overrides any generic or default posing):\n` +
+    `Compose a living, in-motion moment — never a static line-up of front-facing portraits.\n` +
+    `- POSE FROM ACTION: for each character, read what they are physically DOING in "THE MOMENT TO DEPICT" and translate it into a specific, readable body pose and gesture (reaching, turning away, leaning in, recoiling, gripping something, mid-step, crouching, embracing…). Never fall back to "standing, arms at sides, facing forward".\n` +
+    `- BODY LANGUAGE FROM EMOTION: derive posture, hands and muscle tension from each character's emotion in this beat (tense shoulders, clenched fists, open relaxed stance, defensive crossed arms, weight shifted onto one leg, chin raised or lowered…).\n` +
+    `- GAZE — CRITICAL, NO EMPTY STARES: give every character eyes ACTIVELY DIRECTED at a concrete target present in the scene — another character's face, their own hands, an object, the source of the action — and state that target explicitly (e.g. "locking eyes with X", "glancing down at the letter", "eyes fixed on the door"). Add engaged eye detail (narrowed, widened, sidelong glance, half-lidded). STRICTLY FORBIDDEN unless the beat explicitly demands it: vacant stare, empty or dead eyes, blank expression, unfocused or lost gaze, staring into the distance or at nothing, and looking straight at the camera. The eyes must carry the emotion of the moment.\n` +
+    `- INTERACTION & BLOCKING: place characters in a clear relationship to each other and to the action (facing off, one stepping toward or away from another, a hand on a shoulder, back turned, shielding someone, closing distance) so they share the same moment instead of posing side by side.\n` +
+    `- CAMERA & FRAMING: choose an angle and shot that serve THIS beat (low angle for power, over-the-shoulder for confrontation, close-up for intimacy or tension, wide establishing shot for a calmer beat, a slight dutch tilt for unease). Avoid a flat, eye-level, centered group portrait unless the moment is genuinely calm and still.`;
+
+  return filledPrompt + locationBlock + constraintBlock + dynamismBlock;
 }
 
 export const generateRoutes: FastifyPluginAsync = async (app) => {

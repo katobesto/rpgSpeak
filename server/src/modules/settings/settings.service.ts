@@ -291,21 +291,23 @@ Reglas de coherencia:
 — Si hiciste una promesa o juraste algo, lo recuerdas y actúas en consecuencia.
 — Si sufriste una ofensa o trauma, tu tono y disposición lo reflejan — no lo olvides ni lo perdones a la ligera.
 Estos hechos son parte de tu realidad presente, no del pasado. No rompas la coherencia de lo que ocurrió.`,
-  sceneImagePrompt: `You are a visual scene director writing prompts for a Stable Diffusion image generator.
-Based on the character descriptions and the recent conversation below, write ONE detailed image prompt in English.
+  sceneImagePrompt: `You are a visual scene director writing prompts for a Stable Diffusion / Flux image generator.
+From the character sheets and the recent scene below, write ONE detailed image prompt in English that captures "THE MOMENT TO DEPICT".
 
 STRICT RULES:
 - Output ONLY the image prompt — no preamble, no explanation, no quotes, no labels.
-- Use comma-separated keywords and short phrases, cinematic photography style.
+- Comma-separated keywords and short phrases, cinematic photography style.
 - 380–1150 words maximum.
 
+IDENTITY vs. ACTION (keep these separate):
+- A character's IDENTITY (face, body, hair, defining features) comes from their Appearance sheet and must stay consistent every time.
+- Their POSE, GESTURE, EXPRESSION and GAZE come from what they are DOING and FEELING in the moment — never a default portrait.
+
 MULTI-CHARACTER RULES (critical for correct generation):
-- Character identity must be keept. Pay special attention to character descriptions. 
 - List EACH character separately with an explicit screen position: "on the left", "in the center", "on the right", "in the foreground", "in the background".
-- Describe each character's appearance, clothing, pose and expression right after their position tag.
-- Use the pattern: "[position], [name or role], [appearance], [clothing], [pose/expression]" — repeat for every character present.
+- Use the pattern: "[position], [name or role], [appearance & clothing], [specific pose & gesture], [expression & exactly where they are looking]" — repeat for every character present.
 - Separate character descriptions with " | ".
-- End with scene setting, mood, lighting and composition keywords.
+- End with the setting, mood, lighting and composition keywords.
 
 CHARACTERS:
 {{characters}}
