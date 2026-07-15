@@ -1401,8 +1401,14 @@ async function generateRollingSummary(
   const conv = convRepo.findById(conversationId);
   if (!conv) return;
 
-  const allMessages    = msgRepo.findByConversation(conversationId);
-  const recentMessages = allMessages.slice(-6).filter((m) => m.role !== 'system');
+  const allMessages = msgRepo.findByConversation(conversationId);
+  // Índices (en allMessages) de los últimos 6 mensajes no-system: el tramo NUEVO
+  // que este turno pliega en el acumulado.
+  const recentEntries = allMessages
+    .map((m, i) => ({ m, i }))
+    .filter(({ m }) => m.role !== 'system')
+    .slice(-6);
+  const recentMessages = recentEntries.map((e) => e.m);
   if (recentMessages.length < 2) return;
 
   const messageIndexTo  = allMessages.length - 1;
@@ -1466,9 +1472,14 @@ Responde SOLO con el texto del resumen.`;
   const newSummary = response.content.trim();
   if (!newSummary) return;
 
-  // Historial: el resumen rodante cubre la historia desde el principio; el primer
-  // resumen (sin acumulado previo) cubre solo el fragmento reciente.
-  const messageIndexFrom = previousSummary ? 0 : Math.max(0, messageIndexTo - 5);
+  // Historial: messageIndexFrom marca el tramo NUEVO que este turno incorporó al
+  // acumulado, no "desde el mensaje 1". El CONTENIDO del resumen sí cubre toda
+  // la historia (es acumulativo), pero etiquetar cada entrada con "0" hacía que
+  // el historial mostrara "Msgs 1–N" en TODAS las entradas tras la primera —
+  // indistinguibles entre sí y sin sentido al navegar ("siempre resume desde el
+  // principio hasta el final"). Con el tramo real, cada entrada queda anclada al
+  // momento concreto en que se generó.
+  const messageIndexFrom = recentEntries[0]?.i ?? messageIndexTo;
   summariesRepo.create({ conversationId, content: newSummary, messageIndexFrom, messageIndexTo });
   // conversations.summary es lo que buildContext inyecta como "Historia hasta ahora"
   convRepo.update(conversationId, { summary: newSummary });
