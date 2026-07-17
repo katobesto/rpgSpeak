@@ -93,9 +93,12 @@ function buildNarratorIdentityBlock(multipleChars: boolean): string {
     `Antes de hacer hablar o actuar a un personaje, confirma sus datos en SU bloque de ficha y usa únicamente esos.`;
   if (!multipleChars) return identity;
   const knowledge =
-    `### Conocimiento por personaje\n` +
-    `Cada personaje solo conoce lo que presenció en primera persona: un recién incorporado ignora todo lo anterior a su llegada, y los momentos privados del jugador con un personaje no los conocen los demás. ` +
-    `Cada vínculo con el jugador es independiente — no traslades dinámicas, sentimientos ni afinidades de un personaje a otro.`;
+    `### Conocimiento por personaje — FRONTERA ABSOLUTA\n` +
+    `Cada personaje solo conoce lo que presenció en primera persona. Los momentos privados del jugador con un personaje (a solas, en un lugar apartado) NO los conocen los demás, y un recién incorporado ignora todo lo anterior a su llegada.\n` +
+    `- FALLO A ERRADICAR: que un personaje mencione, dé por sabido o reaccione a algo ocurrido en una escena donde NO estuvo. Si el jugador se declaró a una chica a solas, las demás NO lo saben después — no lo insinúan, no lo reprochan y no cambian su trato por ello.\n` +
+    `- Que una escena esté en el historial NO significa que todos la presenciaran. Guíate por quién aparecía NOMBRADO y presente en cada escena, no por lo que TÚ (narrador omnisciente) sabes. El bloque «Fronteras de conocimiento» del final es la lista factual de quién presenció qué: respétala.\n` +
+    `- ANTES de que un personaje mencione o reaccione a un suceso, verifica que él estuvo presente cuando ocurrió. Si no lo estuvo, para él ese suceso NO existe.\n` +
+    `- Cada vínculo con el jugador es independiente — no traslades dinámicas, sentimientos ni afinidades de un personaje a otro.`;
   return `${identity}\n\n${knowledge}`;
 }
 
@@ -208,6 +211,94 @@ export function filterWitnessedMessages(messages: Message[], activeChar: Charact
   }
 
   return out;
+}
+
+// ── Ledger de presencia (modo narrador) ─────────────────────────────────────
+//
+// En modo narrador NO se filtra el historial por testigo (el narrador es
+// omnisciente y da voz a TODOS los personajes en una sola respuesta, así que no
+// hay un "personaje activo" por el que filtrar). Consecuencia: las escenas
+// privadas del jugador con un personaje quedan en el contexto y otro personaje
+// puede "conocerlas" después. No podemos ocultarlas — el narrador necesita el
+// mundo entero —, pero sí darle un ANCLA FACTUAL explícita: qué personaje
+// presenció qué escena reciente. La presencia se detecta igual que en
+// filterWitnessedMessages: nombrado en la prosa/diálogo del narrador = presente.
+//
+// Solo se listan escenas de asistencia PARCIAL (algún personaje conocido presente
+// y algún otro ausente) — las únicas con riesgo de fuga de conocimiento. Una
+// escena sin nadie nombrado (puro ambiente) no da información fiable y se omite,
+// para no marcar ausencias falsas. Determinista sobre la ventana → footer estable.
+
+/** Máximo de escenas parciales a listar (las más recientes) — acota el footer. */
+const PRESENCE_LEDGER_MAX_SCENES = 8;
+
+function setsEqual(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false;
+  for (const x of a) if (!b.has(x)) return false;
+  return true;
+}
+
+/** Construye el bloque «Fronteras de conocimiento» para modo narrador a partir de
+ *  la ventana de historial vivo. `windowStartIndex` es el índice absoluto (en toda
+ *  la conversación) del primer mensaje de la ventana, para etiquetar [Mensajes a–b]. */
+function buildPresenceLedgerBlock(
+  windowMessages: Message[],
+  knownChars: Character[],
+  windowStartIndex: number,
+): string | null {
+  if (knownChars.length < 2) return null; // sin varios personajes no hay fuga cruzada
+  const regexes = knownChars.map((c) => ({ id: c.id, re: nameMentionRegex(c.name) }));
+
+  interface Scene { from: number; to: number; present: Set<string>; }
+  const scenes: Scene[] = [];
+
+  let i = 0;
+  while (i < windowMessages.length) {
+    const segStart = i;
+    while (i < windowMessages.length && windowMessages[i].role !== 'assistant') i++;
+    const assistant = i < windowMessages.length ? windowMessages[i] : null;
+    const segEnd = assistant ? i + 1 : i; // exclusivo
+
+    // Solo cuentan los segmentos NARRADOS: su prosa nombra a los presentes. Se
+    // ignora la cola de usuario sin respuesta (turno actual) y cualquier assistant
+    // de personaje individual (que en modo narrador no debería aparecer).
+    if (assistant && (assistant.metadata?.narrator || !assistant.characterId)) {
+      const present = new Set<string>();
+      for (const r of regexes) if (r.re.test(assistant.content)) present.add(r.id);
+      // Evidencia positiva de asistencia parcial: al menos uno presente y al menos
+      // uno ausente. Sin nadie nombrado → sin información fiable → se omite.
+      if (present.size > 0 && present.size < knownChars.length) {
+        const from = windowStartIndex + segStart;
+        const to   = windowStartIndex + segEnd - 1;
+        const prev = scenes[scenes.length - 1];
+        // Fusiona beats consecutivos con los MISMOS presentes (una escena continúa).
+        if (prev && prev.to === from - 1 && setsEqual(prev.present, present)) {
+          prev.to = to;
+        } else {
+          scenes.push({ from, to, present });
+        }
+      }
+    }
+    i = segEnd;
+  }
+
+  if (scenes.length === 0) return null;
+
+  const recent = scenes.slice(-PRESENCE_LEDGER_MAX_SCENES);
+  const lines = recent.map((s) => {
+    const present = knownChars.filter((c) => s.present.has(c.id)).map((c) => c.name);
+    const absent  = knownChars.filter((c) => !s.present.has(c.id)).map((c) => c.name);
+    return `- [Mensajes ${s.from + 1}–${s.to + 1}] Presentes (además del jugador): ${present.join(', ')}. ` +
+           `Ausentes: ${absent.join(', ')} — NO conocen nada de lo ocurrido en esta escena.`;
+  });
+
+  return (
+    `## Fronteras de conocimiento — quién presenció qué escena reciente\n` +
+    `Lista factual de escenas recientes con asistencia parcial. Un personaje AUSENTE de una escena ` +
+    `no sabe NADA de lo que pasó en ella: no lo menciona, no lo da por sabido y no cambia su trato ` +
+    `por ello, aunque la escena aparezca en el historial que tú (narrador) sí ves.\n\n` +
+    lines.join('\n')
+  );
 }
 
 // ── Etiquetas de hablante en el historial (modo personaje) ──────────────────
@@ -968,6 +1059,19 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   if (affinitySelfReportBlock && needsSplit) {
     history.push({ role: 'system', content: affinitySelfReportBlock });
     footerCount++;
+  }
+
+  // 9c. Fronteras de conocimiento (modo narrador) — ledger factual de qué
+  // personaje presenció qué escena reciente. En modo narrador el historial no se
+  // filtra por testigo (el narrador es omnisciente), así que este ancla evita que
+  // un personaje "conozca" escenas privadas del jugador con otro. Cerca de la
+  // generación por ser restricción dura; footer → fuera del prefijo cacheado.
+  if (narratorMode && needsSplit) {
+    const presenceLedger = buildPresenceLedgerBlock(trimmedMessages, allKnownChars, windowStart);
+    if (presenceLedger) {
+      history.push({ role: 'system', content: presenceLedger });
+      footerCount++;
+    }
   }
 
   // 10. Last user message (generation point)
