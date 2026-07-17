@@ -475,6 +475,10 @@ export interface AppSettings {
   nsfwBlockedMessage: string;
   // Resúmenes de sucesos — longitud máxima de cada resumen generado (en frases aprox.)
   summaryMaxLength: number;
+  // Resúmenes por bloques — tamaño del bloque en mensajes. Cada bloque completado
+  // se resume UNA vez desde los mensajes crudos (inmutable); en el prompt se
+  // inyectan solo los bloques anteriores a la ventana de historial vivo.
+  summaryBlockSize: number;
   // Opciones de API
   disableFallbacks: boolean;
   // Thinking / razonamiento (DeepSeek V4 y modelos compatibles con `thinking`)
@@ -577,6 +581,9 @@ export interface ConversationSummary {
   messageIndexFrom: number;
   messageIndexTo: number;
   createdAt: string;
+  /** 'block' = bloque automático inmutable (se inyecta en el prompt);
+   *  'manual' = generado por el usuario desde la UI (solo informativo). */
+  kind: 'block' | 'manual';
 }
 
 // ─── Context Index Types ──────────────────────────────────────────────────────

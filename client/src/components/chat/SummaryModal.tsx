@@ -47,6 +47,11 @@ function SummaryCard({
           <span className="text-[10px] text-accent/80 font-medium">
             Msgs {summary.messageIndexFrom + 1}–{summary.messageIndexTo + 1}
           </span>
+          {summary.kind === 'block' && (
+            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-accent/10 text-accent/80 font-medium flex-shrink-0">
+              Bloque auto
+            </span>
+          )}
         </div>
         <button
           onClick={onDelete}

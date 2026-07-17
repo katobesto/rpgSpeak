@@ -16,7 +16,11 @@ export interface BuildContextOptions {
   conversationId: string;
   globalSystemPrompt?: string;
   maxMessages?: number;
-  summary?: string | null;        // Resumen GLOBAL (cronista) — narrador y modo personaje sin grupo
+  summary?: string | null;        // Resumen GLOBAL legacy (rodante) — fallback si aún no hay bloques
+  /** Resúmenes por bloques (inmutables, orden cronológico). Se inyectan SOLO los
+   *  bloques que empiezan antes de la ventana de historial vivo — lo que el modelo
+   *  ya ve literal no se re-resume. Narrador y modo personaje sin grupo. */
+  blockSummaries?: Array<{ content: string; messageIndexFrom: number; messageIndexTo: number }>;
   /** Resumen personal del personaje activo (solo lo que él presenció). En modo
    *  personaje con grupo sustituye al resumen global, que filtraría escenas
    *  privadas del jugador con otros personajes. */
@@ -404,6 +408,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     globalSystemPrompt,
     maxMessages = 40,
     summary,
+    blockSummaries = [],
     characterSummary,
     groupCharacters = [],
     narratorMode = false,
@@ -794,7 +799,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   //   6. Scene coherence    — location + established objects (one consolidated block)
   //   7. Affinity block     — current relationship state + consent rules (changes often)
   //   8. Narration style    — user preference for verbosity
-  //   9. Summary            — "Historia hasta ahora" (rolling, changes every ~6 messages)
+  //   9. Summary            — "Historia hasta ahora" (bloques inmutables; crece cada ~blockSize msgs)
   //   9b. Affinity self-report — [AFINIDAD:...] tag instruction (fast-LLM off only);
   //       último bloque para máxima obediencia — el footer entero queda tras el
   //       historial creciente, así que su posición no afecta al prefix-cache
@@ -903,9 +908,20 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     footerCount++;
   }
 
-  // 9. Rolling summary ("Historia hasta ahora") — changes every ~6 messages, kept
-  // close to the generation point so its periodic changes don't invalidate the
-  // cache for the conversation history and earlier directive blocks.
+  // 9. "Historia hasta ahora" — resúmenes por bloques del pasado lejano.
+  //
+  // Se inyectan SOLO los bloques que empiezan antes de la ventana de historial
+  // vivo (messageIndexFrom < windowStart): lo que el modelo ya ve literal no se
+  // re-resume. Un bloque que cruza la frontera de la ventana se inyecta entero
+  // (ligera duplicación) para que nunca quede un hueco sin cubrir entre el último
+  // bloque y el inicio del historial.
+  //
+  // Caché: el footer va tras el historial creciente y NUNCA forma parte del
+  // prefijo cacheable, así que lo que importa aquí no es cuándo cambia sino su
+  // TAMAÑO (se re-procesa entero cada turno) y su determinismo (mismo texto →
+  // misma estimación de tokens → punto de recorte estable). Los bloques ganan en
+  // ambos frentes al rodante: texto inmutable byte a byte, y crecen a saltos
+  // (~blockSize msgs) en vez de re-generarse con longitud variable cada 6.
   //
   // En modo personaje con grupo, el resumen GLOBAL (cronista) filtraría escenas
   // privadas del jugador con otros personajes — el mismo agujero que el filtrado
@@ -913,13 +929,36 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // del personaje activo (generado solo con lo que él presenció). Si aún no
   // existe, no se inyecta nada: el historial filtrado cubre lo reciente.
   const useCharacterSummary = !narratorMode && groupCharacters.length > 0;
-  const summaryForContext = useCharacterSummary ? characterSummary : summary;
-  if (summaryForContext?.trim()) {
-    const header = useCharacterSummary
-      ? `## Historia hasta ahora (lo que TÚ has vivido)`
-      : `## Historia hasta ahora`;
-    history.push({ role: 'system', content: `${header}\n${summaryForContext.trim()}` });
-    footerCount++;
+  if (useCharacterSummary) {
+    if (characterSummary?.trim()) {
+      history.push({
+        role: 'system',
+        content: `## Historia hasta ahora (lo que TÚ has vivido)\n${characterSummary.trim()}`,
+      });
+      footerCount++;
+    }
+  } else if (windowStart > 0) {
+    // Solo hay pasado fuera de la ventana si windowStart > 0; si todo el
+    // historial cabe en el contexto, cualquier resumen sería redundante.
+    const pastBlocks = blockSummaries.filter((b) => b.messageIndexFrom < windowStart);
+    if (pastBlocks.length > 0) {
+      const parts = pastBlocks.map(
+        (b) => `[Mensajes ${b.messageIndexFrom + 1}–${b.messageIndexTo + 1}]\n${b.content.trim()}`,
+      );
+      history.push({
+        role: 'system',
+        content:
+          `## Historia hasta ahora\n` +
+          `Lo ocurrido antes del historial reciente, en orden cronológico (lo más antiguo primero):\n\n` +
+          parts.join('\n\n'),
+      });
+      footerCount++;
+    } else if (summary?.trim()) {
+      // Fallback legacy: conversación anterior al sistema de bloques cuyos
+      // bloques aún no se han generado — se usa el último resumen rodante.
+      history.push({ role: 'system', content: `## Historia hasta ahora\n${summary.trim()}` });
+      footerCount++;
+    }
   }
 
   // 9b. Auto-reporte de afinidad — último bloque antes del mensaje del usuario.

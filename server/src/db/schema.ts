@@ -257,6 +257,9 @@ export const conversationSummaries = sqliteTable('conversation_summaries', {
   content:          text('content').notNull(),
   messageIndexFrom: integer('message_index_from').notNull().default(0),
   messageIndexTo:   integer('message_index_to').notNull().default(0),
+  // 'block' = bloque automático inmutable (inyectado en el prompt);
+  // 'manual' = generado desde la UI (también los snapshots rodantes antiguos).
+  kind:             text('kind').notNull().default('manual'),
   createdAt:        text('created_at').notNull(),
 });
 

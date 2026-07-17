@@ -240,6 +240,10 @@ export function runMigrations(db: Db): void {
     CREATE INDEX IF NOT EXISTS idx_conv_summaries_conv
       ON conversation_summaries(conversation_id)
   `);
+  // Resúmenes por bloques: distingue bloques automáticos inmutables ('block',
+  // inyectados en el prompt) de los generados desde la UI ('manual'; los
+  // snapshots del antiguo resumen rodante quedan como 'manual').
+  try { db.run(sql`ALTER TABLE conversation_summaries ADD COLUMN kind TEXT NOT NULL DEFAULT 'manual'`); } catch { /* already exists */ }
 
   // ─── User content assignments ─────────────────────────────────────────────
   db.run(sql`

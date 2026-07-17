@@ -457,6 +457,7 @@ Responde de forma breve y directa: máximo 2 párrafos cortos. Ve al punto esenc
   nsfwBlockedMessage: `*[Moderación: el contenido de tu mensaje no está permitido con el modo NSFW desactivado. Si deseas este tipo de interacciones, activa "Permitir contenido adulto" en Ajustes → Generación.]*`,
   // Resúmenes de sucesos
   summaryMaxLength: 5,   // máximo de frases por resumen generado
+  summaryBlockSize: 40,  // mensajes por bloque de resumen automático (inmutable)
   // API options
   disableFallbacks: false,
   // Thinking / razonamiento (DeepSeek V4 y modelos compatibles)

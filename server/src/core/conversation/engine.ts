@@ -697,6 +697,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       globalSystemPrompt: settings.globalSystemPrompt,
       maxMessages,
       summary: conversation.summary,
+      blockSummaries: summariesRepo.findBlocks(conversationId),
       characterSummary: !narratorMode && character
         ? ((conversation.metadata as { characterSummaries?: Record<string, string> })
             ?.characterSummaries?.[character.id] ?? null)
@@ -1351,14 +1352,18 @@ async function analyzeExchangeAsync(
   }
 }
 
-// ─── Rolling Summary ──────────────────────────────────────────────────────────
+// ─── Resúmenes por bloques ────────────────────────────────────────────────────
 //
-// conversations.summary is a ROLLING summary of the WHOLE story, not just the
-// latest fragment: each update feeds the previous accumulated summary plus the
-// most recent exchanges back to the LLM, which returns an updated whole-story
-// summary. Without this, once the trimmer drops old history the LLM only ever
-// "remembers" the last ~6 messages worth of summarized story — everything
-// earlier evaporates from the context.
+// Sustituye al antiguo resumen rodante global (que re-resumía un resumen cada 6
+// mensajes — "teléfono estropeado": los eventos antiguos se degradaban en cada
+// iteración, y el grueso del presupuesto se gastaba en re-contar lo que el modelo
+// ya tenía literal en el historial).
+//
+// Ahora la historia se trocea en bloques de `summaryBlockSize` mensajes. Cada
+// bloque completado se resume UNA sola vez a partir de los mensajes crudos y
+// queda inmutable en conversation_summaries (kind='block'). buildContext inyecta
+// solo los bloques anteriores a la ventana de historial vivo — fidelidad estable
+// para el pasado lejano, cero redundancia con el historial reciente.
 
 // Etiqueta cada turno con su hablante REAL (nombre del personaje, Narrador o
 // Jugador). El etiquetado genérico ("Personaje" para todo turno assistant)
@@ -1393,7 +1398,7 @@ function labelSpeakers(msgs: Message[]): string {
     .join('\n\n');
 }
 
-async function generateRollingSummary(
+async function generateBlockSummaries(
   conversationId: string,
   provider: NonNullable<ReturnType<ProviderRepository['findById']>>,
   modelId: string,
@@ -1401,88 +1406,68 @@ async function generateRollingSummary(
   const conv = convRepo.findById(conversationId);
   if (!conv) return;
 
-  const allMessages = msgRepo.findByConversation(conversationId);
-  // Índices (en allMessages) de los últimos 6 mensajes no-system: el tramo NUEVO
-  // que este turno pliega en el acumulado.
-  const recentEntries = allMessages
-    .map((m, i) => ({ m, i }))
-    .filter(({ m }) => m.role !== 'system')
-    .slice(-6);
-  const recentMessages = recentEntries.map((e) => e.m);
-  if (recentMessages.length < 2) return;
+  const settings  = settingsService.getAll();
+  const blockSize = Math.max(10, settings.summaryBlockSize ?? 40);
+  const maxFrases = settings.summaryMaxLength ?? 5;
 
-  const messageIndexTo  = allMessages.length - 1;
-  const settings        = settingsService.getAll();
-  const maxFrases       = settings.summaryMaxLength ?? 5;
-  const previousSummary = conv.summary?.trim() ?? '';
-  // The rolling summary covers the whole story, so it gets a larger budget than
-  // the per-fragment setting (which still applies to manual range summaries).
-  const maxFrasesTotal  = maxFrases * 3;
+  // El mismo orden de mensajes que ve buildContext (rama principal) — los índices
+  // de los bloques deben coincidir con la ventana de historial que calcula.
+  const allMessages     = msgRepo.findByConversation(conversationId);
+  const completedBlocks = Math.floor(allMessages.length / blockSize);
+  if (completedBlocks === 0) return;
 
-  const messagesText = labelSpeakers(recentMessages);
+  const existing = summariesRepo.findBlocks(conversationId);
+  const covered  = new Set(existing.map((b) => b.messageIndexFrom));
+  const llm      = createProvider(provider);
 
-  const prompt = previousSummary
-    ? `Eres el cronista de una historia colaborativa de rol. Mantienes un resumen acumulado de TODA la historia.
+  // Bucle de puesta al día: normalmente genera 0 o 1 bloques por turno, pero
+  // recupera atrasos (conversaciones anteriores al sistema, fallos previos del
+  // LLM, o un cambio de summaryBlockSize).
+  let prevContent = '';
+  for (let k = 0; k < completedBlocks; k++) {
+    const from = k * blockSize;
+    const to   = from + blockSize - 1;
+    if (covered.has(from)) {
+      prevContent = existing.find((b) => b.messageIndexFrom === from)?.content ?? prevContent;
+      continue;
+    }
 
-RESUMEN ACUMULADO HASTA AHORA:
----
-${previousSummary}
----
+    const blockMsgs = allMessages.slice(from, to + 1).filter((m) => m.role !== 'system');
+    if (blockMsgs.length === 0) continue;
+    const messagesText = labelSpeakers(blockMsgs);
 
-NUEVOS INTERCAMBIOS (lo más reciente):
----
-${messagesText}
----
+    const prompt =
+      `Eres el cronista de una historia colaborativa de rol. Resume el siguiente fragmento ` +
+      `(mensajes ${from + 1}–${to + 1} de la historia).\n\n` +
+      (prevContent
+        ? `CONTEXTO — lo ocurrido justo antes (NO lo re-resumas, es solo referencia):\n---\n${prevContent}\n---\n\n`
+        : '') +
+      `FRAGMENTO A RESUMIR:\n---\n${messagesText}\n---\n\n` +
+      `Escribe un resumen SOLO del fragmento. Debe ser:\n` +
+      `- Objetivo y fiel a lo narrado\n` +
+      `- Conserva siempre: nombres propios, lugares, objetos relevantes, promesas, decisiones y heridas o cambios de estado\n` +
+      `- Máximo ${maxFrases} frases, en pasado narrativo\n` +
+      `- Sin explicaciones ni frases introductorias\n\n` +
+      `Responde SOLO con el texto del resumen.`;
 
-Escribe la versión ACTUALIZADA del resumen acumulado, integrando los nuevos intercambios:
-- Cubre TODA la historia, no solo lo nuevo — nada importante del resumen anterior debe perderse
-- Conserva siempre: nombres propios, lugares, objetos relevantes, promesas, decisiones y el estado actual de la situación
-- Comprime más los eventos antiguos y da más detalle a los recientes
-- Máximo ${maxFrasesTotal} frases, en pasado narrativo
-- Sin explicaciones ni frases introductorias
+    const response = await llm.generate({
+      messages: [
+        { role: 'system', content: 'Eres un cronista que resume fragmentos de una historia colaborativa de rol.' },
+        { role: 'user', content: prompt },
+      ],
+      model: modelId,
+      temperature: 0.3,
+      stream: false,
+      disableFallbacks: settings.disableFallbacks,
+    } satisfies GenerateRequest);
 
-Responde SOLO con el texto del resumen actualizado.`
-    : `Eres el cronista de una historia colaborativa de rol. Revisa estos últimos intercambios:
+    const content = response.content.trim();
+    if (!content) return; // el LLM falló: se reintentará en el próximo turno
 
----
-${messagesText}
----
-
-Escribe un resumen de lo ocurrido. El resumen debe ser:
-- Objetivo y fiel a lo narrado
-- Conciso: máximo ${maxFrases} frases
-- En pasado narrativo
-- Sin explicaciones ni frases introductorias
-
-Responde SOLO con el texto del resumen.`;
-
-  const llm = createProvider(provider);
-  const request: GenerateRequest = {
-    messages: [
-      { role: 'system', content: 'Eres un cronista que mantiene el resumen acumulado de una historia colaborativa de rol.' },
-      { role: 'user', content: prompt },
-    ],
-    model: modelId,
-    temperature: 0.3,
-    stream: false,
-    disableFallbacks: settings.disableFallbacks,
-  };
-
-  const response = await llm.generate(request);
-  const newSummary = response.content.trim();
-  if (!newSummary) return;
-
-  // Historial: messageIndexFrom marca el tramo NUEVO que este turno incorporó al
-  // acumulado, no "desde el mensaje 1". El CONTENIDO del resumen sí cubre toda
-  // la historia (es acumulativo), pero etiquetar cada entrada con "0" hacía que
-  // el historial mostrara "Msgs 1–N" en TODAS las entradas tras la primera —
-  // indistinguibles entre sí y sin sentido al navegar ("siempre resume desde el
-  // principio hasta el final"). Con el tramo real, cada entrada queda anclada al
-  // momento concreto en que se generó.
-  const messageIndexFrom = recentEntries[0]?.i ?? messageIndexTo;
-  summariesRepo.create({ conversationId, content: newSummary, messageIndexFrom, messageIndexTo });
-  // conversations.summary es lo que buildContext inyecta como "Historia hasta ahora"
-  convRepo.update(conversationId, { summary: newSummary });
+    summariesRepo.create({ conversationId, content, messageIndexFrom: from, messageIndexTo: to, kind: 'block' });
+    console.log(`[summary] Bloque ${from + 1}–${to + 1} resumido para conv ${conversationId}`);
+    prevContent = content;
+  }
 }
 
 // ─── Resumen personal por personaje ───────────────────────────────────────────
@@ -1595,17 +1580,21 @@ async function updateSummaryAsync(
 ): Promise<void> {
   if (!provider) return;
   try {
-    const SUMMARY_EVERY_N = 6; // each 6 messages
+    const SUMMARY_EVERY_N = 6; // cadencia del resumen personal (rodante)
     const conv = convRepo.findById(conversationId);
     if (!conv) return;
 
-    // Only update every N messages
-    if (conv.messageCount % SUMMARY_EVERY_N !== 0) return;
+    // Los resúmenes usan SIEMPRE el provider principal: son la memoria a largo
+    // plazo de la historia y su calidad importa. El fast LLM solo está presente
+    // en pruebas locales — en producción (VPS) no existe, y desviar los resúmenes
+    // a él haría que la calidad de la crónica dependiera del entorno.
 
-    // El resumen global (cronista, omnisciente) se actualiza siempre: lo usa el
-    // modo narrador. El personal solo en turnos de personaje con grupo.
-    await generateRollingSummary(conversationId, provider, modelId);
-    if (characterForPersonalSummary) {
+    // Bloques globales: la comprobación es barata (no-op salvo que un bloque se
+    // haya completado), así que se ejecuta en todos los turnos.
+    await generateBlockSummaries(conversationId, provider, modelId);
+
+    // El resumen personal por personaje sigue siendo rodante (ventana de 6 msgs).
+    if (characterForPersonalSummary && conv.messageCount % SUMMARY_EVERY_N === 0) {
       await generateCharacterSummary(conversationId, provider, modelId, characterForPersonalSummary);
     }
   } catch (err) {
@@ -1632,7 +1621,7 @@ export async function triggerSummaryUpdate(conversationId: string): Promise<Conv
   if (!modelId) return conv;
 
   try {
-    await generateRollingSummary(conversationId, provider, modelId);
+    await generateBlockSummaries(conversationId, provider, modelId);
   } catch (err) {
     console.error('[summary] Error in triggerSummaryUpdate:', err);
   }
@@ -1759,10 +1748,13 @@ export async function performDeathRewind(
   // Borra la línea temporal condenada (todo lo posterior al ancla)
   const deleted = msgRepo.deleteAfter(anchor.id);
 
-  // Restaura el resumen global al último snapshot anterior al ancla — el
-  // resumen rodante actual puede narrar hechos que "ya no han ocurrido".
+  // Resúmenes por bloques: los que se extienden más allá del ancla narran la
+  // línea temporal borrada — fuera. Los anteriores siguen válidos (inmutables).
+  summariesRepo.deleteBlocksBeyond(conversationId, anchorIdx);
+  // Resumen legacy (conversations.summary, fallback para conversaciones sin
+  // bloques): restaurar al último snapshot manual/rodante anterior al ancla.
   const snapshots = summariesRepo.findByConversation(conversationId); // desc por fecha
-  const snapshot = snapshots.find((s) => s.messageIndexTo <= anchorIdx);
+  const snapshot = snapshots.find((s) => s.kind !== 'block' && s.messageIndexTo <= anchorIdx);
   convRepo.update(conversationId, { summary: snapshot?.content ?? null });
 
   // Metadata: bucle a 'looping' + fuera resúmenes personales (contienen la

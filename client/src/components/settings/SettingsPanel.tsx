@@ -19,7 +19,7 @@ import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
 
 type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats' | 'backup';
 
-const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'sceneImagePrompt', 'charImagePrompt', 'backgroundImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort'];
+const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'sceneImagePrompt', 'charImagePrompt', 'backgroundImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'summaryBlockSize', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret', 'bzComfyUrl', 'bzComfyApiToken', 'bzComfyWorkflow'];
 
@@ -234,6 +234,15 @@ export function SettingsPanel() {
                       min={1}
                       max={20}
                       hint="Número máximo de frases en cada resumen generado automáticamente o bajo demanda (1–20)."
+                    />
+                    <Input
+                      label="Tamaño de bloque de resumen (mensajes)"
+                      type="number"
+                      value={draft.summaryBlockSize ?? 40}
+                      onChange={(e) => update('summaryBlockSize', Math.max(10, parseInt(e.target.value) || 40))}
+                      min={10}
+                      max={200}
+                      hint="Cada bloque de N mensajes se resume una sola vez (inmutable). En el prompt solo se inyectan los bloques anteriores al historial visible — así el modelo recuerda lo sucedido mucho más atrás sin repetir lo reciente."
                     />
                   </Section>
 
