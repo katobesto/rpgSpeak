@@ -1045,7 +1045,10 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     // accept the English [LOCATION:...] form for backward compatibility.
     // We take the LAST occurrence (most authoritative in long responses),
     // persist it and strip all occurrences from the visible content.
-    const LOCATION_RE = /\[(?:UBICACION|LOCATION):\s*([^\]]+?)\s*\]/gi;
+    // La clase [OÓ] tolera la tilde: el modelo suele "corregir" la directiva y
+    // emitir [UBICACIÓN:...] con tilde (o [Ubicación:...]); sin ella el tag no se
+    // capturaba → se colaba al final del mensaje y la ubicación no se actualizaba.
+    const LOCATION_RE = /\[(?:UBICACI[OÓ]N|LOCATION):\s*([^\]]+?)\s*\]/gi;
     let locationUpdate: string | null | undefined;
     const locationMatches = [...cleanContent.matchAll(LOCATION_RE)];
     if (locationMatches.length > 0) {

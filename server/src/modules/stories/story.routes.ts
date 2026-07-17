@@ -17,7 +17,9 @@ const EVENT_TAG_RE = /\[EVENTO:([^\]|]+)\|([^\]|]+)\|([^\]|]+)\|(\d+)(?:\|([^\]|
 
 // ─── Parser for generated locations ──────────────────────────────────────────
 
-const LOCATION_TAG_RE = /\[UBICACION:([^\]|]+)\|([^\]|]*)\|([^\]|]*)\|([^\]|]*)\|([^\]]*)\]/g;
+// [OÓ] + flag i: el modelo suele emitir la tilde ([UBICACIÓN:...]) o minúsculas
+// pese a la directiva; sin tolerarlo, la ubicación generada se descartaba en silencio.
+const LOCATION_TAG_RE = /\[UBICACI[OÓ]N:([^\]|]+)\|([^\]|]*)\|([^\]|]*)\|([^\]|]*)\|([^\]]*)\]/gi;
 
 function parseGeneratedLocations(text: string): Omit<StoryLocation, 'id'>[] {
   const locations: Omit<StoryLocation, 'id'>[] = [];
