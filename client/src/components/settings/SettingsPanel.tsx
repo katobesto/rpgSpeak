@@ -9,9 +9,10 @@ import { charactersApi } from '../../api/characters.ts';
 import { storiesApi } from '../../api/stories.ts';
 import { Button } from '../ui/Button.tsx';
 import { Input, Textarea } from '../ui/Input.tsx';
-import { Plus, Trash2, RefreshCw, Check, X, Volume2, Wifi, Download, CheckCircle2, Play, Square, Loader, LogOut, Users, Shield, UserCircle, RotateCcw, AlertCircle, BarChart2, Zap, Camera, Sparkles, Wand2, FlaskConical, Upload, Link2, BookOpen, Pencil, DatabaseBackup, HardDriveDownload, HardDriveUpload, TriangleAlert } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, Check, X, Volume2, Wifi, Download, CheckCircle2, Play, Square, Loader, LogOut, Users, Shield, UserCircle, RotateCcw, AlertCircle, BarChart2, Zap, Camera, Sparkles, Wand2, FlaskConical, Upload, Link2, BookOpen, Pencil, DatabaseBackup, HardDriveDownload, HardDriveUpload, TriangleAlert, Search, Brain, ChevronUp, ChevronDown, ListFilter } from 'lucide-react';
+import { createPortal } from 'react-dom';
 import { backupApi } from '../../api/backup.ts';
-import type { Provider, CreateProviderDto, AppSettings, TtsSettings, TtsVoice, BzWorkflow } from '@rpgspeak/shared';
+import type { Provider, CreateProviderDto, AppSettings, TtsSettings, TtsVoice, BzWorkflow, ProviderModel } from '@rpgspeak/shared';
 import { useUiStore } from '../../stores/ui.store.ts';
 import { useAuthStore } from '../../stores/auth.store.ts';
 import { conversationsApi } from '../../api/conversations.ts';
@@ -1804,6 +1805,205 @@ function FastLlmSection({
   );
 }
 
+// ─── Model metadata formatting + browser modal ──────────────────────────────
+
+/** Precio por millón de tokens → string corto. null si la API no lo expone. */
+function fmtPrice(perM?: number): string | null {
+  if (perM == null) return null;
+  if (perM === 0) return '$0';
+  return perM < 1 ? `$${perM.toFixed(3)}` : `$${perM.toFixed(2)}`;
+}
+/** Par compacto entrada/salida por millón, p.ej. "$3.00/M in · $15.00/M out" o "Gratis". */
+function fmtPricePair(m: ProviderModel): string | null {
+  const inHas = m.promptPricePerM != null, outHas = m.completionPricePerM != null;
+  if (!inHas && !outHas) return null;
+  if (m.promptPricePerM === 0 && m.completionPricePerM === 0) return 'Gratis';
+  return `${inHas ? fmtPrice(m.promptPricePerM) : '—'}/M in · ${outHas ? fmtPrice(m.completionPricePerM) : '—'}/M out`;
+}
+/** Contexto en forma compacta: 128000 → "128K". */
+function fmtContext(n?: number): string | null {
+  if (n == null) return null;
+  return n >= 1000 ? `${Math.round(n / 1000)}K` : String(n);
+}
+
+/** Línea informativa bajo el selector con los datos del modelo elegido. */
+function ModelInfoLine({ model }: { model: ProviderModel }) {
+  const ctx = fmtContext(model.contextLength);
+  const price = fmtPricePair(model);
+  if (!ctx && !price && !model.supportsReasoning && !model.inputModalities?.includes('image')) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[10px] text-text-muted mt-1">
+      {ctx && <span>Contexto {ctx}</span>}
+      {price && <span>{price}</span>}
+      {model.supportsReasoning && (
+        <span className="inline-flex items-center gap-1 text-accent"><Brain size={11} /> Razona</span>
+      )}
+      {model.inputModalities?.includes('image') && <span>🖼 Visión</span>}
+    </div>
+  );
+}
+
+type ModelSortKey = 'name' | 'owner' | 'context' | 'in' | 'out' | 'reasoning';
+const alignCls = (a?: 'left' | 'right' | 'center') =>
+  a === 'right' ? 'text-right' : a === 'center' ? 'text-center' : 'text-left';
+
+/** Modal explorador de modelos: buscador + tabla con columnas ordenables. */
+function ModelBrowserModal({ models, selectedId, onSelect, onClose }: {
+  models: ProviderModel[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [query, setQuery] = React.useState('');
+  const [sort, setSort] = React.useState<{ key: ModelSortKey; dir: 'asc' | 'desc' }>({ key: 'name', dir: 'asc' });
+
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const hasPricing = models.some((m) => m.promptPricePerM != null || m.completionPricePerM != null);
+
+  const filtered = React.useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return models;
+    return models.filter((m) =>
+      m.name.toLowerCase().includes(q) ||
+      m.id.toLowerCase().includes(q) ||
+      (m.ownedBy?.toLowerCase().includes(q) ?? false),
+    );
+  }, [models, query]);
+
+  const sorted = React.useMemo(() => {
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    // Los valores ausentes van SIEMPRE al final, sea cual sea la dirección.
+    const num = (v?: number) => (v == null ? (sort.dir === 'asc' ? Infinity : -Infinity) : v);
+    const val = (m: ProviderModel): number | string => {
+      switch (sort.key) {
+        case 'name':      return m.name.toLowerCase();
+        case 'owner':     return (m.ownedBy ?? '').toLowerCase();
+        case 'context':   return num(m.contextLength);
+        case 'in':        return num(m.promptPricePerM);
+        case 'out':       return num(m.completionPricePerM);
+        case 'reasoning': return m.supportsReasoning ? 1 : 0;
+      }
+    };
+    return [...filtered].sort((a, b) => {
+      const va = val(a), vb = val(b);
+      if (typeof va === 'string' && typeof vb === 'string') return va.localeCompare(vb) * dir;
+      return ((va as number) - (vb as number)) * dir;
+    });
+  }, [filtered, sort]);
+
+  const toggleSort = (key: ModelSortKey) =>
+    setSort((s) =>
+      s.key === key
+        ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' }
+        : { key, dir: key === 'name' || key === 'owner' ? 'asc' : 'desc' },
+    );
+
+  const Th = ({ k, label, align }: { k: ModelSortKey; label: string; align?: 'left' | 'right' | 'center' }) => (
+    <th
+      className={`px-3 py-2 font-medium text-text-secondary select-none cursor-pointer hover:text-accent whitespace-nowrap ${alignCls(align)}`}
+      onClick={() => toggleSort(k)}
+    >
+      <span className={`inline-flex items-center gap-1 ${align === 'right' ? 'flex-row-reverse' : ''}`}>
+        {label}
+        {sort.key === k && (sort.dir === 'asc' ? <ChevronUp size={11} /> : <ChevronDown size={11} />)}
+      </span>
+    </th>
+  );
+
+  const modal = (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/55" onClick={onClose} />
+      <div
+        className="relative w-full max-w-3xl mx-auto rounded-2xl border border-border shadow-2xl flex flex-col max-h-[85vh] animate-fade-in"
+        style={{ background: 'var(--surface-1)' }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
+          <div className="flex items-center gap-2">
+            <ListFilter size={14} className="text-accent" />
+            <h2 className="font-semibold text-sm">Explorar modelos</h2>
+            <span className="text-[10px] text-text-muted">({sorted.length} de {models.length})</span>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors"
+          >
+            <X size={15} />
+          </button>
+        </div>
+        {/* Search */}
+        <div className="px-5 py-3 border-b border-border flex-shrink-0">
+          <div className="relative">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar por nombre, id o proveedor…"
+              className="w-full rounded-lg pl-9 pr-3 py-2 text-sm border border-border focus:outline-none focus:ring-1 focus:ring-accent"
+              style={{ background: 'var(--surface-2)', color: 'var(--text-primary)' }}
+            />
+          </div>
+          {!hasPricing && (
+            <p className="text-[10px] text-text-muted mt-2">
+              Este proveedor no expone precios ni metadata extendida. Para ver coste por millón y razonamiento, usa un proveedor OpenRouter.
+            </p>
+          )}
+        </div>
+        {/* Table */}
+        <div className="overflow-auto flex-1">
+          <table className="w-full text-xs border-collapse">
+            <thead className="sticky top-0 z-10" style={{ background: 'var(--surface-1)' }}>
+              <tr className="border-b border-border">
+                <Th k="name" label="Modelo" />
+                <Th k="owner" label="Proveedor" />
+                <Th k="context" label="Contexto" align="right" />
+                <Th k="in" label="$/M in" align="right" />
+                <Th k="out" label="$/M out" align="right" />
+                <Th k="reasoning" label="Razona" align="center" />
+              </tr>
+            </thead>
+            <tbody>
+              {sorted.map((m) => {
+                const sel = m.id === selectedId;
+                return (
+                  <tr
+                    key={m.id}
+                    onClick={() => onSelect(m.id)}
+                    className={`border-b border-border cursor-pointer transition-colors ${sel ? '' : 'hover:bg-white/5'}`}
+                    style={sel ? { background: 'var(--accent-muted)' } : undefined}
+                  >
+                    <td className="px-3 py-2 max-w-[240px]">
+                      <div className={`truncate font-medium ${sel ? 'text-accent' : 'text-text-primary'}`} title={m.name}>{m.name}</div>
+                      <div className="truncate text-[10px] text-text-muted" title={m.id}>{m.id}</div>
+                    </td>
+                    <td className="px-3 py-2 text-text-secondary whitespace-nowrap">{m.ownedBy ?? '—'}</td>
+                    <td className="px-3 py-2 text-right text-text-secondary whitespace-nowrap">{fmtContext(m.contextLength) ?? '—'}</td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap">{fmtPrice(m.promptPricePerM) ?? '—'}</td>
+                    <td className="px-3 py-2 text-right whitespace-nowrap">{fmtPrice(m.completionPricePerM) ?? '—'}</td>
+                    <td className="px-3 py-2 text-center">
+                      {m.supportsReasoning ? <Brain size={13} className="inline text-accent" /> : <span className="text-text-muted">—</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+              {sorted.length === 0 && (
+                <tr><td colSpan={6} className="px-3 py-8 text-center text-text-muted">Sin resultados para «{query}».</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+  return createPortal(modal, document.body);
+}
+
 // ─── Default Model section ───────────────────────────────────────────────────
 
 function DefaultModelSection({
@@ -1821,21 +2021,24 @@ function DefaultModelSection({
   onModelChange: (v: string | null) => void;
   hideDescription?: boolean;
 }) {
-  const [models, setModels] = React.useState<string[]>([]);
+  const [models, setModels] = React.useState<ProviderModel[]>([]);
   const [loading, setLoading] = React.useState(false);
+  const [browserOpen, setBrowserOpen] = React.useState(false);
 
   async function loadModels(providerId: string) {
     setLoading(true);
     setModels([]);
     try {
       const list = await providersApi.listModels(providerId);
-      setModels(list.map((m) => m.id));
+      setModels(list);
     } catch {
       setModels([]);
     } finally {
       setLoading(false);
     }
   }
+
+  const selectedModel = models.find((m) => m.id === defaultModelId);
 
   function handleProviderChange(pid: string) {
     const val = pid || null;
@@ -1873,15 +2076,33 @@ function DefaultModelSection({
           {loading ? (
             <p className="text-xs text-text-muted animate-pulse">Cargando modelos...</p>
           ) : models.length > 0 ? (
-            <select
-              value={defaultModelId ?? ''}
-              onChange={(e) => onModelChange(e.target.value || null)}
-              className="w-full rounded-lg px-3 py-2 text-sm border border-border focus:outline-none focus:ring-1 focus:ring-accent"
-              style={{ background: 'var(--surface-1)', color: 'var(--text-primary)' }}
-            >
-              <option value="">— elige un modelo —</option>
-              {models.map((m) => <option key={m} value={m}>{m}</option>)}
-            </select>
+            <>
+              <div className="flex gap-2">
+                <select
+                  value={defaultModelId ?? ''}
+                  onChange={(e) => onModelChange(e.target.value || null)}
+                  className="flex-1 min-w-0 rounded-lg px-3 py-2 text-sm border border-border focus:outline-none focus:ring-1 focus:ring-accent"
+                  style={{ background: 'var(--surface-1)', color: 'var(--text-primary)' }}
+                >
+                  <option value="">— elige un modelo —</option>
+                  {models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}{fmtPricePair(m) ? ` · ${fmtPricePair(m)}` : ''}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => setBrowserOpen(true)}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-border hover:border-accent hover:text-accent transition-colors flex-shrink-0"
+                  style={{ background: 'var(--surface-1)', color: 'var(--text-secondary)' }}
+                  title="Explorar modelos con buscador, precios y detalles"
+                >
+                  <ListFilter size={13} /> Explorar
+                </button>
+              </div>
+              {selectedModel && <ModelInfoLine model={selectedModel} />}
+            </>
           ) : (
             <input
               value={defaultModelId ?? ''}
@@ -1903,6 +2124,14 @@ function DefaultModelSection({
             Recargar modelos
           </button>
         </div>
+      )}
+      {browserOpen && (
+        <ModelBrowserModal
+          models={models}
+          selectedId={defaultModelId}
+          onSelect={(id) => { onModelChange(id); setBrowserOpen(false); }}
+          onClose={() => setBrowserOpen(false)}
+        />
       )}
     </div>
   );

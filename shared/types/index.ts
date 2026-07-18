@@ -294,6 +294,22 @@ export interface ProviderModel {
   name: string;
   contextLength?: number;
   description?: string;
+  /** Precio por millón de tokens de ENTRADA (prompt), en USD. Solo si la API lo expone (OpenRouter). */
+  promptPricePerM?: number;
+  /** Precio por millón de tokens de SALIDA (completion), en USD. */
+  completionPricePerM?: number;
+  /** Máx. tokens de salida admitidos por el proveedor top de este modelo. */
+  maxCompletionTokens?: number;
+  /** El modelo admite razonamiento/thinking (supported_parameters incluye "reasoning"). */
+  supportsReasoning?: boolean;
+  /** Modalidades de entrada, p.ej. ["text","image"] (architecture.input_modalities). */
+  inputModalities?: string[];
+  /** Tokenizer / familia del modelo (architecture.tokenizer). */
+  tokenizer?: string;
+  /** Propietario / organización del modelo (owned_by). */
+  ownedBy?: string;
+  /** Fecha de alta del modelo (epoch en segundos), si la API la expone. */
+  created?: number;
 }
 
 // ─── Scene Image ─────────────────────────────────────────────────────────────

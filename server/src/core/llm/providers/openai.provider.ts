@@ -2,6 +2,53 @@ import type { LLMProvider, ProviderOptions } from '../provider.interface.js';
 import type { GenerateRequest, GenerateResponse, ProviderModel } from '@rpgspeak/shared';
 import { ProviderError } from '../../../shared/errors.js';
 
+// ── Parser del endpoint /models ──────────────────────────────────────────────
+// OpenRouter expone un esquema rico (pricing, architecture, supported_parameters,
+// top_provider); los OpenAI-compatible "pelados" (DeepSeek, LM Studio, mlx…) solo
+// devuelven { id, owned_by, created }. Todos los campos son opcionales: el parser
+// lee lo que haya y degrada con gracia.
+interface RawModelEntry {
+  id: string;
+  name?: string;
+  description?: string;
+  created?: number;
+  context_length?: number;
+  owned_by?: string;
+  architecture?: { input_modalities?: string[]; output_modalities?: string[]; tokenizer?: string };
+  pricing?: { prompt?: string; completion?: string };
+  top_provider?: { context_length?: number; max_completion_tokens?: number; is_moderated?: boolean };
+  supported_parameters?: string[];
+}
+
+/** Precio por millón de tokens desde el precio-por-token (string) de OpenRouter. */
+function pricePerMillion(raw: string | undefined): number | undefined {
+  if (raw == null) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n * 1e6 : undefined;
+}
+
+function parseModelEntry(m: RawModelEntry): ProviderModel {
+  const arch = m.architecture ?? {};
+  const top  = m.top_provider ?? {};
+  const supported = Array.isArray(m.supported_parameters) ? m.supported_parameters : [];
+  return {
+    id: m.id,
+    name: m.name ?? m.id,
+    contextLength: m.context_length ?? top.context_length,
+    description: m.description,
+    promptPricePerM:     pricePerMillion(m.pricing?.prompt),
+    completionPricePerM: pricePerMillion(m.pricing?.completion),
+    maxCompletionTokens: top.max_completion_tokens,
+    supportsReasoning:   supported.includes('reasoning') ? true : undefined,
+    inputModalities:     Array.isArray(arch.input_modalities) ? arch.input_modalities : undefined,
+    tokenizer:           arch.tokenizer,
+    // OpenRouter no expone owned_by: el proveedor va en el prefijo del id
+    // ("anthropic/claude-sonnet-5" → "anthropic"). Se deriva como fallback.
+    ownedBy:             m.owned_by ?? (m.id.includes('/') ? m.id.split('/')[0] : undefined),
+    created:             typeof m.created === 'number' ? m.created : undefined,
+  };
+}
+
 // Compatible with OpenAI, LM Studio, OpenRouter, and any OpenAI-compatible API
 export class OpenAIProvider implements LLMProvider {
   readonly type: string;
@@ -282,8 +329,8 @@ export class OpenAIProvider implements LLMProvider {
       );
     }
     if (!res.ok) return [];
-    const data = await res.json() as { data: Array<{ id: string }> };
-    return (data.data ?? []).map((m) => ({ id: m.id, name: m.id }));
+    const data = await res.json() as { data?: RawModelEntry[] };
+    return (data.data ?? []).map(parseModelEntry);
   }
 
   async validate(): Promise<{ valid: boolean; error?: string }> {
