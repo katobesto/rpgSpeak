@@ -175,7 +175,7 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
         const name = rawName.trim();
         const char = matchCharacterName(name, speakerCandidates);
         const avatarEl = char?.avatar
-          ? `<img src="${char.avatar}" alt="${char.name}" />`
+          ? `<span class="speaker-avatar" style="background-image:url('${char.avatar}')" role="img" aria-label="${char.name}"></span>`
           : `<span class="speaker-initials">${name.charAt(0).toUpperCase()}</span>`;
         return `<p class="speaker-line"><span class="speaker-tag">${avatarEl}<strong>${char?.name ?? name}:</strong></span>`;
       }

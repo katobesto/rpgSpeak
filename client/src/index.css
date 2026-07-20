@@ -233,7 +233,9 @@ body {
   line-height: 1;
 }
 
-.narrator-content .speaker-tag img {
+.narrator-content .speaker-tag img,
+.narrator-content .speaker-avatar {
+  display: inline-block;
   width: 28px;
   height: 28px;
   border-radius: 50%;
@@ -241,6 +243,8 @@ body {
   border: 2px solid rgba(124, 58, 237, 0.45);
   flex-shrink: 0;
   box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
+  background-size: cover;
+  background-position: center;
 }
 
 .narrator-content .speaker-initials {
@@ -256,6 +260,47 @@ body {
   flex-shrink: 0;
   font-weight: 700;
   border: 2px solid rgba(124, 58, 237, 0.45);
+}
+
+/* Desktop: avatar del hablante como recuadro grande con degradado a transparente,
+   encuadrado y centrado verticalmente con el diálogo (en vez del círculo pequeño). */
+@media (min-width: 640px) {
+  .narrator-content p.speaker-line {
+    align-items: center;
+    gap: 14px;
+  }
+
+  .narrator-content .speaker-tag {
+    gap: 12px;
+  }
+
+  .narrator-content .speaker-avatar {
+    width: 88px;
+    height: 88px;
+    border-radius: 12px;
+    border: none;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+    position: relative;
+  }
+
+  .narrator-content .speaker-avatar::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 12px;
+    background: linear-gradient(to right, rgba(0,0,0,0.4) 0%, transparent 75%);
+  }
+
+  .narrator-content .speaker-initials {
+    width: 88px;
+    height: 88px;
+    border-radius: 12px;
+    font-size: 30px;
+  }
+
+  .narrator-content .speaker-tag strong {
+    font-size: 1.05em;
+  }
 }
 
 .narrator-content .speaker-tag strong {
