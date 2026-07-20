@@ -834,7 +834,9 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       messages: trimmedMessages,
       model: modelId,
       contextSize,
-      temperature: opts.overrides?.temperature ?? activeChar?.temperature,
+      // Tono global manda sobre el valor por personaje; el override puntual (regenerar
+      // con otra temp) sigue teniendo prioridad. Modo thinking la ignora (ver provider).
+      temperature: opts.overrides?.temperature ?? settings.generationTemperature ?? activeChar?.temperature,
       maxTokens: resolvedMaxTokens,
       topP: activeChar?.llmParams?.topP,
       topK: activeChar?.llmParams?.topK,

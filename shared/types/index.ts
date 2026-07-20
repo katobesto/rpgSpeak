@@ -438,6 +438,9 @@ export interface AppSettings {
   autoSummarizeThreshold: number;
   maxResponseTokens: number | null;  // null = sin límite (deja decidir al modelo)
   defaultContextLength: number;       // ventana de contexto de entrada por defecto
+  // Tono de respuesta del LLM (temperatura de muestreo). Global; manda sobre el
+  // valor por personaje. Ignorada por modelos en modo thinking (p.ej. DeepSeek).
+  generationTemperature: number;      // ~0.4 preciso · ~0.7 equilibrado · ~1.0 expresivo
   streamingEnabled: boolean;
   layoutMode: 'default' | 'compact' | 'wide';
   sidebarPosition: 'left' | 'right';

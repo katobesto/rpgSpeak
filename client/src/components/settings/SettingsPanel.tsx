@@ -20,7 +20,7 @@ import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
 
 type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats' | 'backup';
 
-const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'characterCoherencePrompt', 'sceneImagePrompt', 'charImagePrompt', 'backgroundImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'summaryBlockSize', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort'];
+const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'characterCoherencePrompt', 'sceneImagePrompt', 'charImagePrompt', 'backgroundImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'summaryBlockSize', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort', 'generationTemperature'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret', 'bzComfyUrl', 'bzComfyApiToken', 'bzComfyWorkflow'];
 
@@ -272,6 +272,39 @@ export function SettingsPanel() {
                           <option value="max">Máximo</option>
                         </select>
                       </div>
+                    )}
+                  </Section>
+
+                  <Section title="Tono de respuesta">
+                    <p className="text-xs text-text-muted mb-2 leading-relaxed">
+                      Controla la <strong className="text-text-secondary">temperatura de muestreo</strong> del modelo: más bajo = respuestas más estables y ceñidas a lo probable; más alto = más variadas y espontáneas. No cambia la obediencia al prompt ni corrige la complacencia. Global, manda sobre el valor del personaje.
+                    </p>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { label: 'Preciso',     temp: 0.4, hint: 'Estable, coherente' },
+                        { label: 'Equilibrado', temp: 0.7, hint: 'Punto medio' },
+                        { label: 'Expresivo',   temp: 1.0, hint: 'Variado, espontáneo' },
+                      ].map((opt) => {
+                        const active = Math.abs((draft.generationTemperature ?? 0.7) - opt.temp) < 0.15;
+                        return (
+                          <button
+                            key={opt.label}
+                            type="button"
+                            onClick={() => update('generationTemperature', opt.temp)}
+                            className={`flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg border text-left transition-colors ${active ? 'border-accent text-accent' : 'border-border text-text-secondary hover:border-accent/50'}`}
+                            style={{ background: active ? 'var(--accent-muted)' : 'var(--surface-1)' }}
+                          >
+                            <span className="text-sm font-medium">{opt.label}</span>
+                            <span className="text-[10px] text-text-muted">{opt.hint} · {opt.temp}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    {draft.reasoningEnabled && (
+                      <p className="text-[11px] text-amber-500/90 mt-2 flex items-start gap-1">
+                        <TriangleAlert size={12} className="mt-0.5 flex-shrink-0" />
+                        <span>Con el modo <strong>thinking</strong> activado, el modelo ignora la temperatura — este ajuste no tendrá efecto hasta que lo desactives (o uses un modelo que sí la respete).</span>
+                      </p>
                     )}
                   </Section>
 
