@@ -174,10 +174,77 @@ function makeEllipsisMessage(index: number, conversationId: string): Message {
   };
 }
 
+// ── Presencia por escena narrada ─────────────────────────────────────────────
+//
+// Las escenas del NARRADOR son públicas: los presentes las viven aunque no se
+// les nombre en cada frase. Marcar "presenció solo si aparece nombrado" (regla
+// antigua) congelaba al personaje en una historia narrada larga — muchas escenas
+// que sí vivió no lo nombraban y se convertían en elipsis.
+//
+// En su lugar, agrupamos los beats de narrador en ESCENAS y consideramos que el
+// personaje presenció toda la escena si estuvo presente en cualquiera de sus
+// beats. Una escena crece mientras los beats compartan a alguien con el elenco
+// acumulado (misma reunión, aunque el narrador vaya turnando nombres); un beat
+// con elenco totalmente disjunto abre escena nueva (probablemente otro lugar /
+// trama paralela). Los beats ambientales (nadie nombrado) heredan la escena en
+// curso, y una escena sin nadie en exclusiva es pública para todos.
+//
+// Límite conocido: si el narrador NUNCA co-menciona a dos personajes que están
+// juntos (los nombra siempre por separado), la escena puede fragmentarse. En la
+// práctica el narrador establece a los presentes juntos al abrir la escena.
+
+/** Para cada beat de narrador (por messageId), el conjunto de charIds presentes
+ *  en su escena. Beats de personaje individual no forman escenas narradas. */
+function computeNarratedScenePresence(
+  messages: Message[],
+  knownChars: Character[],
+): Map<string, Set<string>> {
+  const regexes = knownChars.map((c) => ({ id: c.id, re: nameMentionRegex(c.name) }));
+  interface Scene { present: Set<string>; beatIds: string[]; }
+  const scenes: Scene[] = [];
+  let current: Scene | null = null;
+
+  for (const m of messages) {
+    if (m.role !== 'assistant') continue;
+    const isNarrator = Boolean(m.metadata?.narrator) || !m.characterId;
+    if (!isNarrator) continue;
+
+    const named = new Set<string>();
+    for (const r of regexes) if (r.re.test(m.content)) named.add(r.id);
+
+    if (!current) {
+      current = { present: new Set(named), beatIds: [m.id] };
+    } else if (named.size === 0) {
+      current.beatIds.push(m.id); // ambiental: continúa la escena en curso
+    } else {
+      let overlap = false;
+      for (const id of named) if (current.present.has(id)) { overlap = true; break; }
+      if (overlap || current.present.size === 0) {
+        for (const id of named) current.present.add(id);
+        current.beatIds.push(m.id);
+      } else {
+        scenes.push(current);
+        current = { present: new Set(named), beatIds: [m.id] };
+      }
+    }
+  }
+  if (current) scenes.push(current);
+
+  const map = new Map<string, Set<string>>();
+  for (const s of scenes) for (const id of s.beatIds) map.set(id, s.present);
+  return map;
+}
+
 /** Devuelve solo los mensajes que `activeChar` presenció, con elipsis en los
- *  huecos. Exportada para reutilizarla en el resumen por personaje (engine). */
-export function filterWitnessedMessages(messages: Message[], activeChar: Character): Message[] {
-  const nameRe = nameMentionRegex(activeChar.name);
+ *  huecos. Exportada para reutilizarla en el resumen por personaje (engine).
+ *  `allChars` (elenco completo) permite agrupar escenas narradas por presencia;
+ *  sin él, las escenas narradas se tratan como públicas (fallback seguro). */
+export function filterWitnessedMessages(
+  messages: Message[],
+  activeChar: Character,
+  allChars: Character[] = [activeChar],
+): Message[] {
+  const scenePresence = computeNarratedScenePresence(messages, allChars);
   const out: Message[] = [];
   let gapOpen = false;
   let ellipsisCount = 0;
@@ -195,9 +262,12 @@ export function filterWitnessedMessages(messages: Message[], activeChar: Charact
     } else if (assistant.characterId === activeChar.id) {
       witnessed = true;
     } else if (assistant.characterId && !assistant.metadata?.narrator) {
-      witnessed = false; // escena privada con otro personaje
+      witnessed = false; // charla privada del jugador con otro personaje
     } else {
-      witnessed = nameRe.test(assistant.content); // narrador: presente si nombrado
+      // Narrador: presenció si estuvo presente en la escena, o si la escena no
+      // tiene a nadie en exclusiva (puramente ambiental → pública).
+      const present = scenePresence.get(assistant.id);
+      witnessed = !present || present.size === 0 || present.has(activeChar.id);
     }
 
     if (witnessed) {
@@ -798,7 +868,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // ANTES de la ventana para que esta se llene con mensajes que sí verá.
   const sourceMessages =
     !narratorMode && groupCharacters.length > 0 && character
-      ? filterWitnessedMessages(messages, character)
+      ? filterWitnessedMessages(messages, character, allKnownChars)
       : messages;
 
   const WINDOW_STEP = 8;

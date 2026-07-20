@@ -1494,7 +1494,11 @@ async function generateCharacterSummary(
   if (!conv) return;
 
   const allMessages = msgRepo.findByConversation(conversationId) as Message[];
-  const witnessed   = filterWitnessedMessages(allMessages, character)
+  // Elenco completo → mismo agrupado de escenas narradas que en buildContext.
+  const allChars = conv.characters
+    .map((c) => charRepo.findById(c.characterId))
+    .filter((c): c is Character => c !== null);
+  const witnessed   = filterWitnessedMessages(allMessages, character, allChars)
     .filter((m) => m.role !== 'system'); // fuera elipsis y mensajes de sistema
   const recentMessages = witnessed.slice(-6);
   if (recentMessages.length < 2) return;
