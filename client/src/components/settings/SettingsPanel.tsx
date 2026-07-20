@@ -24,6 +24,23 @@ const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'default
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret', 'bzComfyUrl', 'bzComfyApiToken', 'bzComfyWorkflow'];
 
+// ─── Ejemplo compacto "mal / bien" para explicar un parámetro de muestreo ────
+function ParamExample({ bad, good, note }: { bad: string; good: string; note?: string }) {
+  return (
+    <div className="mt-1.5 rounded-lg border border-border/60 px-2.5 py-2 text-[11px] leading-relaxed space-y-1" style={{ background: 'rgba(0,0,0,0.15)' }}>
+      <div className="flex gap-1.5">
+        <span className="text-red-400/80 flex-shrink-0">✗</span>
+        <span className="text-text-muted italic">{bad}</span>
+      </div>
+      <div className="flex gap-1.5">
+        <span className="text-emerald-400/80 flex-shrink-0">✓</span>
+        <span className="text-text-secondary italic">{good}</span>
+      </div>
+      {note && <p className="text-text-muted not-italic pt-0.5">{note}</p>}
+    </div>
+  );
+}
+
 export function SettingsPanel() {
   const [tab, setTab] = useState<STab>('profile');
   const [genTab, setGenTab] = useState<'llm' | 'fast-llm' | 'embeddings' | 'images'>('llm');
@@ -277,7 +294,7 @@ export function SettingsPanel() {
 
                   <Section title="Tono de respuesta">
                     <p className="text-xs text-text-muted mb-2 leading-relaxed">
-                      Controla la <strong className="text-text-secondary">temperatura de muestreo</strong> del modelo: más bajo = respuestas más estables y ceñidas a lo probable; más alto = más variadas y espontáneas. No cambia la obediencia al prompt ni corrige la complacencia. Global, manda sobre el valor del personaje.
+                      Controla la <strong className="text-text-secondary">temperatura de muestreo</strong>: cuánto se aleja el modelo de su respuesta "más probable" (que suele coincidir con la más genérica y complaciente). Más bajo = predecible y estable; más alto = más decidido y variado, con algo más de riesgo de incoherencia. Global, manda sobre el valor del personaje.
                     </p>
                     <div className="grid grid-cols-3 gap-2">
                       {[
@@ -300,6 +317,11 @@ export function SettingsPanel() {
                         );
                       })}
                     </div>
+                    <ParamExample
+                      bad="No sé cómo sentirme... por un lado, me halaga. Pero no te digo que no, quizá algún día podríamos hablarlo despacio."
+                      good="No. Ni siquiera como fantasía. Cuando estoy contigo, estoy contigo, y punto."
+                      note='Misma pregunta del jugador, dos temperaturas: baja (izquierda) tiende a caer en la respuesta genérica y evasiva porque es la más "probable"; alta (derecha) se aleja de ese camino trillado hacia algo más decidido — aunque no lo garantiza, es una apuesta con más varianza.'
+                    />
                     {draft.reasoningEnabled && (
                       <p className="text-[11px] text-amber-500/90 mt-2 flex items-start gap-1">
                         <TriangleAlert size={12} className="mt-0.5 flex-shrink-0" />
@@ -312,29 +334,48 @@ export function SettingsPanel() {
                         Avanzado — top_p / penalizaciones de repetición
                       </summary>
                       <div className="mt-2 space-y-3 pl-3 border-l border-border">
-                        <Input
-                          type="number" min={0} max={1} step={0.05}
-                          label="Top P (nucleus sampling)"
-                          value={draft.generationTopP ?? 1.0}
-                          onChange={(e) => update('generationTopP', Number(e.target.value))}
-                          hint="1.0 = sin recortar candidatos. Baja a ~0.9 para descartar los tokens menos probables sin restringir tanto como la temperatura."
-                        />
-                        <Input
-                          type="number" min={-2} max={2} step={0.1}
-                          label="Frequency penalty"
-                          value={draft.generationFrequencyPenalty ?? 0}
-                          onChange={(e) => update('generationFrequencyPenalty', Number(e.target.value))}
-                          hint="Penaliza tokens según cuánto se repiten. Súbelo (~0.3–0.6) si notas al modelo recalcando demasiado elogios o logros ya mencionados del personaje."
-                        />
-                        <Input
-                          type="number" min={-2} max={2} step={0.1}
-                          label="Presence penalty"
-                          value={draft.generationPresencePenalty ?? 0}
-                          onChange={(e) => update('generationPresencePenalty', Number(e.target.value))}
-                          hint="Penaliza con un castigo fijo cualquier token ya usado en el contexto, aparezca una vez o mil. Súbelo (~0.3–0.6) para que el modelo evite reciclar las mismas muletillas evasivas ('no lo sé', 'quizá')."
-                        />
+                        <div>
+                          <Input
+                            type="number" min={0} max={1} step={0.05}
+                            label="Top P (nucleus sampling)"
+                            value={draft.generationTopP ?? 1.0}
+                            onChange={(e) => update('generationTopP', Number(e.target.value))}
+                            hint="1.0 = sin recortar candidatos. Baja a ~0.9 para descartar solo los tokens menos probables, sin restringir tanto como bajar la temperatura."
+                          />
+                          <p className="text-[11px] text-text-muted mt-1 pl-0.5">
+                            Ejemplo: para completar "El pasillo estaba...", el modelo baraja candidatos como <em>oscuro (35%), vacío (25%), en silencio (15%) ... catedralicio (0.2%)</em>. Con top_p=1.0 hasta "catedralicio" tiene su ínfima chance; con top_p=0.9 se descartan las opciones más raras de la cola y solo compiten las palabras razonablemente probables. No decide el TEMA de la respuesta, solo poda los extremos improbables.
+                          </p>
+                        </div>
+                        <div>
+                          <Input
+                            type="number" min={-2} max={2} step={0.1}
+                            label="Frequency penalty"
+                            value={draft.generationFrequencyPenalty ?? 0}
+                            onChange={(e) => update('generationFrequencyPenalty', Number(e.target.value))}
+                            hint="Penaliza cada token MÁS cuantas más veces se repite. Súbelo (~0.3–0.6) si el modelo insiste demasiado en los mismos elogios o logros del personaje."
+                          />
+                          <ParamExample
+                            bad="Mochi, eres tan valiente. De verdad, tan valiente. Hasta cuando dudas, sigues siendo tan valiente a tu manera."
+                            good="Mochi, eres valiente. De verdad. Hasta cuando dudas, hay algo en ti que no se rinde."
+                            note='Sin penalización, "tan valiente" es la frase segura y el modelo tiende a repetirla dentro de la misma respuesta. Con frequency_penalty alto, cada repetición cuesta más caro y el modelo busca otra forma de decirlo.'
+                          />
+                        </div>
+                        <div>
+                          <Input
+                            type="number" min={-2} max={2} step={0.1}
+                            label="Presence penalty"
+                            value={draft.generationPresencePenalty ?? 0}
+                            onChange={(e) => update('generationPresencePenalty', Number(e.target.value))}
+                            hint="Penaliza con un castigo FIJO cualquier token que ya apareció en el contexto, sea una vez o mil. Súbelo (~0.3–0.6) para que el modelo no reutilice las mismas muletillas evasivas turno tras turno."
+                          />
+                          <ParamExample
+                            bad='Turno 1: "No lo sé, quizá algún día." · Turno 5: "Sigo sin saberlo, quizá más adelante." · Turno 9: "No lo sé todavía, quizá..."'
+                            good='Turno 1: "No lo sé, quizá algún día." · Turno 5: "Ya te lo dije: eso no." · Turno 9: "Te lo repito porque va en serio: no."'
+                            note='La diferencia con frequency_penalty: esta penalización no mira CUÁNTAS veces se repite algo, solo SI ya apareció en el historial visible — por eso frena bien las muletillas recicladas turno tras turno, no solo dentro de una misma respuesta.'
+                          />
+                        </div>
                         <p className="text-[10px] text-text-muted">
-                          Valores negativos hacen lo contrario (fomentan la repetición) — normalmente no interesa aquí. 0 = desactivado.
+                          Valores negativos hacen lo contrario (fomentan la repetición) — normalmente no interesa aquí. 0 = desactivado. Ninguno de los tres corrige la complacencia por sí solo: son apuestas estadísticas que se combinan con la temperatura y con la directiva de "Coherencia del personaje" de más abajo.
                         </p>
                       </div>
                     </details>
