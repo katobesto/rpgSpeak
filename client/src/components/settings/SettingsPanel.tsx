@@ -20,7 +20,7 @@ import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
 
 type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats' | 'backup';
 
-const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'sceneImagePrompt', 'charImagePrompt', 'backgroundImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'summaryBlockSize', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort'];
+const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'characterCoherencePrompt', 'sceneImagePrompt', 'charImagePrompt', 'backgroundImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'summaryBlockSize', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret', 'bzComfyUrl', 'bzComfyApiToken', 'bzComfyWorkflow'];
 
@@ -314,6 +314,19 @@ export function SettingsPanel() {
                       onChange={(v) => update('narratorPrompt', v)}
                       rows={14}
                       mono
+                    />
+                  </Section>
+
+                  <Section title="Coherencia del personaje">
+                    <p className="text-xs text-text-muted mb-1 leading-relaxed">
+                      <span className="text-accent/70 font-mono text-[10px] mr-1">[SYSTEM]</span>
+                      Se inyecta <strong className="text-text-secondary">pegado al mensaje del usuario</strong> (máxima autoridad, no se diluye en conversaciones largas). Blinda que los personajes sean auténticos: opinión propia, saber decir "no", firmeza de valores y límites, sin complacencia. Solo se aplica cuando hay personajes con vínculo. Vacío = desactivado.
+                    </p>
+                    <RestorablePrompt
+                      settingsKey="characterCoherencePrompt"
+                      value={draft.characterCoherencePrompt ?? ''}
+                      onChange={(v) => update('characterCoherencePrompt', v)}
+                      rows={10}
                     />
                   </Section>
 

@@ -33,6 +33,7 @@ export interface BuildContextOptions {
   affinitySystemPrompt?: string;
   responseFormatPrompt?: string;  // character mode: response format instruction
   narratorPrompt?: string;        // narrator mode: full narrator instructions; use {{PERSONAJES}}
+  characterCoherencePrompt?: string;  // directiva de coherencia inyectada junto al mensaje del usuario (footer)
   fastLlmEnabled?: boolean;   // when true, skip affinity tag instructions (fast LLM handles it)
   memoryInjectionPrompt?: string; // template with {{MEMORIAS}} — injected just before last user message
   // Context index injection
@@ -579,6 +580,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     affinitySystemPrompt,
     responseFormatPrompt,
     narratorPrompt,
+    characterCoherencePrompt,
     fastLlmEnabled = false,
     memoryInjectionPrompt,
     contextIndexInjectionEnabled = false,
@@ -1142,6 +1144,17 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       history.push({ role: 'system', content: presenceLedger });
       footerCount++;
     }
+  }
+
+  // 9d. Coherencia del personaje — recordatorio de máxima autoridad, pegado al
+  // mensaje del jugador. Consolida integridad, opinión propia, decir "no" y
+  // firmeza de límites. Vive aquí (no solo en el globalSystemPrompt, que va al
+  // INICIO) porque en conversaciones largas el modelo pondera lo cercano a la
+  // generación y la regla del inicio se diluye. Solo cuando hay personajes con
+  // vínculo (afinidades): en una aventura sin relaciones no hace falta.
+  if (needsSplit && characterCoherencePrompt?.trim() && (characterAffinities?.length ?? 0) > 0) {
+    history.push({ role: 'system', content: characterCoherencePrompt.trim() });
+    footerCount++;
   }
 
   // 10. Last user message (generation point)

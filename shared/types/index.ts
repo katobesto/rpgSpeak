@@ -429,6 +429,10 @@ export interface AppSettings {
   responseFormatPrompt: string;
   narratorPrompt: string;
   affinitySystemPrompt: string;
+  // Coherencia del personaje — se inyecta pegado al mensaje del usuario (footer)
+  // para máxima autoridad en conversaciones largas. Consolida integridad,
+  // opinión propia, decir "no" y firmeza de valores/límites.
+  characterCoherencePrompt: string;
   contextStrategy: 'rolling' | 'summary' | 'hybrid';
   maxContextMessages: number;
   autoSummarizeThreshold: number;
