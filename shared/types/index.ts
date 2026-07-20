@@ -102,6 +102,7 @@ export interface LLMParams {
   topP?: number;
   topK?: number;
   repetitionPenalty?: number;
+  presencePenalty?: number;
   maxTokens?: number;
   stopSequences?: string[];
   seed?: number;
@@ -441,6 +442,15 @@ export interface AppSettings {
   // Tono de respuesta del LLM (temperatura de muestreo). Global; manda sobre el
   // valor por personaje. Ignorada por modelos en modo thinking (p.ej. DeepSeek).
   generationTemperature: number;      // ~0.4 preciso · ~0.7 equilibrado · ~1.0 expresivo
+  // Parámetros avanzados de muestreo — global, mandan sobre character.llmParams.
+  // Ignorados por modelos en modo thinking, igual que la temperatura.
+  generationTopP: number;             // 1.0 = sin recorte (default OpenAI-compatible)
+  /** Penaliza tokens PROPORCIONALMENTE a cuántas veces ya se repitieron — reduce
+   *  muletillas y elogios reiterados ("me regalaste…", "eres increíble…"). 0 = off. */
+  generationFrequencyPenalty: number;
+  /** Penaliza con un castigo FIJO cualquier token ya usado en el contexto — empuja
+   *  a no reciclar el mismo vocabulario de evasivas ("no lo sé", "quizá"). 0 = off. */
+  generationPresencePenalty: number;
   streamingEnabled: boolean;
   layoutMode: 'default' | 'compact' | 'wide';
   sidebarPosition: 'left' | 'right';
@@ -547,6 +557,7 @@ export interface GenerateRequest {
   topP?: number;
   topK?: number;
   repetitionPenalty?: number;
+  presencePenalty?: number;
   stopSequences?: string[];
   stream: boolean;
   /** When true, adds allow_fallbacks:false to OpenAI-compatible requests (e.g. OpenRouter). */

@@ -111,6 +111,7 @@ export class OpenAIProvider implements LLMProvider {
         temperature: request.temperature,
         top_p: request.topP,
         frequency_penalty: request.repetitionPenalty,
+        presence_penalty: request.presencePenalty,
       }),
       // Si no hay límite explícito, enviamos -1 para LM Studio / OpenRouter que lo aceptan,
       // o lo omitimos si el valor es undefined (OpenAI real usa el máximo del modelo)

@@ -219,6 +219,9 @@ IMPORTANTISIMO: NO PUEDES INDICAR SI ES PRONTO PARA COMENZAR UNA RELACION, PORQU
   maxResponseTokens: null,       // null = sin límite
   defaultContextLength: 32768,   // ventana de contexto de entrada
   generationTemperature: 0.7,    // tono global (equilibrado); manda sobre el del personaje
+  generationTopP: 1.0,               // sin recorte por defecto
+  generationFrequencyPenalty: 0,     // sin penalizar por defecto
+  generationPresencePenalty: 0,      // sin penalizar por defecto
   streamingEnabled: true,
   layoutMode: 'default',
   sidebarPosition: 'left',

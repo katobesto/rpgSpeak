@@ -838,9 +838,12 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       // con otra temp) sigue teniendo prioridad. Modo thinking la ignora (ver provider).
       temperature: opts.overrides?.temperature ?? settings.generationTemperature ?? activeChar?.temperature,
       maxTokens: resolvedMaxTokens,
-      topP: activeChar?.llmParams?.topP,
+      // Mismo patrón que temperature: el ajuste global manda sobre el valor por
+      // personaje. Modo thinking los ignora todos (ver provider).
+      topP: settings.generationTopP ?? activeChar?.llmParams?.topP,
       topK: activeChar?.llmParams?.topK,
-      repetitionPenalty: activeChar?.llmParams?.repetitionPenalty,
+      repetitionPenalty: settings.generationFrequencyPenalty ?? activeChar?.llmParams?.repetitionPenalty,
+      presencePenalty: settings.generationPresencePenalty ?? activeChar?.llmParams?.presencePenalty,
       stopSequences: activeChar?.llmParams?.stopSequences,
       stream: true,
       disableFallbacks: settings.disableFallbacks,

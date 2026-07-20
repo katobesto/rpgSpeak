@@ -20,7 +20,7 @@ import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
 
 type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats' | 'backup';
 
-const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'characterCoherencePrompt', 'sceneImagePrompt', 'charImagePrompt', 'backgroundImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'summaryBlockSize', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort', 'generationTemperature'];
+const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'characterCoherencePrompt', 'sceneImagePrompt', 'charImagePrompt', 'backgroundImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'summaryBlockSize', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort', 'generationTemperature', 'generationTopP', 'generationFrequencyPenalty', 'generationPresencePenalty'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret', 'bzComfyUrl', 'bzComfyApiToken', 'bzComfyWorkflow'];
 
@@ -303,9 +303,41 @@ export function SettingsPanel() {
                     {draft.reasoningEnabled && (
                       <p className="text-[11px] text-amber-500/90 mt-2 flex items-start gap-1">
                         <TriangleAlert size={12} className="mt-0.5 flex-shrink-0" />
-                        <span>Con el modo <strong>thinking</strong> activado, el modelo ignora la temperatura — este ajuste no tendrá efecto hasta que lo desactives (o uses un modelo que sí la respete).</span>
+                        <span>Con el modo <strong>thinking</strong> activado, el modelo ignora estos parámetros de muestreo — no tendrán efecto hasta que lo desactives (o uses un modelo que sí los respete).</span>
                       </p>
                     )}
+
+                    <details className="mt-3 group">
+                      <summary className="text-xs text-accent cursor-pointer select-none hover:underline w-fit">
+                        Avanzado — top_p / penalizaciones de repetición
+                      </summary>
+                      <div className="mt-2 space-y-3 pl-3 border-l border-border">
+                        <Input
+                          type="number" min={0} max={1} step={0.05}
+                          label="Top P (nucleus sampling)"
+                          value={draft.generationTopP ?? 1.0}
+                          onChange={(e) => update('generationTopP', Number(e.target.value))}
+                          hint="1.0 = sin recortar candidatos. Baja a ~0.9 para descartar los tokens menos probables sin restringir tanto como la temperatura."
+                        />
+                        <Input
+                          type="number" min={-2} max={2} step={0.1}
+                          label="Frequency penalty"
+                          value={draft.generationFrequencyPenalty ?? 0}
+                          onChange={(e) => update('generationFrequencyPenalty', Number(e.target.value))}
+                          hint="Penaliza tokens según cuánto se repiten. Súbelo (~0.3–0.6) si notas al modelo recalcando demasiado elogios o logros ya mencionados del personaje."
+                        />
+                        <Input
+                          type="number" min={-2} max={2} step={0.1}
+                          label="Presence penalty"
+                          value={draft.generationPresencePenalty ?? 0}
+                          onChange={(e) => update('generationPresencePenalty', Number(e.target.value))}
+                          hint="Penaliza con un castigo fijo cualquier token ya usado en el contexto, aparezca una vez o mil. Súbelo (~0.3–0.6) para que el modelo evite reciclar las mismas muletillas evasivas ('no lo sé', 'quizá')."
+                        />
+                        <p className="text-[10px] text-text-muted">
+                          Valores negativos hacen lo contrario (fomentan la repetición) — normalmente no interesa aquí. 0 = desactivado.
+                        </p>
+                      </div>
+                    </details>
                   </Section>
 
                   <Section title="Prompt de sistema global">
