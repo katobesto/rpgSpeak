@@ -303,13 +303,25 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
         isUser ? 'flex-row-reverse' : ''
       } ${highlighted ? 'msg-highlight' : ''}`}
     >
-      {/* Avatar */}
-      <div className="flex-shrink-0 mt-0.5">
-        {isUser ? (
-          <Avatar name="You" size="md" />
+      {/* Avatar — Desktop: large box with gradient fade */}
+      <div className="flex-shrink-0 hidden sm:flex sm:items-center">
+        {!isUser && characterAvatar ? (
+          <div
+            className="w-28 h-28 rounded-lg overflow-hidden flex-shrink-0 relative"
+            style={{
+              background: `linear-gradient(to right, rgba(0,0,0,0.4) 0%, transparent 70%), url('${characterAvatar}') center/cover`,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+            }}
+            title={characterName}
+          />
         ) : (
-          <Avatar name={characterName ?? 'AI'} src={characterAvatar} size="md" expandable />
+          <Avatar name={isUser ? 'You' : (characterName ?? 'AI')} size="md" expandable={!isUser} />
         )}
+      </div>
+
+      {/* Avatar — Mobile */}
+      <div className="flex-shrink-0 mt-0.5 sm:hidden">
+        <Avatar name={isUser ? 'You' : (characterName ?? 'AI')} src={!isUser ? characterAvatar : undefined} size="md" expandable={!isUser} />
       </div>
 
       {/* Bubble */}
