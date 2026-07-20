@@ -262,44 +262,45 @@ body {
   border: 2px solid rgba(124, 58, 237, 0.45);
 }
 
-/* Desktop: avatar del hablante como recuadro grande con degradado a transparente,
-   encuadrado y centrado verticalmente con el diálogo (en vez del círculo pequeño). */
+/* Desktop: la línea del hablante se convierte en una "barra de título" propia
+   (bloque de ancho completo, no una fila inline con el diálogo): la cara del
+   personaje se funde por la izquierda con un degradado a transparente hacia
+   el color de la barra, y el nombre queda en la zona ya despejada. El diálogo
+   sigue como párrafo normal justo debajo. Móvil no se toca (círculo 28px). */
 @media (min-width: 640px) {
   .narrator-content p.speaker-line {
-    align-items: center;
-    gap: 14px;
+    display: block;
+    margin: 16px 0 8px;
+    padding: 0;
   }
 
   .narrator-content .speaker-tag {
-    gap: 12px;
-  }
-
-  .narrator-content .speaker-avatar {
-    width: 88px;
-    height: 88px;
-    border-radius: 12px;
-    border: none;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+    display: flex;
+    align-items: center;
+    width: 100%;
+    height: 44px;
+    border-radius: 8px;
+    overflow: hidden;
     position: relative;
+    background-color: var(--surface-2);
+    background-image:
+      linear-gradient(to right, transparent 0px, var(--surface-2) 100px),
+      var(--avatar-url, none);
+    background-position: 0 0, left center;
+    background-size: 100% 100%, cover;
+    background-repeat: no-repeat, no-repeat;
+    padding-left: 110px;
   }
 
-  .narrator-content .speaker-avatar::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: 12px;
-    background: linear-gradient(to right, rgba(0,0,0,0.4) 0%, transparent 75%);
-  }
-
-  .narrator-content .speaker-initials {
-    width: 88px;
-    height: 88px;
-    border-radius: 12px;
-    font-size: 30px;
+  /* El círculo interior queda superseded por el fondo de la propia barra */
+  .narrator-content .speaker-tag .speaker-avatar,
+  .narrator-content .speaker-tag .speaker-initials {
+    display: none;
   }
 
   .narrator-content .speaker-tag strong {
-    font-size: 1.05em;
+    font-size: 0.95em;
+    position: relative;
   }
 }
 

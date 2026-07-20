@@ -174,10 +174,13 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
       (match, rawName) => {
         const name = rawName.trim();
         const char = matchCharacterName(name, speakerCandidates);
+        // --avatar-url alimenta el fondo de la "barra de título" en desktop (CSS);
+        // el <span class="speaker-avatar"> interior es el círculo visible en móvil.
+        const tagStyle = char?.avatar ? ` style="--avatar-url:url('${char.avatar}')"` : '';
         const avatarEl = char?.avatar
           ? `<span class="speaker-avatar" style="background-image:url('${char.avatar}')" role="img" aria-label="${char.name}"></span>`
           : `<span class="speaker-initials">${name.charAt(0).toUpperCase()}</span>`;
-        return `<p class="speaker-line"><span class="speaker-tag">${avatarEl}<strong>${char?.name ?? name}:</strong></span>`;
+        return `<p class="speaker-line"><span class="speaker-tag"${tagStyle}>${avatarEl}<strong>${char?.name ?? name}:</strong></span>`;
       }
     );
   }, [message.content, isNarrator, speakerCandidates]);
