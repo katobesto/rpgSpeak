@@ -233,6 +233,16 @@ body {
   line-height: 1;
 }
 
+/* Clicable: abre la imagen completa (y la galería del personaje si tiene más
+   de una) en el lightbox — ver handleNarratorContentClick en MessageItem.tsx. */
+.narrator-content .speaker-tag[data-avatar] {
+  cursor: zoom-in;
+}
+
+.narrator-content .speaker-tag[data-avatar]:hover .speaker-avatar {
+  filter: brightness(1.12);
+}
+
 .narrator-content .speaker-tag img,
 .narrator-content .speaker-avatar {
   display: inline-block;
@@ -305,6 +315,10 @@ body {
   .narrator-content .speaker-tag strong {
     font-size: 0.95em;
     position: relative;
+  }
+
+  .narrator-content .speaker-tag[data-avatar]:hover {
+    filter: brightness(1.1);
   }
 }
 

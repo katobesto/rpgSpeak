@@ -1,20 +1,25 @@
 import { useEffect } from 'react';
-import { X, Download, RotateCcw } from 'lucide-react';
+import { X, Download, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useLightboxStore } from '../../stores/lightbox.store.ts';
 import { useImagePanZoom } from '../../hooks/useImagePanZoom.ts';
 import { useBackHandler } from '../../hooks/useBackHandler.ts';
 
 export function ImageLightbox() {
-  const { src, name, close } = useLightboxStore();
+  const { src, name, gallery, index, close, next, prev } = useLightboxStore();
   const { wrapRef, imgRef, reset, onMouseDown } = useImagePanZoom(!!src, src);
+  const hasGallery = gallery.length > 1;
 
-  // Escape key + mobile swipe-back
+  // Escape to close, ←/→ to navigate the gallery, mobile swipe-back
   useEffect(() => {
     if (!src) return;
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+      else if (hasGallery && e.key === 'ArrowRight') next();
+      else if (hasGallery && e.key === 'ArrowLeft') prev();
+    };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [src, close]);
+  }, [src, close, next, prev, hasGallery]);
   useBackHandler(!!src, close);
 
   // Prevent body scroll while open
@@ -36,8 +41,11 @@ export function ImageLightbox() {
         className="absolute top-0 left-0 right-0 flex items-center justify-between px-5 py-3 z-10 pointer-events-none"
         style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.65), transparent)' }}
       >
-        <span className="text-sm font-medium text-white/90 truncate max-w-[50vw] pointer-events-auto">
+        <span className="text-sm font-medium text-white/90 truncate max-w-[50vw] pointer-events-auto flex items-center gap-2">
           {name}
+          {hasGallery && (
+            <span className="text-white/50 tabular-nums font-normal">{index + 1} / {gallery.length}</span>
+          )}
         </span>
         <div className="flex items-center gap-1 pointer-events-auto" onClick={(e) => e.stopPropagation()}>
           <button
@@ -84,9 +92,28 @@ export function ImageLightbox() {
         />
       </div>
 
+      {hasGallery && (
+        <>
+          <button
+            onClick={(e) => { e.stopPropagation(); prev(); }}
+            title="Anterior (←)"
+            className="absolute left-3 top-1/2 -translate-y-1/2 p-2.5 rounded-full bg-black/40 hover:bg-black/60 text-white/70 hover:text-white transition-colors"
+          >
+            <ChevronLeft size={22} />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); next(); }}
+            title="Siguiente (→)"
+            className="absolute right-3 top-1/2 -translate-y-1/2 p-2.5 rounded-full bg-black/40 hover:bg-black/60 text-white/70 hover:text-white transition-colors"
+          >
+            <ChevronRight size={22} />
+          </button>
+        </>
+      )}
+
       {/* Usage hint */}
       <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[11px] text-white/25 select-none pointer-events-none whitespace-nowrap">
-        Rueda: zoom · Arrastrar: mover · Doble clic: restablecer
+        {hasGallery ? '←/→: galería · ' : ''}Rueda: zoom · Arrastrar: mover · Doble clic: restablecer
       </div>
     </div>
   );

@@ -116,6 +116,21 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
     [groupCharacters],
   );
 
+  // El HTML del narrador es una string inyectada (dangerouslySetInnerHTML), así que
+  // el avatar del hablante (.speaker-tag) no puede llevar onClick de React — se
+  // delega aquí. Al abrir, se pasa la galería completa del personaje si tiene más
+  // de una imagen, para poder navegar con ←/→ en el lightbox.
+  const handleNarratorContentClick = React.useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+    const tag = (e.target as HTMLElement).closest('.speaker-tag[data-avatar]') as HTMLElement | null;
+    if (!tag) return;
+    const avatarUrl = tag.dataset.avatar;
+    const charName = tag.dataset.avatarName;
+    if (!avatarUrl || !charName) return;
+    const char = (groupCharacters ?? []).find((c) => c.name === charName);
+    const gallery = char?.gallery?.length ? char.gallery : undefined;
+    openLightbox(avatarUrl, charName, gallery);
+  }, [groupCharacters, openLightbox]);
+
   const html = useMemo(() => {
     if (!message.content) return '';
 
@@ -176,11 +191,14 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
         const char = matchCharacterName(name, speakerCandidates);
         // --avatar-url alimenta el fondo de la "barra de título" en desktop (CSS);
         // el <span class="speaker-avatar"> interior es el círculo visible en móvil.
+        // data-avatar/data-avatar-name permiten abrir el lightbox por delegación de
+        // eventos (este HTML es una string inyectada, no elementos React con onClick).
         const tagStyle = char?.avatar ? ` style="--avatar-url:url('${char.avatar}')"` : '';
+        const tagData = char?.avatar ? ` data-avatar="${char.avatar}" data-avatar-name="${char.name}"` : '';
         const avatarEl = char?.avatar
           ? `<span class="speaker-avatar" style="background-image:url('${char.avatar}')" role="img" aria-label="${char.name}"></span>`
           : `<span class="speaker-initials">${name.charAt(0).toUpperCase()}</span>`;
-        return `<p class="speaker-line"><span class="speaker-tag"${tagStyle}>${avatarEl}<strong>${char?.name ?? name}:</strong></span>`;
+        return `<p class="speaker-line"><span class="speaker-tag"${tagStyle}${tagData}>${avatarEl}<strong>${char?.name ?? name}:</strong></span>`;
       }
     );
   }, [message.content, isNarrator, speakerCandidates]);
@@ -403,6 +421,7 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
               ) : message.content ? (
                 <div
                   className={`prose${isNarrator ? ' narrator-content' : ''}`}
+                  onClick={isNarrator ? handleNarratorContentClick : undefined}
                   dangerouslySetInnerHTML={{ __html: html || message.content }}
                 />
               ) : null}
