@@ -283,13 +283,17 @@ body {
     overflow: hidden;
     position: relative;
     background-color: var(--surface-2);
+    /* La imagen se acota a 66px de ANCHO (no "cover" a lo ancho de toda la barra):
+       con la barra tan ancha y solo 44px de alto, "cover" escalaba en función del
+       ancho y dejaba un zoom extremo (apenas se veía el pelo). Al fijar el ancho
+       de render a 66px con alto automático, se conserva el encuadre de la cara. */
     background-image:
-      linear-gradient(to right, transparent 0px, var(--surface-2) 100px),
+      linear-gradient(to right, transparent 0px, transparent 56px, var(--surface-2) 66px),
       var(--avatar-url, none);
     background-position: 0 0, left center;
-    background-size: 100% 100%, cover;
+    background-size: 100% 100%, 66px auto;
     background-repeat: no-repeat, no-repeat;
-    padding-left: 110px;
+    padding-left: 78px;
   }
 
   /* El círculo interior queda superseded por el fondo de la propia barra */
