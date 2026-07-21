@@ -129,4 +129,26 @@ export const characterRoutes: FastifyPluginAsync = async (app) => {
 
     return reply.status(201).send({ success: true, data: updated });
   });
+
+  // POST /characters/:id/generate-scene-image
+  // Galería con escena/pose libre: el usuario escribe una escena, se funde con la
+  // descripción visual del personaje vía charImagePrompt, y se genera la imagen
+  // usando su avatar como referencia (cuando el proveedor lo soporta) para
+  // mantener consistencia de personaje.
+  app.post<{ Params: { id: string } }>('/:id/generate-scene-image', async (req, reply) => {
+    const { scenePrompt, providerId, modelId, workflowName } = (req.body ?? {}) as {
+      scenePrompt?: string;
+      providerId?: string;
+      modelId?: string;
+      workflowName?: string;
+    };
+
+    const updated = await service.generateSceneImage(req.params.id, scenePrompt ?? '', {
+      providerId,
+      modelId,
+      workflowName,
+    });
+
+    return reply.status(201).send({ success: true, data: updated });
+  });
 };

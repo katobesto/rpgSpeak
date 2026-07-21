@@ -6,6 +6,7 @@ import type { CreateCharacterInput, UpdateCharacterInput } from './character.sch
 import { SettingsService } from '../settings/settings.service.js';
 import { ProviderRepository } from '../providers/provider.repository.js';
 import { createProvider } from '../../core/llm/provider.factory.js';
+import { createImageProvider } from '../../core/image/image-provider.factory.js';
 import type { GenerateRequest } from '@rpgspeak/shared';
 import fs from 'fs';
 import path from 'path';
@@ -110,7 +111,8 @@ export class CharacterService {
       .replace('{{nombre}}',      character.name        ?? '')
       .replace('{{descripcion}}', character.description ?? '')
       .replace('{{personalidad}}', character.personality ?? '')
-      .replace('{{lore}}',        character.lore        ?? '');
+      .replace('{{lore}}',        character.lore        ?? '')
+      .replace('{{escena}}',      '(ninguna — genera su apariencia base en una pose neutra de retrato)');
 
     const llm = createProvider(provider);
     const request: GenerateRequest = {
@@ -124,6 +126,84 @@ export class CharacterService {
 
     const response = await llm.generate(request);
     return { description: response.content.trim() };
+  }
+
+  /**
+   * Galería con escena/pose libre: combina la descripción visual ya validada del
+   * personaje (imageDescription, o description/personalidad/lore si aún no existe)
+   * con el texto de escena que escribe el usuario, deja que el LLM configurado
+   * fusione ambos en un único prompt de imagen (mismo charImagePrompt que usa el
+   * generador de la ventana de edición), y genera la imagen usando el avatar del
+   * personaje como referencia cuando el proveedor lo soporta, para consistencia visual.
+   */
+  async generateSceneImage(
+    id: string,
+    scenePrompt: string,
+    overrides?: { providerId?: string; modelId?: string; workflowName?: string },
+  ): Promise<Character> {
+    const character = this.get(id);
+    const settings = settingsService.getAll();
+
+    const providerId =
+      overrides?.providerId ??
+      character.providerId ??
+      settings.defaultProviderId ??
+      'default-ollama';
+    const provider = providerRepo.findById(providerId);
+    if (!provider || !provider.isEnabled) {
+      throw new ValidationError('No hay un proveedor LLM configurado o habilitado.');
+    }
+
+    const modelId =
+      overrides?.modelId ??
+      character.modelId ??
+      provider.defaultModel ??
+      settings.defaultModelId;
+    if (!modelId) {
+      throw new ValidationError('No hay un modelo configurado. Ve a Settings y selecciona un modelo.');
+    }
+
+    const identityText = character.imageDescription?.trim() || character.description || '';
+    const escenaText = scenePrompt.trim() || '(ninguna — genera su apariencia base en una pose neutra de retrato)';
+    const promptTemplate = settings.charImagePrompt;
+    const llmPrompt = promptTemplate
+      .replace('{{nombre}}',       character.name         ?? '')
+      .replace('{{descripcion}}',  identityText)
+      .replace('{{personalidad}}', character.personality  ?? '')
+      .replace('{{lore}}',         character.lore         ?? '')
+      .replace('{{escena}}',       escenaText);
+
+    const llm = createProvider(provider);
+    const llmResponse = await llm.generate({
+      messages: [{ role: 'user', content: llmPrompt }],
+      model: modelId,
+      temperature: 0.7,
+      stream: false,
+    });
+    const finalImagePrompt = llmResponse.content.trim();
+
+    const imageProvider = createImageProvider(settings);
+    let buffer: Buffer, filename: string;
+
+    const avatarDiskPath = character.avatar
+      ? path.join(PROJECT_ROOT, 'data', 'images', character.avatar.replace(/^\/images\//, ''))
+      : null;
+
+    if (imageProvider.supportsReference && avatarDiskPath && fs.existsSync(avatarDiskPath)) {
+      ({ buffer, filename } = await imageProvider.generateWithReference!({
+        prompt: finalImagePrompt,
+        referenceImagePath: avatarDiskPath,
+        ...(overrides?.workflowName ? { workflowName: overrides.workflowName } : {}),
+      }));
+    } else {
+      ({ buffer, filename } = await imageProvider.generate({
+        prompt: finalImagePrompt,
+        workflowName: overrides?.workflowName ?? 'image_z_image_turbo',
+      }));
+    }
+
+    const base64 = buffer.toString('base64');
+    return this.addImage(id, base64, filename, false);
   }
 
   addImage(id: string, data: string, filename: string, setAsAvatar?: boolean): Character {

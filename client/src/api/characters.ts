@@ -27,4 +27,6 @@ export const charactersApi = {
     api.deleteWithBody<Character>(`/characters/${id}/images`, { path: imagePath }),
   generateComfyImage: (id: string, workflowName?: string) =>
     api.post<Character>(`/characters/${id}/generate-comfy`, { workflowName }),
+  generateSceneImage: (id: string, opts: { scenePrompt: string; providerId?: string; modelId?: string; workflowName?: string }) =>
+    api.post<Character>(`/characters/${id}/generate-scene-image`, opts),
 };

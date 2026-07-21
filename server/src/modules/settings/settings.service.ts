@@ -524,6 +524,9 @@ Descripción: {{descripcion}}
 Personalidad: {{personalidad}}
 Lore: {{lore}}
 
+ESCENA O POSE SOLICITADA: {{escena}}
+Si se especifica una escena o pose, el prompt debe reflejar esa acción, postura o contexto concretos — pero los rasgos físicos, cara, pelo y complexión del personaje deben mantenerse EXACTAMENTE como en su descripción, para conservar la consistencia visual. Si no se especifica ninguna escena, genera su apariencia base en una pose neutra de retrato.
+
 Responde SOLO con el prompt de imagen, sin explicaciones adicionales.`,
   // Prompt de mejora de descripción para fondos de la ventana de chat
   backgroundImagePrompt: `Eres un experto generando prompts en inglés para IA de generación de imágenes (Stable Diffusion / ComfyUI), especializado en fondos y escenarios para juegos de rol.

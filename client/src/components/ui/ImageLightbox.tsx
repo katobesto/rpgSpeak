@@ -1,21 +1,35 @@
-import { useEffect } from 'react';
-import { X, Download, RotateCcw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { X, Download, RotateCcw, ChevronLeft, ChevronRight, Sparkles, Loader2 } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useLightboxStore } from '../../stores/lightbox.store.ts';
 import { useImagePanZoom } from '../../hooks/useImagePanZoom.ts';
 import { useBackHandler } from '../../hooks/useBackHandler.ts';
+import { charactersApi } from '../../api/characters.ts';
 
 export function ImageLightbox() {
-  const { src, name, gallery, index, close, next, prev } = useLightboxStore();
+  const { src, name, gallery, index, characterId, close, next, prev, addGenerated } = useLightboxStore();
   const { wrapRef, imgRef, reset, onMouseDown } = useImagePanZoom(!!src, src);
   const hasGallery = gallery.length > 1;
+  const qc = useQueryClient();
 
-  // Escape to close, ←/→ to navigate the gallery, mobile swipe-back
+  const [scenePrompt, setScenePrompt] = useState('');
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+
+  // Reset the scene-generation panel whenever the lightbox targets a different character
+  useEffect(() => {
+    setScenePrompt('');
+    setGenError(null);
+  }, [characterId]);
+
+  // Escape to close, ←/→ to navigate the gallery (ignored while typing), mobile swipe-back
   useEffect(() => {
     if (!src) return;
     const handler = (e: KeyboardEvent) => {
+      const typing = (e.target as HTMLElement)?.tagName === 'TEXTAREA' || (e.target as HTMLElement)?.tagName === 'INPUT';
       if (e.key === 'Escape') close();
-      else if (hasGallery && e.key === 'ArrowRight') next();
-      else if (hasGallery && e.key === 'ArrowLeft') prev();
+      else if (!typing && hasGallery && e.key === 'ArrowRight') next();
+      else if (!typing && hasGallery && e.key === 'ArrowLeft') prev();
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -29,6 +43,23 @@ export function ImageLightbox() {
   }, [src]);
 
   if (!src) return null;
+
+  async function handleGenerate() {
+    if (!characterId || generating) return;
+    setGenerating(true);
+    setGenError(null);
+    try {
+      const updated = await charactersApi.generateSceneImage(characterId, { scenePrompt: scenePrompt.trim() });
+      const newUrl = updated.gallery[updated.gallery.length - 1];
+      if (newUrl) addGenerated(newUrl);
+      qc.invalidateQueries({ queryKey: ['characters'] });
+      setScenePrompt('');
+    } catch (err) {
+      setGenError(err instanceof Error ? err.message : 'Error desconocido generando la imagen');
+    } finally {
+      setGenerating(false);
+    }
+  }
 
   return (
     <div
@@ -111,10 +142,41 @@ export function ImageLightbox() {
         </>
       )}
 
-      {/* Usage hint */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[11px] text-white/25 select-none pointer-events-none whitespace-nowrap">
-        {hasGallery ? '←/→: galería · ' : ''}Rueda: zoom · Arrastrar: mover · Doble clic: restablecer
-      </div>
+      {characterId ? (
+        <div
+          className="absolute bottom-0 left-0 right-0 px-4 pt-8 pb-4 pointer-events-auto"
+          style={{ background: 'linear-gradient(to top, rgba(0,0,0,0.85) 30%, transparent)' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="max-w-xl mx-auto">
+            <div className="flex items-end gap-2">
+              <textarea
+                value={scenePrompt}
+                onChange={(e) => setScenePrompt(e.target.value)}
+                placeholder="Describe una escena o pose (opcional) — p.ej. «sentada en un banco del parque, leyendo un libro, atardecer»"
+                rows={2}
+                disabled={generating}
+                className="flex-1 resize-none rounded-lg px-3 py-2 text-sm bg-white/10 text-white placeholder:text-white/40 border border-white/15 focus:outline-none focus:border-white/40 disabled:opacity-50"
+              />
+              <button
+                onClick={handleGenerate}
+                disabled={generating}
+                title="El personaje mantiene su identidad visual (usa su avatar como referencia); la escena solo cambia pose, acción y contexto"
+                className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg bg-accent hover:bg-accent-hover text-white text-sm font-medium disabled:opacity-50 transition-colors flex-shrink-0"
+              >
+                {generating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                {generating ? 'Generando…' : 'Generar'}
+              </button>
+            </div>
+            {genError && <p className="mt-1.5 text-[11px] text-red-400">{genError}</p>}
+          </div>
+        </div>
+      ) : (
+        /* Usage hint */
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[11px] text-white/25 select-none pointer-events-none whitespace-nowrap">
+          {hasGallery ? '←/→: galería · ' : ''}Rueda: zoom · Arrastrar: mover · Doble clic: restablecer
+        </div>
+      )}
     </div>
   );
 }

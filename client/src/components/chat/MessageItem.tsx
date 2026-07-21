@@ -128,7 +128,7 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
     if (!avatarUrl || !charName) return;
     const char = (groupCharacters ?? []).find((c) => c.name === charName);
     const gallery = char?.gallery?.length ? char.gallery : undefined;
-    openLightbox(avatarUrl, charName, gallery);
+    openLightbox(avatarUrl, charName, gallery, char?.id);
   }, [groupCharacters, openLightbox]);
 
   const html = useMemo(() => {
