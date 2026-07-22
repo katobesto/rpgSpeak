@@ -1,4 +1,4 @@
-import { eq, like, sql, and } from 'drizzle-orm';
+import { eq, like, sql, and, desc } from 'drizzle-orm';
 import { getDb } from '../../db/index.js';
 import { stories, storyCharacters, type DbStory } from '../../db/schema.js';
 import type { Story, StoryCharacterLink, StoryEvent, StoryLocation } from '@rpgspeak/shared';
@@ -120,7 +120,7 @@ export class StoryRepository {
     let query = this.db.select().from(stories).$dynamic();
     if (conds.length === 1) query = query.where(conds[0]);
     else if (conds.length > 1) query = query.where(and(...conds));
-    const rows = query.all();
+    const rows = query.orderBy(desc(stories.createdAt)).all();
     return rows.map((r) => dbToStory(r, this.getChars(r.id)));
   }
 

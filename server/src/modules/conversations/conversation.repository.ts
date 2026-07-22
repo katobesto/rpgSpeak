@@ -123,7 +123,11 @@ export class ConversationRepository {
     if (conds.length === 1) query = query.where(conds[0]);
     else if (conds.length > 1) query = query.where(and(...conds));
 
-    const rows = query.orderBy(desc(conversations.updatedAt)).all();
+    // createdAt (no updatedAt): éste último no se actualiza al enviar mensajes,
+    // solo al editar metadatos de la conversación, lo que mezclaba el orden de
+    // forma inconsistente. createdAt da un "más nuevos arriba" predecible,
+    // igual que personajes e historias.
+    const rows = query.orderBy(desc(conversations.createdAt)).all();
     return rows.map((r) => dbToConversation(r, this.getChars(r.id), this.getStories(r.id)));
   }
 

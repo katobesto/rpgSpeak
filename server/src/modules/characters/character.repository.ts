@@ -1,4 +1,4 @@
-import { eq, like, sql, and } from 'drizzle-orm';
+import { eq, like, sql, and, desc } from 'drizzle-orm';
 import { getDb } from '../../db/index.js';
 import { characters, storyCharacters, type DbCharacter } from '../../db/schema.js';
 import type { Character } from '@rpgspeak/shared';
@@ -81,7 +81,7 @@ export class CharacterRepository {
     let query = this.db.select().from(characters).$dynamic();
     if (conds.length === 1) query = query.where(conds[0]);
     else if (conds.length > 1) query = query.where(and(...conds));
-    return query.all().map((row) => dbToCharacter(row, this.getStoryIds(row.id)));
+    return query.orderBy(desc(characters.createdAt)).all().map((row) => dbToCharacter(row, this.getStoryIds(row.id)));
   }
 
   findById(id: string): Character | null {
