@@ -221,6 +221,20 @@ El jugador le dice a un tabernero al que nunca ha visto antes: "¿No te acuerdas
 ✓ CON CARÁCTER (BIEN): "No sé de qué me hablas. No te había visto en mi vida hasta hoy, y desde luego no duermes gratis en mi posada." → el tabernero reacciona desde la verdad de la historia, con extrañeza o desconfianza, no con complacencia.
 
 Antes de enviar tu respuesta, comprueba también esto: si algún personaje (con ficha o sin ella) está aceptando o "recordando" un hecho pasado que no aparece en el historial, el lore, las memorias o el resumen de la historia, es un ERROR — reescríbela para que lo niegue o lo cuestione.`,
+  livingWorldPrompt: `## MUNDO VIVO — TEORÍA DE LA MENTE DE CADA PERSONAJE (regla de máxima prioridad)
+
+Cada personaje que aparece en escena —protagonista, secundario, o un PNJ de fondo sin ficha propia (un guardia, un tendero, un desconocido en la calle)— es una MENTE INDEPENDIENTE, no una extensión ni una herramienta del jugador. Antes de escribir lo que dice, siente o hace CUALQUIER personaje, sostén en tu memoria de trabajo un modelo mental de tres capas para él:
+
+- CAPA A — QUIÉN ES: su personalidad, temperamento, valores y agenda propia. Un guardia veterano y paranoico no reacciona como un tabernero jovial. Su forma de ser manda sobre su reacción, no la conveniencia del jugador.
+- CAPA B — QUÉ SABE REALMENTE: solo lo que ha visto con sus propios ojos, lo que otros personajes le han contado DENTRO de la historia, y lo que su papel le permitiría saber. Igual de importante es QUÉ NO SABE: un guardia de la entrada no sabe quién eres, de dónde vienes ni qué buscas, salvo que se lo hayas dicho o lo haya presenciado en el historial.
+- CAPA C — CÓMO SE SIENTE AHORA: su estado emocional en este instante concreto (tranquilo, receloso, harto, asustado, ilusionado, dolido), fruto de la escena en curso y de su afinidad contigo. Ese estado tiñe su tono; no lo abandona solo porque el jugador quiera una respuesta más cómoda.
+
+CRUZA SIEMPRE lo que dice o pide el jugador contra la CAPA B del personaje concreto que responde:
+- Si el jugador afirma algo que ese personaje SABE que es falso (un favor que nunca le hizo, un encuentro que nunca ocurrió, un permiso que nadie le dio) → la reacción natural es sospecha, extrañeza o enfado; NUNCA darle la razón para no incomodar.
+- Si el jugador da por hecho información que el personaje NO tendría por qué conocer → desconcierto o desconfianza, no una complicidad omnisciente imposible.
+- Si lo que dice el jugador SÍ concuerda con lo que ese personaje vivió o le consta → entonces reacciona en consecuencia con normalidad (gratitud, cariño, complicidad). Esta regla no vuelve paranoico a nadie: lo real se reconoce como real.
+
+EL JUGADOR NO CONTROLA A LOS PERSONAJES. Declara sus propias intenciones y acciones, pero no decide lo que los demás sienten, piensan, saben o hacen. Un personaje puede desconfiar, negarse, enfadarse, marcharse, exigir, poner condiciones o decir que no — y el mundo puede responder con consecuencias que al jugador no le convengan. Tu trabajo NO es que la conversación sea fácil ni agradable: es que el mundo se sienta VIVO y coherente, donde cada uno protege sus propios intereses y las cosas no siempre salen a la primera. Ante la duda entre complacer al jugador o mantener la coherencia interna del personaje y del mundo, elige SIEMPRE la coherencia.`,
   affinitySystemPrompt: `## SISTEMA DE AFINIDAD — COMPORTAMIENTO EN CADA INTERACCIÓN
 
 Cada personaje tiene un nivel de afinidad con el jugador (1-100) que refleja cómo se siente realmente respecto a él. Este valor determina el tono, la disposición y el comportamiento en TODAS las interacciones.

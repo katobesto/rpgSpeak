@@ -20,7 +20,7 @@ import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
 
 type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats' | 'backup';
 
-const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'characterCoherencePrompt', 'sceneImagePrompt', 'charImagePrompt', 'backgroundImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'summaryBlockSize', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort', 'generationTemperature', 'generationTopP', 'generationFrequencyPenalty', 'generationPresencePenalty'];
+const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'characterCoherencePrompt', 'livingWorldPrompt', 'sceneImagePrompt', 'charImagePrompt', 'backgroundImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'summaryBlockSize', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort', 'generationTemperature', 'generationTopP', 'generationFrequencyPenalty', 'generationPresencePenalty'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret', 'bzComfyUrl', 'bzComfyApiToken', 'bzComfyWorkflow'];
 
@@ -433,6 +433,19 @@ export function SettingsPanel() {
                       value={draft.characterCoherencePrompt ?? ''}
                       onChange={(v) => update('characterCoherencePrompt', v)}
                       rows={10}
+                    />
+                  </Section>
+
+                  <Section title="Mundo vivo / Teoría de la mente">
+                    <p className="text-xs text-text-muted mb-1 leading-relaxed">
+                      <span className="text-accent/70 font-mono text-[10px] mr-1">[SYSTEM]</span>
+                      Se inyecta <strong className="text-text-secondary">pegado al mensaje del usuario</strong>, de forma <strong className="text-text-secondary">incondicional</strong> (a diferencia de la coherencia del personaje, no requiere afinidades). Hace que cada personaje o PNJ —incluidos guardias, tenderos y desconocidos sin ficha— razone desde lo que realmente sabe y siente (las tres capas: quién es, qué sabe, cómo se siente) y no se rinda a los deseos del jugador. Vacío = desactivado.
+                    </p>
+                    <RestorablePrompt
+                      settingsKey="livingWorldPrompt"
+                      value={draft.livingWorldPrompt ?? ''}
+                      onChange={(v) => update('livingWorldPrompt', v)}
+                      rows={12}
                     />
                   </Section>
 

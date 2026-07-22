@@ -434,6 +434,12 @@ export interface AppSettings {
   // para máxima autoridad en conversaciones largas. Consolida integridad,
   // opinión propia, decir "no" y firmeza de valores/límites.
   characterCoherencePrompt: string;
+  // Mundo vivo / Teoría de la Mente — directiva maestra que hace que CADA personaje
+  // o PNJ (incluidos guardias, tenderos y desconocidos sin ficha) razone desde lo
+  // que realmente sabe y siente, y no se rinda a los deseos del jugador. Se inyecta
+  // en el footer de forma incondicional (a diferencia de characterCoherencePrompt,
+  // que depende de que haya afinidades registradas).
+  livingWorldPrompt: string;
   contextStrategy: 'rolling' | 'summary' | 'hybrid';
   maxContextMessages: number;
   autoSummarizeThreshold: number;

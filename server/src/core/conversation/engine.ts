@@ -711,6 +711,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       responseFormatPrompt: settings.responseFormatPrompt,
       narratorPrompt: settings.narratorPrompt,
       characterCoherencePrompt: settings.characterCoherencePrompt,
+      livingWorldPrompt: settings.livingWorldPrompt,
       fastLlmEnabled: useFastLlm,
       memoryInjectionPrompt: settings.memoryInjectionPrompt,
       contextIndexInjectionEnabled:  settings.contextIndexInjectionEnabled,

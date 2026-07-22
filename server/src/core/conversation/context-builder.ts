@@ -34,6 +34,7 @@ export interface BuildContextOptions {
   responseFormatPrompt?: string;  // character mode: response format instruction
   narratorPrompt?: string;        // narrator mode: full narrator instructions; use {{PERSONAJES}}
   characterCoherencePrompt?: string;  // directiva de coherencia inyectada junto al mensaje del usuario (footer)
+  livingWorldPrompt?: string;         // directiva de "mundo vivo"/teoría de la mente (footer, incondicional)
   fastLlmEnabled?: boolean;   // when true, skip affinity tag instructions (fast LLM handles it)
   memoryInjectionPrompt?: string; // template with {{MEMORIAS}} — injected just before last user message
   // Context index injection
@@ -581,6 +582,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     responseFormatPrompt,
     narratorPrompt,
     characterCoherencePrompt,
+    livingWorldPrompt,
     fastLlmEnabled = false,
     memoryInjectionPrompt,
     contextIndexInjectionEnabled = false,
@@ -1144,6 +1146,16 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       history.push({ role: 'system', content: presenceLedger });
       footerCount++;
     }
+  }
+
+  // 9c-bis. Mundo vivo / Teoría de la Mente — directiva maestra incondicional (a
+  // diferencia de 9d, que solo aplica si hay afinidades). Hace que CADA personaje o
+  // PNJ razone desde lo que realmente sabe y siente y no se rinda al jugador. Va
+  // aquí, cerca de la generación, y cubre también aventuras de puro narrador sin
+  // ningún Character de ficha (un guardia, un tendero…), donde 9d no se inyectaría.
+  if (needsSplit && livingWorldPrompt?.trim()) {
+    history.push({ role: 'system', content: livingWorldPrompt.trim() });
+    footerCount++;
   }
 
   // 9d. Coherencia del personaje — recordatorio de máxima autoridad, pegado al
