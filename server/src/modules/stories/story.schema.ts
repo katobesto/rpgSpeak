@@ -31,6 +31,23 @@ const storyCharacterLinkSchema = z.array(
   })
 );
 
+// Calendario del mundo. Los mínimos protegen la aritmética del reloj: sin meses
+// no hay fecha posible, y un ciclo lunar de 0 días dividiría por cero.
+const storyCalendarSchema = z.object({
+  name: z.string().default(''),
+  months: z.array(z.string()).min(1),
+  daysPerMonth: z.array(z.number().int().min(1).max(400)).min(1),
+  weekdays: z.array(z.string()).min(1),
+  seasons: z.array(z.string()).default([]),
+  moonCycleDays: z.number().int().min(1).max(400).default(28),
+  startYear: z.number().int().default(1),
+  startMonth: z.number().int().min(0).default(0),
+  startDay: z.number().int().min(1).default(1),
+  startMinuteOfDay: z.number().int().min(0).max(1439).default(480),
+  startWeekdayIndex: z.number().int().min(0).default(0),
+  startMoonDay: z.number().int().min(0).default(0),
+});
+
 export const createStorySchema = z.object({
   name: z.string().min(1).max(100),
   description: z.string().max(2000).default(''),
@@ -45,6 +62,7 @@ export const createStorySchema = z.object({
   adventureMode: z.boolean().default(false),
   openWorld: z.boolean().default(false),
   deathMode: z.boolean().default(false),
+  calendar: storyCalendarSchema.nullable().default(null),
   characters: storyCharacterLinkSchema.default([]),
 });
 

@@ -63,6 +63,7 @@ export const stories = sqliteTable('stories', {
   adventureMode: integer('adventure_mode', { mode: 'boolean' }).default(false),
   openWorld: integer('open_world', { mode: 'boolean' }).default(false),
   deathMode: integer('death_mode', { mode: 'boolean' }).default(false),
+  calendar: text('calendar'),  // JSON StoryCalendar; NULL = gregoriano por defecto
   userId: text('user_id'),  // owner; NULL = shared/legacy
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),
@@ -247,6 +248,21 @@ export const contextItems = sqliteTable('context_items', {
   updatedAt:        text('updated_at').notNull(),
 });
 
+// ─── Narrative Threads (deuda narrativa abierta por conversación) ────────────
+
+export const narrativeThreads = sqliteTable('narrative_threads', {
+  id:             text('id').primaryKey(),
+  conversationId: text('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  title:          text('title').notNull(),
+  description:    text('description').notNull().default(''),
+  status:         text('status').notNull().default('open'),  // 'open' | 'closed'
+  importance:     integer('importance').notNull().default(5),
+  openedAtIndex:  integer('opened_at_index').notNull().default(0),
+  closedAtIndex:  integer('closed_at_index'),
+  createdAt:      text('created_at').notNull(),
+  updatedAt:      text('updated_at').notNull(),
+});
+
 // ─── Type exports for Drizzle inference ───────────────────────────────────────
 
 // ─── Conversation Summaries (historial acumulativo) ──────────────────────────
@@ -266,6 +282,7 @@ export const conversationSummaries = sqliteTable('conversation_summaries', {
 export type DbConversationSummary = typeof conversationSummaries.$inferSelect;
 
 export type DbContextItem = typeof contextItems.$inferSelect;
+export type DbNarrativeThread = typeof narrativeThreads.$inferSelect;
 export type DbCharacter = typeof characters.$inferSelect;
 export type DbStory = typeof stories.$inferSelect;
 export type DbConversation = typeof conversations.$inferSelect;

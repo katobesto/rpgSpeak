@@ -209,6 +209,37 @@ export function runMigrations(db: Db): void {
   // ─── Stories — modo "Regreso después de la muerte" (0 = desactivado) ────────
   try { db.run(sql`ALTER TABLE stories ADD COLUMN death_mode INTEGER DEFAULT 0`); } catch { /* already exists */ }
 
+  // ─── Narrative Threads — deuda narrativa abierta por conversación ──────────
+  // Una fila = un hilo que la partida dejó sin resolver. El LLM los abre y los
+  // cierra con etiquetas técnicas; se inyectan en el footer para que nada
+  // planteado se pierda al salir de la ventana de historial.
+  db.run(sql`
+    CREATE TABLE IF NOT EXISTS narrative_threads (
+      id              TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      title           TEXT NOT NULL,
+      description     TEXT NOT NULL DEFAULT '',
+      status          TEXT NOT NULL DEFAULT 'open',
+      importance      INTEGER NOT NULL DEFAULT 5,
+      opened_at_index INTEGER NOT NULL DEFAULT 0,
+      closed_at_index INTEGER,
+      created_at      TEXT NOT NULL,
+      updated_at      TEXT NOT NULL
+    )
+  `);
+  // La consulta caliente es "hilos abiertos de esta conversación", en cada turno.
+  try {
+    db.run(sql`
+      CREATE INDEX IF NOT EXISTS idx_narrative_threads_conv_status
+      ON narrative_threads (conversation_id, status)
+    `);
+  } catch { /* already exists */ }
+
+  // ─── Stories — calendario del mundo (NULL = gregoriano por defecto) ─────────
+  // JSON StoryCalendar: meses, días por mes, días de la semana, estaciones,
+  // ciclo lunar y momento de inicio. Alimenta la cabecera ambiental.
+  try { db.run(sql`ALTER TABLE stories ADD COLUMN calendar TEXT`); } catch { /* already exists */ }
+
   // ─── Conversation Story Events — eventos de historia ya ocurridos por chat ──
   // Una fila = el evento (stories.persistent_events[].id) ya ocurrió
   // narrativamente en esa conversación; sin fila = pendiente.

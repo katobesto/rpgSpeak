@@ -7,6 +7,7 @@ import { Button } from '../ui/Button.tsx';
 import { Input, Textarea } from '../ui/Input.tsx';
 import { Avatar } from '../ui/Avatar.tsx';
 import type { Story, CreateStoryDto, StoryLocation } from '@rpgspeak/shared';
+import { CALENDAR_PRESETS, GREGORIAN_CALENDAR } from '@rpgspeak/shared';
 import { Plus, Trash2, Search, Wand2, MapPin } from 'lucide-react';
 
 /** crypto.randomUUID() only works in secure contexts (HTTPS / localhost).
@@ -41,6 +42,7 @@ const DEFAULT_STORY: CreateStoryDto = {
   adventureMode: false,
   openWorld: false,
   deathMode: false,
+  calendar: null,
   characters: [],
 };
 
@@ -241,6 +243,33 @@ export function StoryEditor({ story, open, onClose }: StoryEditorProps) {
                   repite la secuencia fatal — con los personajes sin recuerdos — hasta que consigas sobrevivirla.
                 </p>
               </div>
+            </div>
+
+            {/* Calendario del mundo — alimenta la cabecera ambiental de cada respuesta */}
+            <div className="space-y-2">
+              <label className="text-xs font-medium text-text-secondary">Calendario del mundo</label>
+              <select
+                value={form.calendar?.name ?? ''}
+                onChange={(e) => {
+                  const preset = CALENDAR_PRESETS.find((c) => c.name === e.target.value);
+                  set('calendar', preset ?? null);
+                }}
+                className="w-full px-3 py-2 text-sm rounded-lg bg-surface-2 border border-border text-text-primary focus:border-accent outline-none"
+              >
+                <option value="">Calendario gregoriano (por defecto)</option>
+                {CALENDAR_PRESETS.filter((c) => c !== GREGORIAN_CALENDAR).map((c) => (
+                  <option key={c.name} value={c.name}>{c.name}</option>
+                ))}
+              </select>
+              <p className="text-xs text-text-muted">
+                Define la fecha, la estación y la fase lunar que aparecen en la cabecera al inicio de cada
+                respuesta. El reloj lo lleva el servidor: avanza según el tiempo que consume cada escena, así
+                que la fecha y la hora nunca se contradicen.
+                {form.calendar && (
+                  <> Arranca el <strong>{form.calendar.startDay} de {form.calendar.months[form.calendar.startMonth]}
+                  {' '}de {form.calendar.startYear}</strong>.</>
+                )}
+              </p>
             </div>
           </>
         )}

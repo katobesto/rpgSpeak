@@ -1,4 +1,4 @@
-import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem, PartyState, DeathLoopState } from '@rpgspeak/shared';
+import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem, PartyState, DeathLoopState, NarrativeThread } from '@rpgspeak/shared';
 import { MemoryRepository } from '../memory/memory.repository.js';
 import { ContextRepository, type ContextItemWithEmbedding } from '../../modules/context/context.repository.js';
 import { ProviderRepository } from '../../modules/providers/provider.repository.js';
@@ -60,6 +60,21 @@ export interface BuildContextOptions {
   /** Estado del bucle de muerte (conversation.metadata.deathLoop). Con status
    *  'looping' se inyecta la directiva de repetición del hilo fatal. */
   deathLoop?: DeathLoopState | null;
+  /** Cabecera ambiental canónica, ya renderizada por el servidor. `null` cuando
+   *  la escena aún no está anclada: entonces se le pide al modelo que la declare
+   *  en vez de imponerle una hora y un lugar que quizá contradigan lo narrado. */
+  worldHeader?: string | null;
+  /** true = inyectar el bloque de escena aunque `worldHeader` sea null (para
+   *  poder pedir el anclaje inicial). */
+  worldTrackingEnabled?: boolean;
+  /** true si el turno tiene carga física/sexual (lo decide `detectPlayerAction`
+   *  en el engine, o la continuidad de una escena íntima ya en marcha). Activa el
+   *  reglamento detallado de consentimiento, que en el resto de turnos no se inyecta. */
+  intimacyContext?: boolean;
+  /** Hilos narrativos abiertos de la conversación, ya ordenados por prioridad. */
+  openThreads?: NarrativeThread[];
+  /** Índice del mensaje actual — para calcular la antigüedad de cada hilo. */
+  currentMessageIndex?: number;
 }
 
 // ── Aviso de aventura para modo personaje individual (sin narrador) ─────────
@@ -468,37 +483,111 @@ function buildDeathLoopDirective(loop: DeathLoopState): string {
   );
 }
 
+// ── Hilos narrativos abiertos ───────────────────────────────────────────────
+//
+// La deuda narrativa viva. A diferencia de la "trama pendiente" (eventos que el
+// usuario escribió de antemano en la historia), estos hilos EMERGEN jugando: la
+// promesa que se hizo, la pregunta que alguien esquivó, la amenaza que quedó
+// latente. Antes no vivían en ninguna estructura, así que al salir de la ventana
+// de historial dejaban de existir.
+//
+// Se muestra la ANTIGÜEDAD de cada hilo, y es lo más importante del bloque: un
+// hilo abierto hace 60 mensajes es precisamente el que está a punto de diluirse,
+// y verlo etiquetado es lo que empuja al modelo a retomarlo en vez de seguir
+// acumulando asuntos nuevos.
+const THREADS_MAX_INJECTED = 6;
+
+function buildThreadsBlock(threads: NarrativeThread[], currentIndex: number): string | null {
+  if (threads.length === 0) return null;
+
+  const shown = threads.slice(0, THREADS_MAX_INJECTED);
+  const lines = shown.map((t) => {
+    const age = Math.max(0, currentIndex - t.openedAtIndex);
+    const ageLabel =
+      age >= 60 ? ` ⚠ SIN RESOLVER DESDE HACE ${age} MENSAJES — ya va siendo hora` :
+      age >= 25 ? ` (abierto hace ${age} mensajes)` :
+                  '';
+    return `- «${t.title}» [importancia ${t.importance}/10]${ageLabel}\n  ${t.description}`;
+  });
+
+  const overflow = threads.length - shown.length;
+  const overflowNote = overflow > 0
+    ? `\n\n(Hay ${overflow} hilo(s) abierto(s) más, de menor importancia, que no se listan aquí.)`
+    : '';
+
+  return (
+    `## HILOS ABIERTOS — LO QUE ESTA HISTORIA DEJÓ SIN RESOLVER\n` +
+    `Asuntos que la partida ha planteado y siguen pendientes. Son deuda narrativa: el mundo no los ha olvidado.\n\n` +
+    lines.join('\n') +
+    overflowNote +
+    `\n\nCÓMO USARLOS:\n` +
+    `- NO hay que tocarlos todos en cada respuesta — eso los convertiría en una lista de tareas y aplanaría la escena. Basta con que ninguno se evapore.\n` +
+    `- Cuando la escena lo permita de forma natural, deja que uno respire: alguien lo menciona, aparece una consecuencia, el asunto vuelve por su propio peso.\n` +
+    `- Los marcados como SIN RESOLVER llevan demasiado tiempo parados: retómalos con prioridad en cuanto la escena dé pie.\n` +
+    `- Un hilo NO se resuelve porque sí ni porque convenga cerrarlo: se resuelve cuando la historia lo gana.\n\n` +
+    `REGISTRO DE HILOS (marcadores técnicos, el sistema los borra antes de mostrar tu respuesta):\n` +
+    `- Si tu respuesta PLANTEA algo nuevo que queda pendiente (una promesa, una amenaza, una pregunta sin responder, alguien que desaparece, un misterio):\n` +
+    `[HILO_ABIERTO:título corto|qué queda pendiente, en una frase|importancia 1-10]\n` +
+    `- Si tu respuesta RESUELVE de verdad uno de los de arriba:\n` +
+    `[HILO_CERRADO:título del hilo]\n` +
+    `- Solo lo que quede ABIERTO de verdad. Una conversación cualquiera no abre hilo; sí lo abre una promesa, una traición, una amenaza o un misterio planteado.`
+  );
+}
+
+// ── Cabecera ambiental — estado del mundo ───────────────────────────────────
+//
+// El servidor ya ha calculado la cabecera (fecha, hora, estación, luna) a partir
+// de un único contador de minutos; aquí solo se le pide al modelo que la COPIE
+// literal y que declare cuánto tiempo consume lo que narra.
+//
+// El reparto es deliberado: el modelo es lo único que sabe si una escena ha
+// durado dos minutos o media tarde, pero es pésimo manteniendo la aritmética de
+// fechas turno a turno. Así que él aporta el juicio narrativo (la etiqueta) y el
+// servidor aporta el cálculo (la cabecera). Ninguno hace el trabajo del otro.
+// Solo se inyecta cuando la escena YA está anclada. El anclaje inicial lo
+// resuelve el servidor en una llamada aparte (bootstrapWorldStateAsync): pedirlo
+// aquí no funcionaba —el modelo ignoraba la petición aun estando en la posición
+// de máxima obediencia— y ocupaba ~300 tok compitiendo con el resto.
+function buildWorldHeaderBlock(header: string): string {
+  const tags =
+    `[ESCENA:22:30|dormitorio de Rika]  — dónde y cuándo ocurre de verdad (hora en 24h, o "noche"/"amanecer"/"mediodía"; el lugar es opcional)\n` +
+    `[TIEMPO:+45m] · [TIEMPO:+3h] · [TIEMPO:amanecer]  — cuánto tiempo consume lo que acabas de narrar\n` +
+    `[CLIMA:llovizna fría]  — solo si el tiempo atmosférico cambia de forma perceptible\n` +
+    `Son marcadores técnicos: el sistema los procesa y los BORRA antes de mostrar tu respuesta. No los menciones en la narración.`;
+
+  return (
+    `## CABECERA DE ESCENA — PRIMERA LÍNEA OBLIGATORIA\n` +
+    `Empieza tu respuesta con esta línea y después un salto de línea en blanco:\n` +
+    `${header}\n\n` +
+    `SI LA CABECERA CONTRADICE TU ESCENA, CORRÍGELA. El registro puede haberse quedado atrás; lo que tú estás narrando manda. ` +
+    `Si dice que es de día y los personajes están acostándose, o nombra un lugar del que ya se marcharon, escribe la cabecera con los datos CORRECTOS y añade [ESCENA:hora|lugar] al final para que el sistema se ponga al día. ` +
+    `Mientras cuadre, cópiala tal cual: no recalcules la fecha ni la estación por tu cuenta.\n\n` +
+    `ETIQUETAS DISPONIBLES:\n${tags}\n\n` +
+    `Usa la hora, la estación, la luna y el clima como material narrativo real —la luz, el frío, lo que se oye de noche—, no como adorno.`
+  );
+}
+
 // ── Bloque de coherencia de escena — inyectado en todos los modos ───────────
 // Consolida en UN solo mensaje de sistema las reglas de coherencia espacial
 // (ubicación + instrucción [UBICACION:...]) y de objetos establecidos. Un solo
 // bloque reduce la fatiga de directivas en el footer (menos bloques "REGLA
 // ABSOLUTA" compitiendo entre sí) y ahorra un mensaje del presupuesto.
 function buildSceneCoherenceBlock(currentLocation: string | null | undefined, narratorMode = false): string {
+  // Condensado (2026-07-22): la cabecera ambiental ya declara el lugar en la
+  // primera línea de cada respuesta y ofrece [ESCENA:hora|lugar] para corregirlo,
+  // así que aquí sobraba repetir toda la mecánica de ubicación.
   const locationPart = currentLocation?.trim()
     ? `### Ubicación actual\n` +
-      `La acción transcurre en: **${currentLocation.trim()}**\n` +
-      `Los personajes están en este lugar. Sus acciones, percepciones y referencias ` +
-      `deben ser coherentes con ese entorno. No cambies el escenario de forma ` +
-      `arbitraria ni teleportes a los personajes; los desplazamientos se narran.\n` +
-      `Si la narrativa lleva explícitamente a los personajes a un lugar claramente distinto, ` +
-      `escribe al final de tu respuesta (no en medio):\n` +
-      `[UBICACION:nombre del nuevo lugar]\n` +
-      `No emitas [UBICACION:...] si la escena continúa en el mismo lugar.`
+      `La acción transcurre en **${currentLocation.trim()}**. No teleportes a nadie: los desplazamientos se narran. ` +
+      `Si la escena se traslada de verdad a otro lugar, decláralo al final con [UBICACION:nuevo lugar].`
     : `### Ubicación de la escena\n` +
-      `La ubicación aún no está registrada. Si tu respuesta sitúa la acción en un ` +
-      `lugar concreto, indícalo al final de tu respuesta con:\n` +
-      `[UBICACION:nombre del lugar]\n` +
-      `Una vez establecida, los personajes permanecerán en ese lugar hasta que ` +
-      `la narrativa los lleve explícitamente a otro.`;
+      `Aún no consta. Si tu respuesta la sitúa en un lugar concreto, decláralo al final con [UBICACION:nombre del lugar].`;
 
   const objectsPart =
     `### Objetos y elementos establecidos\n` +
-    `Cuando un objeto o elemento relevante (llaves, armas, objetos mágicos, pertenencias, pistas…) ` +
-    `ya ha sido descrito —su aspecto, ubicación, quién lo lleva o para qué sirve— esos detalles son ` +
-    `HECHOS FIJOS. No los reinventes, reubiques ni les asignes otra función sin que la narrativa lo ` +
-    `justifique de forma explícita (alguien lo mueve, lo entrega, lo usa, lo pierde). ` +
-    `Si no recuerdas un detalle concreto, no inventes uno nuevo — deja la incógnita abierta o ` +
-    `reutiliza lo último que se dijo.`;
+    `Lo ya descrito (aspecto, ubicación, quién lo lleva, para qué sirve) son HECHOS FIJOS: no los reinventes ni los ` +
+    `reubiques sin que la narrativa lo justifique. Si no recuerdas un detalle, no inventes uno nuevo — deja la ` +
+    `incógnita abierta o reutiliza lo último que se dijo.`;
 
   // Voz narrativa (solo narrador): refuerzo cerca del punto de generación.
   // El narratorPrompt (lejano, en el mensaje de sistema) ya lo prohíbe, pero los
@@ -597,6 +686,11 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     occurredEventIds = new Set<string>(),
     deathModeActive = false,
     deathLoop = null,
+    worldHeader = null,
+    worldTrackingEnabled = false,
+    intimacyContext = false,
+    openThreads = [],
+    currentMessageIndex = messages.length,
   } = opts;
 
   const systemParts: string[] = [];
@@ -719,6 +813,8 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // its authority: LLMs weight content closer to the generation point more heavily,
   // so it overrides the character's base description even more effectively than before.
   let affinityBlock: string | null = null;
+  // Reglamento detallado de romance/consentimiento — solo en turnos que lo piden.
+  let intimacyBlock: string | null = null;
   // Instrucción de auto-reporte [AFINIDAD:...] — solo sin LLM rápido. Se inyecta
   // como bloque propio al FINAL del footer (justo antes del último mensaje del
   // usuario) para máxima obediencia del modelo.
@@ -743,9 +839,33 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       return `- ${name}: afinidad ${affinity}/100 — ${romance}; ${intimacy}`;
     });
 
-    const consentDirective =
-      `## ESTADO EMOCIONAL ACTUAL — TIENE PRECEDENCIA SOBRE LA DESCRIPCIÓN BASE\n\n` +
+    // ── Núcleo permanente: el estado, no el reglamento ──────────────────────
+    //
+    // Esto va en TODOS los turnos. Es corto a propósito: son datos (los números
+    // y su lectura) más las tres reglas que aplican siempre, hable la escena de
+    // lo que hable.
+    //
+    // El reglamento largo de romance, consentimiento y contacto físico se separó
+    // a `intimacyDirective` y solo entra cuando el turno lo pide. Estaba costando
+    // ~2.000 tokens en cada turno de una partida de aventuras, y con ese peso el
+    // prompt entero le decía al modelo «esto va de tu relación con el jugador»
+    // justo mientras el texto le pedía que los personajes tuvieran vida propia.
+    const affinityCoreDirective =
+      `## ESTADO EMOCIONAL ACTUAL — TIENE PRECEDENCIA SOBRE LA FICHA\n\n` +
       `${consentLines.join('\n')}\n\n` +
+      `Estos números son el estado emocional REAL de cada personaje hacia el jugador AHORA. Mandan sobre lo que diga su ficha ` +
+      `en cuanto a SI hay atracción o apertura romántica: lo que la ficha describe es su POTENCIAL, no su realidad actual.\n` +
+      `Lo que la afinidad NO decide es el CÓMO: un personaje frío, reservado o calculador sigue siéndolo con afinidad alta — ` +
+      `el vínculo se expresa a través de su carácter, nunca anulándolo.\n\n` +
+      `ANTI-ADULACIÓN: el aprecio vive en el TONO y en las DECISIONES, no en cumplidos. PROHIBIDO recapitular los méritos del ` +
+      `jugador ("me regalaste…", "fuiste tan valiente…") como relleno o para justificar cercanía. Los personajes tienen su propia ` +
+      `vida y sus propios temas: la conversación NO gira en torno a lo bueno que es el jugador.\n\n` +
+      `RITMO: el enamoramiento es fruto de mucho tiempo compartido, no de unas pocas interacciones agradables. Con afinidad < 60 ` +
+      `no hay atracción romántica hacia el jugador — y NUNCA se verbaliza que "es pronto" o "quizás más adelante": insinuar que el ` +
+      `romance llegará a su debido tiempo ya lo pone sobre la mesa. Simplemente no es un tema vivo; se redirige a lo práctico.`;
+
+    const intimacyDirective =
+      `## ROMANCE, CONSENTIMIENTO Y CONTACTO FÍSICO — REGLAS DETALLADAS\n\n` +
       `NOTA CRÍTICA: Este estado de afinidad refleja el estado emocional REAL Y PRESENTE del personaje ` +
       `hacia el jugador en este momento. Tiene PRECEDENCIA ABSOLUTA sobre cualquier rasgo de personalidad ` +
       `o sentimiento descrito en la ficha del personaje SOLO en cuanto a SI existe atracción o apertura ` +
@@ -808,19 +928,26 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       `reflexiva. Un límite genuino del personaje, si lo hay, se expresa como pausa suave dentro de la escena ` +
       `(un matiz, una condición, un cambio de ritmo) — no como un freno seco que rompe la continuidad ya aceptada.`;
 
-    // consentDirective (estado + gradación romántica + contacto físico) SIEMPRE.
-    // Cuando el LLM rápido está OFF añadimos la guía de tramos editable
-    // (affinitySystemPrompt) y activamos el bloque de auto-reporte, que se
-    // inyecta APARTE, como último bloque antes del mensaje del usuario (máxima
-    // salience) — enterrado al final de este mega-bloque el modelo lo ignoraba.
-    // Cuando está ON, el analizador externo gestiona la afinidad → no pedimos tags.
-    if (!fastLlmEnabled) {
-      const tierGuide = affinitySystemPrompt?.trim() ? `\n\n---\n\n${affinitySystemPrompt.trim()}` : '';
-      affinityBlock = `${consentDirective}${tierGuide}`;
-      affinitySelfReportBlock = AFFINITY_SELF_REPORT_INSTRUCTION;
-    } else {
-      affinityBlock = consentDirective;
-    }
+    // El reglamento detallado solo entra cuando el turno lo justifica:
+    //   · el jugador ha hecho algo físico/sexual (lo detecta el regex del engine), o
+    //   · hay vínculo suficiente para que el romance esté vivo (afinidad ≥ 60).
+    // Por debajo de eso, el núcleo ya dice lo único que aplica ("con < 60 no hay
+    // atracción, y no se verbaliza que sea pronto"): las tres páginas sobre
+    // continuidad de escenas íntimas no pintan nada en una escena de taberna.
+    const romanceLive = affinitiesForBlock.some((a) => a.affinity >= 60);
+    const needsIntimacyRules = intimacyContext || romanceLive;
+
+    // La guía de tramos editable (affinitySystemPrompt) acompaña al núcleo: es
+    // una tabla de comportamiento por nivel, útil en todos los turnos.
+    const tierGuide = !fastLlmEnabled && affinitySystemPrompt?.trim()
+      ? `\n\n---\n\n${affinitySystemPrompt.trim()}`
+      : '';
+    affinityBlock = `${affinityCoreDirective}${tierGuide}`;
+    intimacyBlock = needsIntimacyRules ? intimacyDirective : null;
+
+    // Con el LLM rápido apagado, el principal debe emitir las etiquetas
+    // [AFINIDAD:...]; va aparte, como último bloque, para máxima obediencia.
+    if (!fastLlmEnabled) affinitySelfReportBlock = AFFINITY_SELF_REPORT_INSTRUCTION;
   }
   // ─────────────────────────────────────────────────────────────────────────────
   // NOTE: los bloques de historia/mundo/lore se ensamblan ANTES del bloque de
@@ -1067,6 +1194,13 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     footerCount++;
   }
 
+  // 7b. Reglamento de romance/consentimiento — solo cuando el turno lo justifica
+  // (acción física detectada, o afinidad ≥ 60 con el romance ya vivo).
+  if (intimacyBlock && needsSplit) {
+    history.push({ role: 'system', content: intimacyBlock });
+    footerCount++;
+  }
+
   // 8. Narration style directive (user preference — overrides default verbosity)
   if (narrationStylePrompt?.trim() && needsSplit) {
     history.push({ role: 'system', content: narrationStylePrompt.trim() });
@@ -1166,6 +1300,28 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // vínculo (afinidades): en una aventura sin relaciones no hace falta.
   if (needsSplit && characterCoherencePrompt?.trim() && (characterAffinities?.length ?? 0) > 0) {
     history.push({ role: 'system', content: characterCoherencePrompt.trim() });
+    footerCount++;
+  }
+
+  // 9d-bis. Hilos narrativos abiertos — cerca de la generación, a propósito.
+  // La "trama pendiente" (#2) va al principio del footer porque es guion escrito
+  // de antemano y cambia poco; estos hilos son lo que la partida ha planteado de
+  // verdad y es lo que más riesgo corre de diluirse, así que se pone donde el
+  // modelo más pondera.
+  const threadsBlock = buildThreadsBlock(openThreads, currentMessageIndex);
+  if (needsSplit && threadsBlock) {
+    history.push({ role: 'system', content: threadsBlock });
+    footerCount++;
+  }
+
+  // 9e. Cabecera ambiental — ÚLTIMO bloque antes del mensaje del jugador.
+  // Debe ser lo primero que el modelo escriba, así que va en la posición de
+  // máxima obediencia (el mismo criterio que el auto-reporte de afinidad). Es
+  // dinámica por definición — cambia cada turno con el reloj — pero eso no
+  // cuesta caché: el footer entero va tras el historial creciente y nunca forma
+  // parte del prefijo cacheable.
+  if (needsSplit && worldTrackingEnabled && worldHeader?.trim()) {
+    history.push({ role: 'system', content: buildWorldHeaderBlock(worldHeader.trim()) });
     footerCount++;
   }
 
@@ -1362,29 +1518,25 @@ function buildPendingEventsBlock(stories: Story[], occurredEventIds: Set<string>
       horizon.map((e) => `- «${e.title}»${e.location?.trim() ? ` — en ${e.location.trim()}` : ''}: ${e.trigger.trim()}`).join('\n')
     : '';
 
+  // Condensado (2026-07-22): la versión larga gastaba ~650 tok en prosa de
+  // dirección. Dos motivos para recortarla:
+  //   · «En CADA respuesta siembra un gancho» era una orden de repetir lo mismo
+  //     todos los turnos, y se leía como insistencia — de las causas de que los
+  //     personajes suenen repetitivos.
+  //   · La escalada gradual («el rumor se convierte en encargo…») intentaba
+  //     suplir con prosa la falta de estado; los hilos abiertos ya lo sostienen.
   return (
-    `## TRAMA PENDIENTE — TU TRABAJO COMO DIRECTOR\n\n` +
-    `Estos eventos AÚN NO HAN OCURRIDO. No son una ruta fija, pero la historia debe AVANZAR hacia ellos — ` +
-    `tu trabajo es que el jugador los encuentre, no esperar a que tropiece con ellos.\n\n` +
+    `## TRAMA PENDIENTE — DESTINOS DE LA HISTORIA\n\n` +
+    `Aún no han ocurrido. No son una ruta fija, pero la historia debe avanzar hacia ellos.\n\n` +
     `▶ DESTINO INMEDIATO:\n${fmtEvent(next)}\n\n` +
-    `CÓMO CONDUCIR HACIA EL DESTINO (sin railroading):\n` +
-    `- En CADA respuesta siembra al menos un gancho que apunte hacia el destino inmediato: un rumor, un PNJ ` +
-    `que menciona ${nextLocation ? `«${nextLocation}»` : 'el lugar'}, una señal sensorial, un camino que se abre, una necesidad práctica que ` +
-    `empuja hacia allí.\n` +
+    `- Siembra ganchos hacia él cada dos o tres respuestas, variando el tipo (un rumor, un PNJ, una señal, una ` +
+    `necesidad práctica) — no en cada turno ni siempre igual: insistir cansa y se nota.\n` +
     (nextLocation
-      ? `- El evento ocurre en «${nextLocation}»: si la escena transcurre en otro sitio, da al jugador razones ` +
-        `crecientes para viajar hasta allí. Narra el desplazamiento cuando lo emprenda — nada de teletransportes.\n`
+      ? `- Ocurre en «${nextLocation}». Si la escena está en otro sitio, da razones para viajar y narra el desplazamiento.\n`
       : '') +
-    `- Si el jugador ignora los ganchos, NO lo fuerces: sube la intensidad gradualmente (el rumor se convierte ` +
-    `en encargo, el encargo en urgencia, la urgencia en consecuencia que le alcanza donde esté). El mundo se ` +
-    `mueve hacia el evento aunque él se entretenga.\n` +
-    `- Los desvíos del jugador son bienvenidos: atiéndelos con interés y, al agotarse, teje el regreso hacia el ` +
-    `destino con naturalidad.\n` +
-    `- NO menciones ni narres los eventos como si ya hubieran pasado. Como mucho UN evento puede ocurrir por ` +
-    `respuesta, y solo si su disparador se ha cumplido de verdad.\n` +
-    `- Cuando narres efectivamente un evento, añade al final de tu respuesta (línea separada):\n` +
-    `[EVENTO_OCURRIDO:título exacto del evento]\n` +
-    `- No emitas esa etiqueta si el evento aún no ha sucedido en tu narración.` +
+    `- Si el jugador se desvía, atiéndelo con interés; el mundo sigue moviéndose hacia el evento mientras tanto.\n` +
+    `- Máximo UN evento por respuesta, y solo si su disparador se cumplió de verdad. Al narrarlo, añade en línea propia:\n` +
+    `[EVENTO_OCURRIDO:título exacto del evento]` +
     horizonPart
   );
 }

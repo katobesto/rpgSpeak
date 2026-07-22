@@ -169,6 +169,16 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
     // never touching **bold** patterns that remained as literals.
     clean = clean.replace(/(?<!\*)\*(?!\*)([^*<>\n]+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>');
 
+    // Step 3b — mark the ambient scene header (first line, pipe-separated) so the
+    // CSS can render it as a status bar instead of a stray line of prose.
+    // The server guarantees it is the first line and in canonical form (see
+    // normalizeWorldHeader), so anchoring to the start is safe. It stays a plain
+    // paragraph for marked — a GFM table would need a delimiter row.
+    clean = clean.replace(
+      /^\s*<p>(\s*\|(?:[^|<\n]*\|){4,}\s*)<\/p>/i,
+      '<p class="scene-header">$1</p>',
+    );
+
     if (!isNarrator) return clean;
 
     // Step 4 — for narrator messages: mark stage-direction paragraphs explicitly.

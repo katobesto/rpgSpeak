@@ -79,6 +79,27 @@ body {
   color: var(--text-secondary);
 }
 
+/* Ambient scene header — the pipe-separated status line the server prepends to
+   every narrator/character response (time, date, moon, location, season, weather).
+   Rendered as a compact status bar, not as prose. `!important` on margin matches
+   the stage-direction rule below: the `.prose p` base rule would otherwise win. */
+.prose p.scene-header {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 0.72rem;
+  line-height: 1.5;
+  letter-spacing: 0.01em;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 10px;
+  margin: 0 0 10px !important;
+  /* Cabeceras largas (fechas de mundos con nombres extensos) no deben desbordar
+     ni forzar scroll horizontal en el chat. */
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
 /* Full action/description paragraphs (whole <p> wrapped in <em>) — stage-direction style */
 .prose p:has(> em:only-child) {
   border-left: 2px solid rgba(124, 58, 237, 0.55);

@@ -133,9 +133,115 @@ export interface Story {
    *  letales; al morir, la interfaz ofrece rebobinar la historia (máx. 20
    *  mensajes) y la IA fuerza la repetición del hilo fatal hasta superarlo. */
   deathMode: boolean;
+  /** Calendario del mundo para la cabecera ambiental (fecha, estación, luna).
+   *  null = calendario gregoriano real (ver GREGORIAN_CALENDAR). */
+  calendar: StoryCalendar | null;
   characters: StoryCharacterLink[];
   createdAt: string;
   updatedAt: string;
+}
+
+// ─── Calendario del mundo y estado ambiental ──────────────────────────────────
+//
+// El tiempo de la partida se guarda como UN solo número (`minutesElapsed` en
+// WorldState) y TODO lo demás — fecha, día de la semana, estación, fase lunar —
+// se DERIVA de él en el servidor. Los modelos calculan mal la aritmética de
+// fechas ("07:27 + 3h20m un lunes 14 de Kythorn") y derivan turno a turno; con
+// un contador y una función pura, la cabecera nunca se contradice.
+
+export interface StoryCalendar {
+  /** Nombre informativo ("Calendario de Harptos"). */
+  name: string;
+  /** Nombres de los meses, en orden. */
+  months: string[];
+  /** Días de cada mes. Un solo elemento = se aplica a todos los meses. */
+  daysPerMonth: number[];
+  /** Nombres de los días de la semana, en orden. */
+  weekdays: string[];
+  /** Estación de cada mes (misma longitud que `months`). */
+  seasons: string[];
+  /** Duración del ciclo lunar en días. */
+  moonCycleDays: number;
+  /** Momento en que arranca la campaña (t=0). */
+  startYear: number;
+  /** Índice 0-based dentro de `months`. */
+  startMonth: number;
+  /** Día del mes, 1-based. */
+  startDay: number;
+  /** Minuto del día en t=0 (0..1439). */
+  startMinuteOfDay: number;
+  /** Índice dentro de `weekdays` en t=0. */
+  startWeekdayIndex: number;
+  /** Día del ciclo lunar en t=0 (0..moonCycleDays-1). */
+  startMoonDay: number;
+}
+
+/** Estado ambiental de la conversación, persistido en `conversation.metadata.worldState`. */
+export interface WorldState {
+  /** Minutos transcurridos desde el inicio de la campaña. Única fuente de verdad temporal. */
+  minutesElapsed: number;
+  /** Clima actual, texto corto ("Brisa suave", "Llovizna fría"). */
+  weather: string;
+  /**
+   * false mientras la escena no se haya anclado a la narrativa.
+   *
+   * Existe por un fallo concreto: sembrar el reloj a cero en una conversación
+   * que ya llevaba cientos de mensajes producía una cabecera que contradecía
+   * abiertamente lo narrado (decía «Cafetería, 08:00 AM» mientras el texto
+   * describía a los personajes en la cama de noche). Sin anclar no se imprime
+   * cabecera: se le pide al modelo que declare la escena, y sólo entonces
+   * empieza el registro. Una cabecera falsa es peor que ninguna.
+   */
+  established: boolean;
+  updatedAt: string;
+}
+
+/** Calendario real. Por defecto cuando la historia no define uno propio.
+ *  Febrero fijo a 28 días: los años bisiestos no aportan nada narrativo y
+ *  complicarían la aritmética con casos especiales por año. */
+export const GREGORIAN_CALENDAR: StoryCalendar = {
+  name: 'Calendario gregoriano',
+  months: ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio',
+           'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'],
+  daysPerMonth: [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31],
+  weekdays: ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'],
+  seasons: ['Invierno', 'Invierno', 'Primavera', 'Primavera', 'Primavera', 'Verano',
+            'Verano', 'Verano', 'Otoño', 'Otoño', 'Otoño', 'Invierno'],
+  moonCycleDays: 28,
+  startYear: 2024, startMonth: 2, startDay: 1,
+  startMinuteOfDay: 8 * 60, startWeekdayIndex: 4, startMoonDay: 0,
+};
+
+/** Calendario de Harptos (Reinos Olvidados). 12 meses de 30 días; se omiten los
+ *  días intercalares (Festival de la Luna, Solsticio…) por simplicidad. */
+export const HARPTOS_CALENDAR: StoryCalendar = {
+  name: 'Calendario de Harptos',
+  months: ['Hammer', 'Alturiak', 'Ches', 'Tarsakh', 'Mirtul', 'Kythorn',
+           'Flamerule', 'Eleasis', 'Eleint', 'Marpenoth', 'Uktar', 'Nightal'],
+  daysPerMonth: [30],
+  weekdays: ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'],
+  seasons: ['Invierno', 'Invierno', 'Primavera', 'Primavera', 'Primavera', 'Primavera',
+            'Verano', 'Verano', 'Otoño', 'Otoño', 'Otoño', 'Invierno'],
+  moonCycleDays: 30,
+  startYear: 1492, startMonth: 5, startDay: 14,
+  startMinuteOfDay: 7 * 60 + 27, startWeekdayIndex: 0, startMoonDay: 15,
+};
+
+export const CALENDAR_PRESETS: StoryCalendar[] = [GREGORIAN_CALENDAR, HARPTOS_CALENDAR];
+
+/** Valores derivados de `minutesElapsed` + calendario. Todo se calcula, nada se guarda. */
+export interface WorldClock {
+  /** "Madrugada" | "Mañana" | "Mediodía" | "Tarde" | "Anochecer" | "Noche" */
+  timeOfDay: string;
+  /** "07:27 AM" */
+  time: string;
+  /** "Lunes, 14 de Kythorn, 1492" */
+  date: string;
+  /** "Luna Llena" */
+  moonPhase: string;
+  /** "Primavera" */
+  season: string;
+  weather: string;
 }
 
 // ─── Death Loop (modo "Regreso después de la muerte") ─────────────────────────
@@ -644,6 +750,31 @@ export interface ContextItem {
   updatedAt: string;
 }
 
+// ─── Hilos narrativos ─────────────────────────────────────────────────────────
+//
+// La deuda narrativa viva de una partida: la promesa hecha, la pregunta que un
+// personaje esquivó, el desconocido que los seguía, la amenaza latente.
+//
+// Existe porque nada más lo sostenía. Los eventos de historia (`StoryEvent`) son
+// guion escrito de antemano; las memorias son hechos ya consumados; el resumen
+// comprime. Lo que EMERGE jugando y queda sin resolver no vivía en ninguna
+// estructura, así que al salir de la ventana de historial dejaba de existir —
+// la causa directa de que las situaciones se diluyan en sesiones largas.
+export interface NarrativeThread {
+  id: string;
+  conversationId: string;
+  /** Título corto; es también la clave por la que el LLM lo cierra. */
+  title: string;
+  description: string;
+  status: 'open' | 'closed';
+  importance: number;        // 1-10
+  /** messageCount de la conversación al abrirse — permite mostrar su antigüedad. */
+  openedAtIndex: number;
+  closedAtIndex: number | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ContextExtractResult {
   items: ContextItem[];
   batchStart: number;
@@ -656,7 +787,11 @@ export interface ContextExtractResult {
 export type CreateCharacterDto = Omit<Character, 'id' | 'userId' | 'ownerName' | 'storyIds' | 'createdAt' | 'updatedAt'>;
 export type UpdateCharacterDto = Partial<CreateCharacterDto>;
 
-export type CreateStoryDto = Omit<Story, 'id' | 'userId' | 'ownerName' | 'createdAt' | 'updatedAt'>;
+// `calendar` se marca opcional: el servidor lo tiene con default null (ver
+// story.schema.ts), así que un cliente que no lo envíe obtiene el gregoriano.
+export type CreateStoryDto =
+  Omit<Story, 'id' | 'userId' | 'ownerName' | 'createdAt' | 'updatedAt' | 'calendar'> &
+  { calendar?: StoryCalendar | null };
 export type UpdateStoryDto = Partial<CreateStoryDto>;
 
 // ─── Story Assistant Types ────────────────────────────────────────────────────

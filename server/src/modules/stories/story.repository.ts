@@ -1,7 +1,7 @@
 import { eq, like, sql, and, desc } from 'drizzle-orm';
 import { getDb } from '../../db/index.js';
 import { stories, storyCharacters, type DbStory } from '../../db/schema.js';
-import type { Story, StoryCharacterLink, StoryEvent, StoryLocation } from '@rpgspeak/shared';
+import type { Story, StoryCalendar, StoryCharacterLink, StoryEvent, StoryLocation } from '@rpgspeak/shared';
 import { v4 as uuidv4 } from 'uuid';
 
 /** Normaliza eventos persistidos antes de añadir el campo trigger (evita undefined.trim()). */
@@ -18,6 +18,19 @@ function normalizeLocations(locations: StoryLocation[]): StoryLocation[] {
     exits: l.exits ?? '',
     atmosphere: l.atmosphere ?? '',
   }));
+}
+
+/** Calendario persistido como JSON. NULL/vacío o JSON corrupto → null, que el
+ *  reloj interpreta como calendario gregoriano: una historia nunca queda sin
+ *  cabecera por un dato mal guardado. */
+function parseCalendar(raw: string | null | undefined): StoryCalendar | null {
+  if (!raw?.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as StoryCalendar;
+    return parsed?.months?.length ? parsed : null;
+  } catch {
+    return null;
+  }
 }
 
 function resolveOwnerName(userId: string | null | undefined): string | null {
@@ -52,6 +65,7 @@ function dbToStory(row: DbStory, chars: StoryCharacterLink[] = []): Story {
     adventureMode: Boolean(row.adventureMode),
     openWorld: Boolean(row.openWorld),
     deathMode: Boolean(row.deathMode),
+    calendar: parseCalendar((row as unknown as { calendar?: string | null }).calendar),
     characters: chars,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
@@ -136,7 +150,7 @@ export class StoryRepository {
       INSERT INTO stories (
         id, name, description, global_context, narrative_rules, world_lore,
         persistent_events, locations, state_variables, behavior_restrictions,
-        is_active, adventure_mode, open_world, death_mode, user_id, created_at, updated_at
+        is_active, adventure_mode, open_world, death_mode, calendar, user_id, created_at, updated_at
       ) VALUES (
         ${id}, ${data.name}, ${data.description}, ${data.globalContext},
         ${data.narrativeRules}, ${data.worldLore},
@@ -144,7 +158,8 @@ export class StoryRepository {
         ${JSON.stringify(data.stateVariables)},
         ${JSON.stringify(data.behaviorRestrictions)},
         ${data.isActive ? 1 : 0}, ${data.adventureMode ? 1 : 0}, ${data.openWorld ? 1 : 0},
-        ${data.deathMode ? 1 : 0}, ${userId ?? null}, ${ts}, ${ts}
+        ${data.deathMode ? 1 : 0}, ${data.calendar ? JSON.stringify(data.calendar) : null},
+        ${userId ?? null}, ${ts}, ${ts}
       )
     `);
 
@@ -179,6 +194,7 @@ export class StoryRepository {
         adventure_mode       = ${merged.adventureMode ? 1 : 0},
         open_world           = ${merged.openWorld ? 1 : 0},
         death_mode           = ${merged.deathMode ? 1 : 0},
+        calendar             = ${merged.calendar ? JSON.stringify(merged.calendar) : null},
         updated_at           = ${ts}
       WHERE id = ${id}
     `);

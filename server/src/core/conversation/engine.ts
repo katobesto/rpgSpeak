@@ -1,5 +1,9 @@
-import type { GenerateRequest, Character, Story, Message, Conversation, MemoryEntry, PartyState, DeathLoopState } from '@rpgspeak/shared';
+import type { GenerateRequest, Character, Story, Message, Conversation, MemoryEntry, PartyState, DeathLoopState, WorldState, StoryCalendar } from '@rpgspeak/shared';
 import { matchCharacterName } from '@rpgspeak/shared';
+import {
+  computeClock, formatHeader, normalizeWorldState, parseTimeAdvance, parseSceneTag,
+  applySceneTime, currentMinuteOfDay, DEFAULT_ADVANCE_MINUTES,
+} from '../world/calendar.js';
 import { buildContext, filterWitnessedMessages } from './context-builder.js';
 import { trimContext } from './context-trimmer.js';
 import { createProvider } from '../llm/provider.factory.js';
@@ -15,6 +19,7 @@ import { getUserById } from '../../modules/auth/auth.service.js';
 import { autoExtractContextAsync } from '../context/context-extractor.js';
 import { SummariesRepository } from '../../modules/summaries/summaries.repository.js';
 import { EventStatusRepository } from '../../modules/stories/event-status.repository.js';
+import { ThreadRepository } from '../../modules/threads/thread.repository.js';
 import { stripOocNotes } from './ooc.js';
 
 const providerRepo   = new ProviderRepository();
@@ -26,6 +31,7 @@ const settingsService = new SettingsService();
 const memRepo        = new MemoryRepository();
 const summariesRepo  = new SummariesRepository();
 const eventStatusRepo = new EventStatusRepository();
+const threadRepo     = new ThreadRepository();
 
 export interface GenerateOptions {
   conversationId: string;
@@ -450,6 +456,54 @@ export function detectFirstPersonNarration(content: string, wasNarrator: boolean
   return narration.slice(idx, idx + 90).replace(/\s+/g, ' ').trim();
 }
 
+// ─── Cabecera ambiental: normalización ────────────────────────────────────────
+//
+// Detecta una cabecera de pipes al principio de la respuesta. Es deliberadamente
+// laxa en lo que RECONOCE (el modelo la deforma: se deja el pipe final, mete
+// negritas, la envuelve en cursivas) y estricta en lo que ESCRIBE — siempre la
+// canónica. Reconocer de más es lo correcto aquí: una cabecera deforme detectada
+// se sustituye, mientras que una no detectada se duplicaría con la canónica.
+
+/** Una línea es "cabecera" si empieza por | y tiene al menos 4 separadores:
+ *  suficiente para no confundirla con una tabla markdown de 2 columnas ni con
+ *  prosa que empiece por un pipe suelto. */
+const HEADER_LINE_RE = /^\s*[*_]{0,2}\s*\|(?:[^|\n]*\|){4,}\s*[*_]{0,2}\s*$/;
+
+export function normalizeWorldHeader(content: string, canonical: string | null | undefined): string {
+  const header = canonical?.trim() ?? '';
+
+  const lines = content.split('\n');
+  const firstIdx = lines.findIndex((l) => l.trim() !== '');
+  if (firstIdx === -1) return content;
+
+  // Sin cabecera canónica (escena aún sin anclar) se ELIMINA la que el modelo
+  // haya inventado: no hay nada contra lo que validarla, y una cabecera que
+  // cambia de hora y lugar a capricho entre turnos es justo la incoherencia
+  // que este mecanismo existe para evitar.
+  if (!header) {
+    if (HEADER_LINE_RE.test(lines[firstIdx])) {
+      console.warn(`[world] Cabecera inventada sin escena anclada — eliminada: "${lines[firstIdx].trim().slice(0, 80)}"`);
+      return lines.slice(firstIdx + 1).join('\n').trimStart();
+    }
+    return content;
+  }
+
+  if (HEADER_LINE_RE.test(lines[firstIdx])) {
+    if (lines[firstIdx].trim() !== header) {
+      console.warn(`[world] Cabecera divergente sustituida por la canónica: "${lines[firstIdx].trim().slice(0, 90)}"`);
+      lines[firstIdx] = header;
+    }
+    // El slice va también en el caso exacto: el modelo a veces abre con líneas
+    // en blanco y la cabecera debe quedar como PRIMERA línea del mensaje.
+    return lines.slice(firstIdx).join('\n');
+  }
+
+  // No la emitió: se antepone. Línea en blanco entre medias para que `marked`
+  // no funda la cabecera con el primer párrafo en un solo <p>.
+  console.warn('[world] Respuesta sin cabecera ambiental — anteponiendo la canónica');
+  return `${header}\n\n${content.trimStart()}`;
+}
+
 function buildVoiceCorrectionDirective(snippet: string, narratorMode: boolean): string {
   const rules = narratorMode
     ? `En esta respuesta, TODA la narración va en TERCERA persona con el nombre del personaje como sujeto. ` +
@@ -689,6 +743,32 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     // trigger se inyectan como "trama pendiente" en el footer del contexto)
     const occurredEventIds = eventStatusRepo.findOccurredIds(conversationId);
 
+    // ── Estado del mundo (cabecera ambiental) ─────────────────────────────────
+    // El calendario lo aporta la PRIMERA historia vinculada que defina uno; sin
+    // ninguno se usa el gregoriano. El reloj es autoridad del servidor: aquí se
+    // renderiza la cabecera canónica y el modelo solo la copia (ver
+    // buildWorldHeaderBlock). El avance del reloj se aplica DESPUÉS de generar,
+    // al parsear [TIEMPO:...].
+    const worldCalendar = linkedStories.find((s) => s.calendar)?.calendar ?? null;
+    const worldState = normalizeWorldState(
+      (conversation.metadata as { worldState?: WorldState } | null)?.worldState,
+    );
+    // Sin anclar → sin cabecera: se le pide al modelo que declare la escena en
+    // vez de imponerle una hora y un lugar que pueden contradecir lo narrado.
+    const worldHeader = worldState.established
+      ? formatHeader(computeClock(worldState, worldCalendar), conversation.currentLocation)
+      : null;
+
+    // Detección de acción física/sexual del jugador. Se calcula ANTES de construir
+    // el contexto porque decide si se inyecta el reglamento largo de consentimiento
+    // (~2.000 tok); más abajo se reutiliza para la directiva de comportamiento.
+    const playerAction = detectPlayerAction(userMessageForAnalysis);
+
+    // Hilos narrativos abiertos — deuda de la partida que no debe diluirse.
+    const openThreads = threadRepo.findOpen(conversationId);
+    // Índice del turno actual, para calcular la antigüedad de cada hilo.
+    const currentMessageIndex = historyForContext.length + 1;
+
     const { messages: rawContext, footerCount } = await buildContext({
       character: character ?? groupCharacters[0],
       stories: linkedStories,
@@ -726,6 +806,11 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       occurredEventIds,
       deathModeActive,
       deathLoop: currentDeathLoop,
+      worldHeader,
+      worldTrackingEnabled: true,
+      intimacyContext: playerAction !== null,
+      openThreads,
+      currentMessageIndex,
     });
 
     // The global "Ajustes → Contexto" value (settings.defaultContextLength) is the
@@ -756,7 +841,6 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     //     an offense, manipulation attempts, guilt-tripping, etc.
     const hasNonConsentingChars = characterAffinities.some((a) => a.affinity < 80);
 
-    const playerAction = detectPlayerAction(userMessageForAnalysis);
     let turnDirective = buildTurnDirective(playerAction, userMessageForAnalysis, characterAffinities);
 
     if (!turnDirective && hasNonConsentingChars && useFastLlm) {
@@ -1098,6 +1182,125 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
+    // ── Hilos narrativos: [HILO_ABIERTO:...] / [HILO_CERRADO:...] ─────────────
+    // Se CIERRA antes de abrir: si en el mismo turno el modelo resuelve un hilo y
+    // plantea otro con un título parecido, cerrar primero evita que el recién
+    // abierto absorba el cierre por el emparejado tolerante de `close()`.
+    // Las etiquetas se eliminan siempre del contenido visible, aunque el parseo
+    // falle — un marcador técnico nunca debe llegar al jugador.
+    const THREAD_OPEN_RE  = /\[HILO_ABIERTO:\s*([^\]|]{1,120}?)\s*(?:\|\s*([^\]|]{0,400}?)\s*)?(?:\|\s*(\d{1,2})\s*)?\]/gi;
+    const THREAD_CLOSE_RE = /\[HILO_CERRADO:\s*([^\]]{1,120}?)\s*\]/gi;
+
+    const threadOpenMatches  = [...cleanContent.matchAll(THREAD_OPEN_RE)];
+    const threadCloseMatches = [...cleanContent.matchAll(THREAD_CLOSE_RE)];
+    cleanContent = cleanContent.replace(THREAD_OPEN_RE, '').replace(THREAD_CLOSE_RE, '').trimEnd();
+
+    if (!aborted) {
+      for (const m of threadCloseMatches) {
+        const closed = threadRepo.close(conversationId, m[1], currentMessageIndex);
+        if (closed) console.log(`[threads] Cerrado: «${closed.title}»`);
+        else console.warn(`[threads] [HILO_CERRADO:${m[1]}] no casa con ningún hilo abierto — ignorado`);
+      }
+      for (const m of threadOpenMatches) {
+        const title = m[1]?.trim();
+        if (!title) continue;
+        // La importancia declarada se acota al rango válido; sin ella, 5 (media).
+        const rawImp = m[3] ? Number(m[3]) : 5;
+        const importance = Math.min(10, Math.max(1, Number.isFinite(rawImp) ? rawImp : 5));
+        const { thread, created } = threadRepo.open({
+          conversationId,
+          title,
+          description: m[2]?.trim() ?? '',
+          importance,
+          openedAtIndex: currentMessageIndex,
+        });
+        console.log(`[threads] ${created ? 'Abierto' : 'Refrescado'}: «${thread.title}» (imp. ${thread.importance})`);
+      }
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
+    // ── Paso del tiempo y clima: [TIEMPO:...] / [CLIMA:...] ───────────────────
+    // El modelo declara CUÁNTO tiempo consumió lo que narró; el servidor lo
+    // traduce a minutos y lo suma al contador. Sin etiqueta el reloj avanza igual
+    // (DEFAULT_ADVANCE_MINUTES): si el tiempo solo corriera cuando el modelo se
+    // acuerda de la etiqueta, una escena larga de diálogo congelaría el mundo.
+    // No se aplica en respuestas abortadas: media respuesta no consume tiempo.
+    const TIME_RE    = /\[TIEMPO:\s*([^\]]{1,40}?)\s*\]/gi;
+    const WEATHER_RE = /\[CLIMA:\s*([^\]]{1,60}?)\s*\]/gi;
+    const SCENE_RE   = /\[ESCENA:\s*([^\]]{1,120}?)\s*\]/gi;
+
+    // Cabecera a mostrar en ESTA respuesta; se recalcula abajo si el modelo corrigió.
+    let headerForDisplay: string | null = worldHeader;
+    const timeMatches    = [...cleanContent.matchAll(TIME_RE)];
+    const weatherMatches = [...cleanContent.matchAll(WEATHER_RE)];
+    const sceneMatches   = [...cleanContent.matchAll(SCENE_RE)];
+    cleanContent = cleanContent
+      .replace(TIME_RE, '').replace(WEATHER_RE, '').replace(SCENE_RE, '').trimEnd();
+
+    if (!aborted) {
+      // [ESCENA:...] tiene prioridad sobre [TIEMPO:...]: es una corrección
+      // (o el anclaje inicial), no un avance. Si el modelo emite ambas, manda la
+      // corrección — el avance relativo partiría de una hora que él ya declaró mala.
+      const sceneRaw = sceneMatches.at(-1)?.[1];
+      const scene = sceneRaw ? parseSceneTag(sceneRaw) : null;
+
+      let minutesElapsed: number;
+      if (scene?.minuteOfDay != null) {
+        minutesElapsed = applySceneTime(worldState, worldCalendar, scene.minuteOfDay);
+        console.log(`[world] Escena ${worldState.established ? 'corregida' : 'anclada'} → ${sceneRaw}`);
+      } else {
+        // Última ocurrencia = la más autoritativa (igual criterio que [UBICACION:]).
+        const rawAdvance = timeMatches.at(-1)?.[1];
+        const parsed = rawAdvance
+          ? parseTimeAdvance(rawAdvance, currentMinuteOfDay(worldState, worldCalendar))
+          : null;
+        if (rawAdvance && parsed === null) {
+          console.warn(`[world] [TIEMPO:${rawAdvance}] no reconocido — aplicando avance por defecto`);
+        }
+        // Mientras la escena no esté anclada el reloj NO corre: avanzar un tiempo
+        // que no sabemos desde cuándo cuenta solo acumula error.
+        const advance = worldState.established ? (parsed ?? DEFAULT_ADVANCE_MINUTES) : 0;
+        minutesElapsed = worldState.minutesElapsed + advance;
+      }
+
+      // El lugar declarado en [ESCENA:...] actualiza la ubicación igual que
+      // [UBICACION:], sin que el modelo tenga que emitir las dos etiquetas.
+      if (scene?.location) {
+        locationUpdate = scene.location;
+        convRepo.updateLocation(conversationId, scene.location);
+      }
+
+      const nextWorldState: WorldState = {
+        minutesElapsed,
+        weather: weatherMatches.at(-1)?.[1]?.trim() || worldState.weather,
+        // Queda anclada en cuanto el modelo declara una hora válida.
+        established: worldState.established || scene?.minuteOfDay != null,
+        updatedAt: new Date().toISOString(),
+      };
+      // Merge sobre metadata FRESCO para no pisar partyState/deathLoop/resúmenes.
+      const freshForWorld = convRepo.findById(conversationId);
+      if (freshForWorld) {
+        convRepo.update(conversationId, {
+          metadata: { ...freshForWorld.metadata, worldState: nextWorldState },
+        });
+      }
+
+      // Cabecera que se MUESTRA en esta respuesta. Se distingue corrección de avance:
+      //   · [ESCENA:...] es una corrección (o el anclaje) → la cabecera de esta misma
+      //     respuesta debe reflejar ya el valor corregido; si no, se sustituiría por
+      //     la obsoleta que el modelo acaba de declarar equivocada.
+      //   · [TIEMPO:+3h] es tiempo consumido DURANTE la respuesta → la cabecera abre
+      //     la escena y conserva la hora de inicio; el avance se verá en el turno siguiente.
+      if (scene?.minuteOfDay != null && nextWorldState.established) {
+        headerForDisplay = formatHeader(
+          computeClock(nextWorldState, worldCalendar),
+          locationUpdate ?? conversation.currentLocation,
+        );
+      }
+      console.log(`[world] ${headerForDisplay ?? '(escena sin anclar — esperando [ESCENA:...])'}`);
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     // ── Muerte del jugador: [MUERTE_JUGADOR:N:causa] / [MUERTE_SUPERADA] ──────
     // Máquina de estados del bucle (conversation.metadata.deathLoop):
     //   sin bucle + muerte      → 'dead' (count=1) — la UI ofrece rebobinar
@@ -1157,6 +1360,16 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     }
     // ─────────────────────────────────────────────────────────────────────────
 
+    // ── Normalización de la cabecera ambiental (mitad "servidor" del híbrido) ──
+    // El modelo la escribe para que le cebe el tono de lo que narra a continuación,
+    // pero no se le concede autoridad sobre su contenido: si la que emitió no es
+    // EXACTA, se sustituye por la canónica; si no la puso, se antepone. Así se
+    // conserva el efecto de cebado sin exponer al jugador a la deriva (horas que
+    // retroceden, días de la semana que dejan de cuadrar con la fecha).
+    if (!aborted && cleanContent.trim()) {
+      cleanContent = normalizeWorldHeader(cleanContent, headerForDisplay);
+    }
+
     // Observabilidad del guardián de voz: avisa en cuanto una respuesta narra en
     // primera persona (la directiva correctiva se inyectará en el turno siguiente).
     if (!aborted && cleanContent) {
@@ -1195,6 +1408,8 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
         conversationId, provider, modelId,
         !narratorMode && contextGroupChars.length > 0 ? character : null,
       );
+      // Anclaje de la escena: no-op salvo la primera vez de cada conversación.
+      void bootstrapWorldStateAsync(conversationId, provider, modelId, worldCalendar);
       const updatedConv = convRepo.findById(conversationId);
       if (updatedConv) void autoExtractContextAsync(conversationId, updatedConv.messageCount);
     }
@@ -1582,6 +1797,93 @@ Responde SOLO con el texto del resumen.`;
     },
   });
   console.log(`[summary] Resumen personal actualizado para ${character.name} (${witnessed.length} msgs presenciados)`);
+}
+
+// ─── Anclaje inicial de la escena ─────────────────────────────────────────────
+//
+// Averigua hora y lugar leyendo la conversación, en una llamada dedicada al
+// provider PRINCIPAL, una sola vez por conversación.
+//
+// El primer intento fue pedírselo al propio turno narrativo con una etiqueta
+// [ESCENA:...]. No funcionó: el bloque llegaba al prompt en la última posición
+// antes del mensaje del jugador —la de máxima obediencia— y el modelo lo
+// ignoraba igual. Es lógico: en mitad de una escena se le pedía una tarea de
+// contabilidad ajena a lo que estaba escribiendo, compitiendo con otras cinco
+// etiquetas técnicas. Una llamada aparte y con un único cometido no compite con
+// nada, y esto solo hay que resolverlo una vez.
+//
+// La corrección posterior SÍ sigue en manos del turno narrativo ([ESCENA:...]),
+// donde el gesto es natural: arreglar una cabecera que uno ve equivocada delante.
+export async function bootstrapWorldStateAsync(
+  conversationId: string,
+  provider: ReturnType<ProviderRepository['findById']>,
+  modelId: string,
+  calendar: StoryCalendar | null,
+): Promise<void> {
+  if (!provider) return;
+  try {
+    const conv = convRepo.findById(conversationId);
+    if (!conv) return;
+    const state = normalizeWorldState((conv.metadata as { worldState?: WorldState } | null)?.worldState);
+    if (state.established) return; // ya anclada
+
+    const recent = msgRepo.findByConversation(conversationId)
+      .filter((m) => m.role !== 'system')
+      .slice(-10);
+    if (recent.length < 2) return; // aún no hay escena que leer
+
+    const transcript = labelSpeakers(recent as Message[]);
+    const settings = settingsService.getAll();
+    const llm = createProvider(provider);
+
+    const response = await llm.generate({
+      messages: [
+        { role: 'system', content: 'Extraes datos de escena de una historia de rol. Respondes solo con el dato pedido, sin explicaciones.' },
+        { role: 'user', content:
+          `Lee este fragmento y determina CUÁNDO y DÓNDE transcurre la escena en este momento.\n\n` +
+          `---\n${transcript}\n---\n\n` +
+          `Responde EXACTAMENTE en este formato, sin nada más:\n` +
+          `HH:MM|lugar\n\n` +
+          `- HH:MM en formato 24h. Dedúcelo de lo que se narra (si se están acostando será de noche, si desayunan será por la mañana). Si no hay ninguna pista, usa 12:00.\n` +
+          `- El lugar, en pocas palabras y tal como se llama en la historia (por ejemplo: dormitorio de Rika, taberna del Jabalí, camino a la aldea).\n` +
+          `Ejemplo de respuesta válida: 23:15|dormitorio de Rika` },
+      ],
+      model: modelId,
+      temperature: 0.2,
+      maxTokens: 40,
+      stream: false,
+      disableFallbacks: settings.disableFallbacks,
+    });
+
+    const raw = response.content.trim().split('\n')[0].replace(/[`*[\]]/g, '').trim();
+    const scene = parseSceneTag(raw);
+    if (scene.minuteOfDay == null) {
+      console.warn(`[world] Anclaje automático fallido, respuesta no interpretable: "${raw}" — se reintentará`);
+      return;
+    }
+
+    // Merge sobre metadata FRESCO: han podido escribirse resúmenes entre medias.
+    const fresh = convRepo.findById(conversationId);
+    if (!fresh) return;
+    const freshState = normalizeWorldState((fresh.metadata as { worldState?: WorldState } | null)?.worldState);
+    if (freshState.established) return; // otra ejecución se adelantó
+
+    convRepo.update(conversationId, {
+      metadata: {
+        ...fresh.metadata,
+        worldState: {
+          minutesElapsed: applySceneTime(freshState, calendar, scene.minuteOfDay),
+          weather: freshState.weather,
+          established: true,
+          updatedAt: new Date().toISOString(),
+        } satisfies WorldState,
+      },
+    });
+    if (scene.location) convRepo.updateLocation(conversationId, scene.location);
+    console.log(`[world] Escena anclada automáticamente: ${raw}`);
+  } catch (err) {
+    console.error('[world] Error en el anclaje automático:', err);
+  }
 }
 
 async function updateSummaryAsync(
