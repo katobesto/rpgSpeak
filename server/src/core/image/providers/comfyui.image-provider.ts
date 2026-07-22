@@ -1,5 +1,5 @@
 import { ComfyUiService, type ComfyProgressEvent } from '../../../modules/characters/comfyui.service.js';
-import type { ImageProvider, ImageGenRequest, ImageGenResult } from '../image-provider.interface.js';
+import type { ImageProvider, ImageGenRequest, ImageGenResult, ImageProgressEvent } from '../image-provider.interface.js';
 
 export class ComfyUiImageProvider implements ImageProvider {
   readonly supportsReference = true;
@@ -26,9 +26,18 @@ export class ComfyUiImageProvider implements ImageProvider {
 
   async generateWithReference(
     req: ImageGenRequest & { referenceImagePath: string },
+    onProgress?: (evt: ImageProgressEvent) => void,
   ): Promise<ImageGenResult> {
     const workflow = req.workflowName ?? 'faceid_sdxl';
-    return this.service.generateImageWithReference(workflow, req.prompt, req.referenceImagePath);
+    // ComfyProgressEvent (progress|node, flat optional fields) → ImageProgressEvent
+    // (discriminated union, also covers 'preview' which ComfyUI's WS doesn't emit here).
+    const adapted = onProgress
+      ? (evt: ComfyProgressEvent) => {
+          if (evt.type === 'progress') onProgress({ type: 'progress', value: evt.value ?? 0, max: evt.max ?? 0 });
+          else if (evt.type === 'node') onProgress({ type: 'node', nodeId: evt.nodeId ?? '', nodeName: evt.nodeName ?? '' });
+        }
+      : undefined;
+    return this.service.generateImageWithReference(workflow, req.prompt, req.referenceImagePath, adapted);
   }
 
   /**

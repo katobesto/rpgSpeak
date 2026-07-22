@@ -7,6 +7,8 @@ import { SettingsService } from '../settings/settings.service.js';
 import { ProviderRepository } from '../providers/provider.repository.js';
 import { createProvider } from '../../core/llm/provider.factory.js';
 import { createImageProvider } from '../../core/image/image-provider.factory.js';
+import { DYNAMISM_BLOCK } from '../../core/image/dynamism-block.js';
+import type { ImageProgressEvent } from '../../core/image/image-provider.interface.js';
 import type { GenerateRequest } from '@rpgspeak/shared';
 import fs from 'fs';
 import path from 'path';
@@ -111,8 +113,7 @@ export class CharacterService {
       .replace('{{nombre}}',      character.name        ?? '')
       .replace('{{descripcion}}', character.description ?? '')
       .replace('{{personalidad}}', character.personality ?? '')
-      .replace('{{lore}}',        character.lore        ?? '')
-      .replace('{{escena}}',      '(ninguna — genera su apariencia base en una pose neutra de retrato)');
+      .replace('{{lore}}',        character.lore        ?? '');
 
     const llm = createProvider(provider);
     const request: GenerateRequest = {
@@ -128,22 +129,14 @@ export class CharacterService {
     return { description: response.content.trim() };
   }
 
-  /**
-   * Galería con escena/pose libre: combina la descripción visual ya validada del
-   * personaje (imageDescription, o description/personalidad/lore si aún no existe)
-   * con el texto de escena que escribe el usuario, deja que el LLM configurado
-   * fusione ambos en un único prompt de imagen (mismo charImagePrompt que usa el
-   * generador de la ventana de edición), y genera la imagen usando el avatar del
-   * personaje como referencia cuando el proveedor lo soporta, para consistencia visual.
-   */
-  async generateSceneImage(
-    id: string,
-    scenePrompt: string,
-    overrides?: { providerId?: string; modelId?: string; workflowName?: string },
-  ): Promise<Character> {
-    const character = this.get(id);
-    const settings = settingsService.getAll();
-
+  /** Resuelve provider/modelo LLM para un personaje, con overrides puntuales y
+   *  fallback a los defaults globales — compartido por generación de descripción
+   *  y de escena. */
+  private resolveLlmProvider(
+    character: Character,
+    settings: ReturnType<typeof settingsService.getAll>,
+    overrides?: { providerId?: string; modelId?: string },
+  ) {
     const providerId =
       overrides?.providerId ??
       character.providerId ??
@@ -163,15 +156,59 @@ export class CharacterService {
       throw new ValidationError('No hay un modelo configurado. Ve a Settings y selecciona un modelo.');
     }
 
-    const identityText = character.imageDescription?.trim() || character.description || '';
-    const escenaText = scenePrompt.trim() || '(ninguna — genera su apariencia base en una pose neutra de retrato)';
-    const promptTemplate = settings.charImagePrompt;
-    const llmPrompt = promptTemplate
-      .replace('{{nombre}}',       character.name         ?? '')
-      .replace('{{descripcion}}',  identityText)
-      .replace('{{personalidad}}', character.personality  ?? '')
-      .replace('{{lore}}',         character.lore         ?? '')
-      .replace('{{escena}}',       escenaText);
+    return { provider, modelId };
+  }
+
+  /**
+   * Construye el prompt de imagen de escena/pose para UN personaje, reutilizando
+   * el mismo prompt configurado (sceneImagePrompt) y el mismo apéndice de dinamismo
+   * que la generación de escena del chat — en vez del prompt de descripción de
+   * personaje (charImagePrompt), más simple. El texto de escena del usuario ocupa
+   * el lugar de "THE MOMENT TO DEPICT"; la ficha del personaje (nombre, descripción,
+   * imageDescription) alimenta {{characters}}.
+   */
+  private buildSceneImagePromptText(
+    character: Character,
+    scenePrompt: string,
+    settings: ReturnType<typeof settingsService.getAll>,
+  ): string {
+    const charBlock = [
+      `Name: ${character.name}`,
+      character.description ? `Description: ${character.description}` : '',
+      character.imageDescription ? `Appearance: ${character.imageDescription}` : '',
+    ].filter(Boolean).join('\n');
+
+    const moment = scenePrompt.trim() || 'a natural, neutral portrait pose that reflects their personality';
+    const messagesBlock = `>>> THE MOMENT TO DEPICT — build the whole image around THIS beat:\n${character.name}: ${moment}`;
+
+    const filledPrompt = settings.sceneImagePrompt
+      .replace('{{characters}}', charBlock || '(no character info available)')
+      .replace('{{messages}}',   messagesBlock);
+
+    const constraintBlock =
+      `\n\nCRITICAL CONSTRAINT — CHARACTERS IN THE IMAGE:\n` +
+      `Only portray ${character.name}. Do NOT portray any other person, character or figure.`;
+
+    return filledPrompt + constraintBlock + DYNAMISM_BLOCK;
+  }
+
+  /**
+   * Galería con escena/pose libre: el texto de escena del usuario se funde con la
+   * ficha del personaje mediante el mismo prompt (y apéndice de dinamismo) que la
+   * generación de escena del chat, el LLM configurado lo convierte en un prompt de
+   * imagen final, y la imagen se genera usando el avatar del personaje como
+   * referencia cuando el proveedor lo soporta, para consistencia visual.
+   */
+  async generateSceneImage(
+    id: string,
+    scenePrompt: string,
+    overrides?: { providerId?: string; modelId?: string; workflowName?: string },
+  ): Promise<{ character: Character; generatedPrompt: string }> {
+    const character = this.get(id);
+    const settings = settingsService.getAll();
+    const { provider, modelId } = this.resolveLlmProvider(character, settings, overrides);
+
+    const llmPrompt = this.buildSceneImagePromptText(character, scenePrompt, settings);
 
     const llm = createProvider(provider);
     const llmResponse = await llm.generate({
@@ -203,7 +240,67 @@ export class CharacterService {
     }
 
     const base64 = buffer.toString('base64');
-    return this.addImage(id, base64, filename, false);
+    const updated = this.addImage(id, base64, filename, false);
+    return { character: updated, generatedPrompt: finalImagePrompt };
+  }
+
+  /**
+   * Igual que generateSceneImage, pero reporta progreso en vivo (status/progress/
+   * node/preview) a través de onProgress — usado por la ruta SSE de la galería.
+   */
+  async generateSceneImageWithProgress(
+    id: string,
+    scenePrompt: string,
+    onEvent: (evt: { type: 'status'; message: string } | ImageProgressEvent) => void,
+    overrides?: { providerId?: string; modelId?: string; workflowName?: string },
+  ): Promise<{ character: Character; generatedPrompt: string }> {
+    const character = this.get(id);
+    const settings = settingsService.getAll();
+    const { provider, modelId } = this.resolveLlmProvider(character, settings, overrides);
+
+    onEvent({ type: 'status', message: 'Escribiendo el prompt de la escena…' });
+    const llmPrompt = this.buildSceneImagePromptText(character, scenePrompt, settings);
+
+    const llm = createProvider(provider);
+    const llmResponse = await llm.generate({
+      messages: [{ role: 'user', content: llmPrompt }],
+      model: modelId,
+      temperature: 0.7,
+      stream: false,
+    });
+    const finalImagePrompt = llmResponse.content.trim();
+
+    onEvent({ type: 'status', message: 'Generando imagen…' });
+
+    const imageProvider = createImageProvider(settings);
+    let buffer: Buffer, filename: string;
+
+    const avatarDiskPath = character.avatar
+      ? path.join(PROJECT_ROOT, 'data', 'images', character.avatar.replace(/^\/images\//, ''))
+      : null;
+    const onProgress = (evt: ImageProgressEvent) => onEvent(evt);
+
+    if (imageProvider.supportsReference && avatarDiskPath && fs.existsSync(avatarDiskPath)) {
+      ({ buffer, filename } = await imageProvider.generateWithReference!({
+        prompt: finalImagePrompt,
+        referenceImagePath: avatarDiskPath,
+        ...(overrides?.workflowName ? { workflowName: overrides.workflowName } : {}),
+      }, onProgress));
+    } else if (imageProvider.generateWithProgress) {
+      ({ buffer, filename } = await imageProvider.generateWithProgress({
+        prompt: finalImagePrompt,
+        workflowName: overrides?.workflowName ?? 'image_z_image_turbo',
+      }, onProgress));
+    } else {
+      ({ buffer, filename } = await imageProvider.generate({
+        prompt: finalImagePrompt,
+        workflowName: overrides?.workflowName ?? 'image_z_image_turbo',
+      }));
+    }
+
+    const base64 = buffer.toString('base64');
+    const updated = this.addImage(id, base64, filename, false);
+    return { character: updated, generatedPrompt: finalImagePrompt };
   }
 
   addImage(id: string, data: string, filename: string, setAsAvatar?: boolean): Character {

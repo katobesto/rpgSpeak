@@ -33,7 +33,8 @@ export interface ImageProvider {
   /** Whether this provider supports FaceID / reference-image generation. */
   readonly supportsReference: boolean;
   generate(req: ImageGenRequest): Promise<ImageGenResult>;
-  generateWithReference?(req: ImageGenRequest & { referenceImagePath: string }): Promise<ImageGenResult>;
+  /** onProgress is optional — providers/callers that don't need live progress can omit it. */
+  generateWithReference?(req: ImageGenRequest & { referenceImagePath: string }, onProgress?: (evt: ImageProgressEvent) => void): Promise<ImageGenResult>;
   /** Optional: stream progress events during generation. */
   generateWithProgress?(req: ImageGenRequest, onProgress: (evt: ImageProgressEvent) => void): Promise<ImageGenResult>;
 }

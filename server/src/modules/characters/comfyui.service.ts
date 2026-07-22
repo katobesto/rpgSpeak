@@ -341,10 +341,14 @@ export class ComfyUiService {
   }
 
   // ── Full pipeline (BETA — with character reference image) ─────────────────
+  // onProgress is optional: when provided, subscribes to ComfyUI's WS for
+  // real-time step/node progress (same mechanism as startProgressiveWithProgress),
+  // otherwise falls back to plain HTTP polling via runWorkflow.
   async generateImageWithReference(
     workflowName: string,
     positivePrompt: string,
     referenceImagePath: string,
+    onProgress?: (event: ComfyProgressEvent) => void,
   ): Promise<{ buffer: Buffer; filename: string }> {
     // 1. Upload reference image to ComfyUI
     const comfyFilename = await this.uploadImage(referenceImagePath);
@@ -362,7 +366,38 @@ export class ComfyUiService {
       }
     }
 
-    return this.runWorkflow(patched);
+    if (!onProgress) {
+      return this.runWorkflow(patched);
+    }
+
+    const clientId = `rpgspeak-${Date.now()}`;
+    const nodeNameMap = new Map<string, string>(
+      Object.entries(patched).map(([id, node]) => [id, NODE_LABELS[node.class_type] ?? node.class_type]),
+    );
+    const wsUrl = this.baseUrl.replace(/^http/, 'ws') + `/ws?clientId=${clientId}`;
+    let ws: unknown = null;
+    let wsDisconnected = false;
+    this.subscribeComfyWs(wsUrl, clientId, nodeNameMap, onProgress, () => wsDisconnected)
+      .then((socket) => { ws = socket; })
+      .catch(() => { /* WS is optional — generation continues without it */ });
+
+    const promptId = await this.queuePromptFull(patched, clientId);
+    const result = await this.waitForResult(promptId);
+    wsDisconnected = true;
+    try { (ws as { close?: () => void } | null)?.close?.(); } catch { /* ignore */ }
+
+    let imageInfo: { filename: string; subfolder: string; type: string } | null = null;
+    for (const output of Object.values(result.outputs)) {
+      if (output.images && output.images.length > 0) {
+        imageInfo = output.images[0];
+        break;
+      }
+    }
+    if (!imageInfo) {
+      throw new Error('ComfyUI: el resultado no contiene imágenes');
+    }
+    const buffer = await this.downloadImage(imageInfo.filename, imageInfo.subfolder, imageInfo.type);
+    return { buffer, filename: imageInfo.filename };
   }
 
   // ── Shared: queue → wait → download ──────────────────────────────────────

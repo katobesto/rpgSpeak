@@ -39,6 +39,7 @@ export class BzComfyImageProvider implements ImageProvider {
 
   async generateWithReference(
     req: ImageGenRequest & { referenceImagePath: string },
+    onProgress?: (evt: ImageProgressEvent) => void,
   ): Promise<ImageGenResult> {
     const workflow = req.workflowName ?? this.defaultWorkflow;
     if (!workflow) {
@@ -51,7 +52,7 @@ export class BzComfyImageProvider implements ImageProvider {
       req.negativePrompt,
       referenceImageName,
     );
-    const info = await this.waitForImage(promptId, () => {});
+    const info = await this.waitForImage(promptId, onProgress ?? (() => {}));
     const buffer = await this.downloadImage(info);
     return { buffer, filename: info.filename };
   }

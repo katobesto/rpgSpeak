@@ -132,9 +132,9 @@ export const characterRoutes: FastifyPluginAsync = async (app) => {
 
   // POST /characters/:id/generate-scene-image
   // Galería con escena/pose libre: el usuario escribe una escena, se funde con la
-  // descripción visual del personaje vía charImagePrompt, y se genera la imagen
-  // usando su avatar como referencia (cuando el proveedor lo soporta) para
-  // mantener consistencia de personaje.
+  // ficha del personaje vía sceneImagePrompt (mismo prompt y apéndice de dinamismo
+  // que la generación de escena del chat), y se genera la imagen usando su avatar
+  // como referencia (cuando el proveedor lo soporta) para mantener consistencia.
   app.post<{ Params: { id: string } }>('/:id/generate-scene-image', async (req, reply) => {
     const { scenePrompt, providerId, modelId, workflowName } = (req.body ?? {}) as {
       scenePrompt?: string;
@@ -143,12 +143,49 @@ export const characterRoutes: FastifyPluginAsync = async (app) => {
       workflowName?: string;
     };
 
-    const updated = await service.generateSceneImage(req.params.id, scenePrompt ?? '', {
+    const result = await service.generateSceneImage(req.params.id, scenePrompt ?? '', {
       providerId,
       modelId,
       workflowName,
     });
 
-    return reply.status(201).send({ success: true, data: updated });
+    return reply.status(201).send({ success: true, data: result });
+  });
+
+  // POST /characters/:id/generate-scene-image-sse
+  // Igual que generate-scene-image, pero como stream SSE con progreso en vivo
+  // (status | progress | node | preview | done | error) — misma UX que la
+  // generación de escena del chat.
+  app.post<{ Params: { id: string } }>('/:id/generate-scene-image-sse', async (req, reply) => {
+    const { scenePrompt, providerId, modelId, workflowName } = (req.body ?? {}) as {
+      scenePrompt?: string;
+      providerId?: string;
+      modelId?: string;
+      workflowName?: string;
+    };
+
+    reply.raw.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    const send = (data: object) => {
+      try { reply.raw.write(`data: ${JSON.stringify(data)}\n\n`); } catch { /* client gone */ }
+    };
+
+    try {
+      const result = await service.generateSceneImageWithProgress(
+        req.params.id,
+        scenePrompt ?? '',
+        (evt) => send(evt),
+        { providerId, modelId, workflowName },
+      );
+      send({ type: 'done', imageUrl: result.character.gallery[result.character.gallery.length - 1], generatedPrompt: result.generatedPrompt });
+    } catch (err) {
+      send({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      reply.raw.end();
+    }
   });
 };

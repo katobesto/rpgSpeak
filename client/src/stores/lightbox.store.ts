@@ -15,6 +15,9 @@ interface LightboxState {
   prev:        () => void;
   /** Appends a freshly-generated image to the gallery and jumps to it. */
   addGenerated: (url: string) => void;
+  /** Removes an image from the gallery (already deleted server-side) and jumps to
+   *  a neighbour, or closes the lightbox if it was the last one. */
+  removeFromGallery: (url: string) => void;
 }
 
 export const useLightboxStore = create<LightboxState>((set, get) => ({
@@ -45,5 +48,15 @@ export const useLightboxStore = create<LightboxState>((set, get) => ({
     const { gallery } = get();
     const list = gallery.length > 0 ? [...gallery, url] : [url];
     set({ gallery: list, index: list.length - 1, src: url });
+  },
+  removeFromGallery: (url) => {
+    const { gallery, index } = get();
+    const list = gallery.filter((u) => u !== url);
+    if (list.length === 0) {
+      set({ src: null, name: '', gallery: [], index: 0, characterId: null });
+      return;
+    }
+    const newIndex = Math.min(index, list.length - 1);
+    set({ gallery: list, index: newIndex, src: list[newIndex] });
   },
 }));
