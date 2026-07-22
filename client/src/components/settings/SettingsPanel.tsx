@@ -12,7 +12,7 @@ import { Input, Textarea } from '../ui/Input.tsx';
 import { Plus, Trash2, RefreshCw, Check, X, Volume2, Wifi, Download, CheckCircle2, Play, Square, Loader, LogOut, Users, Shield, UserCircle, RotateCcw, AlertCircle, BarChart2, Zap, Camera, Sparkles, Wand2, FlaskConical, Upload, Link2, BookOpen, Pencil, DatabaseBackup, HardDriveDownload, HardDriveUpload, TriangleAlert, Search, Brain, ChevronUp, ChevronDown, ListFilter } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { backupApi } from '../../api/backup.ts';
-import type { Provider, CreateProviderDto, AppSettings, TtsSettings, TtsVoice, BzWorkflow, ProviderModel } from '@rpgspeak/shared';
+import type { Provider, CreateProviderDto, AppSettings, TtsSettings, TtsVoice, BzWorkflow, ProviderModel, Story } from '@rpgspeak/shared';
 import { useUiStore } from '../../stores/ui.store.ts';
 import { useAuthStore } from '../../stores/auth.store.ts';
 import { conversationsApi } from '../../api/conversations.ts';
@@ -3025,9 +3025,9 @@ function UsersSection() {
                   </div>
                 </div>
               )}
-              {/* Assignments panel — rendered inside the card, below both normal row and edit form */}
-              {assignId === u.id && editId !== u.id && (
-                <UserAssignmentsPanel userId={u.id} userName={u.displayName} />
+              {/* Assignments modal — createPortal teleports it to document.body regardless of nesting */}
+              {assignId === u.id && (
+                <UserAssignmentsModal userId={u.id} userName={u.displayName} onClose={() => setAssignId(null)} />
               )}
             </div>
           ))}
@@ -3037,9 +3037,12 @@ function UsersSection() {
   );
 }
 
-// ─── User Assignments Panel ───────────────────────────────────────────────────
+// ─── User Assignments Modal ────────────────────────────────────────────────────
+// Doble lista (disponibles ⇄ asignados) por pestaña Personajes/Historias. Al
+// asignar una historia, si tiene personajes vinculados aún no asignados, ofrece
+// añadirlos también en un banner descartable — no es automático, el admin decide.
 
-function UserAssignmentsPanel({ userId, userName }: { userId: string; userName: string }) {
+function UserAssignmentsModal({ userId, userName, onClose }: { userId: string; userName: string; onClose: () => void }) {
   const qc = useQueryClient();
 
   // All content (admin sees everything)
@@ -3058,8 +3061,11 @@ function UserAssignmentsPanel({ userId, userName }: { userId: string; userName: 
 
   const [selChars, setSelChars]     = useState<Set<string>>(new Set());
   const [selStories, setSelStories] = useState<Set<string>>(new Set());
+  const [tab, setTab]               = useState<'characters' | 'stories'>('characters');
+  const [search, setSearch]         = useState('');
   const [saving, setSaving]         = useState(false);
-  const [saved, setSaved]           = useState(false);
+  const [saveError, setSaveError]   = useState<string | null>(null);
+  const [linkOffer, setLinkOffer]   = useState<{ storyName: string; charIds: string[] } | null>(null);
 
   // Sync remote data into local state once loaded
   useEffect(() => {
@@ -3069,110 +3075,208 @@ function UserAssignmentsPanel({ userId, userName }: { userId: string; userName: 
     if (storyAssign?.storyIds) setSelStories(new Set(storyAssign.storyIds));
   }, [storyAssign]);
 
-  function toggleChar(id: string) {
-    setSelChars((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-    setSaved(false);
+  const isLoading = loadingChars || loadingStories;
+
+  function addChar(id: string) {
+    setSelChars((s) => new Set(s).add(id));
   }
-  function toggleStory(id: string) {
-    setSelStories((s) => { const n = new Set(s); n.has(id) ? n.delete(id) : n.add(id); return n; });
-    setSaved(false);
+  function removeChar(id: string) {
+    setSelChars((s) => { const n = new Set(s); n.delete(id); return n; });
+  }
+  function addStory(story: Story) {
+    setSelStories((s) => new Set(s).add(story.id));
+    const linked = allChars.filter((c) => c.storyIds.includes(story.id) && !selChars.has(c.id));
+    setLinkOffer(linked.length > 0 ? { storyName: story.name, charIds: linked.map((c) => c.id) } : null);
+  }
+  function removeStory(id: string) {
+    setSelStories((s) => { const n = new Set(s); n.delete(id); return n; });
+  }
+  function acceptLinkOffer() {
+    if (!linkOffer) return;
+    setSelChars((s) => { const n = new Set(s); linkOffer.charIds.forEach((id) => n.add(id)); return n; });
+    setLinkOffer(null);
   }
 
   async function handleSave() {
     setSaving(true);
+    setSaveError(null);
     try {
       await usersApi.setCharacterIds(userId, [...selChars]);
       await usersApi.setStoryIds(userId, [...selStories]);
       qc.invalidateQueries({ queryKey: ['user-chars', userId] });
       qc.invalidateQueries({ queryKey: ['user-stories', userId] });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      onClose();
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : 'Error al guardar');
     } finally {
       setSaving(false);
     }
   }
 
-  const isLoading = loadingChars || loadingStories;
+  const q = search.trim().toLowerCase();
+  const charsAvailable    = allChars.filter((c) => !selChars.has(c.id) && (!q || c.name.toLowerCase().includes(q)));
+  const charsAssigned     = allChars.filter((c) => selChars.has(c.id) && (!q || c.name.toLowerCase().includes(q)));
+  const storiesAvailable  = allStories.filter((s) => !selStories.has(s.id) && (!q || s.name.toLowerCase().includes(q)));
+  const storiesAssigned   = allStories.filter((s) => selStories.has(s.id) && (!q || s.name.toLowerCase().includes(q)));
 
-  return (
-    <div className="mt-3 pt-3 border-t border-border">
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-xs font-medium text-text-secondary flex items-center gap-1.5">
-          <Link2 size={12} className="text-accent" />
-          Contenido accesible para <span className="text-text-primary font-semibold">{userName}</span>
-        </p>
-        <button
-          onClick={handleSave}
-          disabled={saving}
-          className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium transition-colors bg-accent hover:bg-accent-hover text-white disabled:opacity-50"
-        >
-          {saving ? <><Loader size={11} className="animate-spin" /> Guardando…</> : saved ? <><Check size={11} /> Guardado</> : 'Guardar'}
-        </button>
-      </div>
-
-      {isLoading ? (
-        <p className="text-xs text-text-muted py-2">Cargando…</p>
-      ) : (
-        <div className="grid grid-cols-2 gap-4">
-
-          {/* Characters column */}
-          <div>
-            <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-1">
-              <UserCircle size={11} /> Personajes ({selChars.size}/{allChars.length})
-            </p>
-            <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
-              {allChars.length === 0 && <p className="text-xs text-text-muted">Sin personajes</p>}
-              {allChars.map((c) => (
-                <label key={c.id} className="flex items-center gap-2 py-1 px-2 rounded-lg cursor-pointer hover:bg-white/5 transition-colors">
-                  <input
-                    type="checkbox"
-                    checked={selChars.has(c.id)}
-                    onChange={() => toggleChar(c.id)}
-                    className="accent-[var(--accent)] w-3.5 h-3.5 rounded flex-shrink-0"
-                  />
-                  <span className={`text-xs truncate ${selChars.has(c.id) ? 'text-text-primary' : 'text-text-muted'}`}>
-                    {c.name}
-                  </span>
-                  {c.userId === userId && (
-                    <span className="ml-auto text-[10px] text-accent flex-shrink-0">propio</span>
-                  )}
-                </label>
-              ))}
-            </div>
-          </div>
-
-          {/* Stories column */}
-          <div>
-            <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-2 flex items-center gap-1">
-              <BookOpen size={11} /> Historias ({selStories.size}/{allStories.length})
-            </p>
-            <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
-              {allStories.length === 0 && <p className="text-xs text-text-muted">Sin historias</p>}
-              {allStories.map((s) => (
-                <label key={s.id} className="flex items-center gap-2 py-1 px-2 rounded-lg cursor-pointer hover:bg-white/5 transition-colors">
-                  <input
-                    type="checkbox"
-                    checked={selStories.has(s.id)}
-                    onChange={() => toggleStory(s.id)}
-                    className="accent-[var(--accent)] w-3.5 h-3.5 rounded flex-shrink-0"
-                  />
-                  <span className={`text-xs truncate ${selStories.has(s.id) ? 'text-text-primary' : 'text-text-muted'}`}>
-                    {s.name}
-                  </span>
-                  {s.userId === userId && (
-                    <span className="ml-auto text-[10px] text-accent flex-shrink-0">propia</span>
-                  )}
-                </label>
-              ))}
-            </div>
-          </div>
-
+  return createPortal(
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4"
+      style={{ background: 'rgba(0,0,0,0.7)' }}
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div
+        className="relative w-full max-w-3xl rounded-xl border border-border animate-slide-up overflow-hidden flex flex-col"
+        style={{ background: 'var(--surface-1)', maxHeight: '85vh' }}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
+          <h2 className="font-semibold text-base flex items-center gap-2">
+            <Link2 size={16} className="text-accent" />
+            Contenido de <span className="text-accent">{userName}</span>
+          </h2>
+          <button onClick={onClose} className="p-1 rounded-lg hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors">
+            <X size={16} />
+          </button>
         </div>
-      )}
-      <p className="text-[10px] text-text-muted mt-2">
-        Los administradores siempre ven todo el contenido. Los personajes e historias propios del usuario siempre son visibles independientemente de esta lista.
-      </p>
-    </div>
+
+        {/* Tabs */}
+        <div className="flex items-center gap-1 px-5 pt-3 border-b border-border flex-shrink-0">
+          <button
+            onClick={() => { setTab('characters'); setSearch(''); }}
+            className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${tab === 'characters' ? 'border-accent text-accent' : 'border-transparent text-text-muted hover:text-text-primary'}`}
+          >
+            <UserCircle size={14} /> Personajes ({selChars.size})
+          </button>
+          <button
+            onClick={() => { setTab('stories'); setSearch(''); }}
+            className={`flex items-center gap-1.5 px-3 py-2 text-sm font-medium border-b-2 transition-colors ${tab === 'stories' ? 'border-accent text-accent' : 'border-transparent text-text-muted hover:text-text-primary'}`}
+          >
+            <BookOpen size={14} /> Historias ({selStories.size})
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-5">
+          {isLoading ? (
+            <p className="text-xs text-text-muted py-2">Cargando…</p>
+          ) : (
+            <>
+              <div className="relative mb-3">
+                <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-muted" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder={tab === 'characters' ? 'Buscar personaje…' : 'Buscar historia…'}
+                  className="w-full pl-8 pr-3 py-2 rounded-lg bg-surface-2 border border-border text-sm text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent"
+                />
+              </div>
+
+              {tab === 'stories' && linkOffer && (
+                <div className="mb-3 p-3 rounded-lg border border-accent/30 bg-accent/5 flex items-start gap-2">
+                  <Link2 size={14} className="text-accent flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 text-xs text-text-secondary leading-relaxed">
+                    <strong className="text-text-primary">«{linkOffer.storyName}»</strong> tiene {linkOffer.charIds.length} personaje{linkOffer.charIds.length !== 1 ? 's' : ''} vinculado{linkOffer.charIds.length !== 1 ? 's' : ''} aún no asignado{linkOffer.charIds.length !== 1 ? 's' : ''}: {linkOffer.charIds.map((id) => allChars.find((c) => c.id === id)?.name).filter(Boolean).join(', ')}. ¿Añadirlos también?
+                    <div className="flex gap-2 mt-2">
+                      <button onClick={acceptLinkOffer} className="px-2.5 py-1 rounded-lg bg-accent text-white text-xs font-medium hover:bg-accent-hover transition-colors">
+                        Añadir personajes
+                      </button>
+                      <button onClick={() => setLinkOffer(null)} className="px-2.5 py-1 rounded-lg text-xs text-text-muted hover:text-text-primary transition-colors">
+                        Ignorar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-4">
+                {/* Available */}
+                <div>
+                  <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-2">Disponibles</p>
+                  <div className="space-y-0.5 max-h-72 overflow-y-auto pr-1 border border-border rounded-lg p-2">
+                    {tab === 'characters' ? (
+                      charsAvailable.length === 0 ? (
+                        <p className="text-xs text-text-muted py-4 text-center">{q ? 'Sin resultados' : 'Todo asignado'}</p>
+                      ) : charsAvailable.map((c) => (
+                        <button key={c.id} onClick={() => addChar(c.id)} className="w-full flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-white/5 transition-colors text-left group">
+                          <Plus size={12} className="text-text-muted group-hover:text-accent flex-shrink-0" />
+                          <span className="text-xs text-text-secondary truncate flex-1">{c.name}</span>
+                          {c.userId === userId && <span className="text-[10px] text-accent flex-shrink-0">propio</span>}
+                        </button>
+                      ))
+                    ) : (
+                      storiesAvailable.length === 0 ? (
+                        <p className="text-xs text-text-muted py-4 text-center">{q ? 'Sin resultados' : 'Todo asignado'}</p>
+                      ) : storiesAvailable.map((s) => (
+                        <button key={s.id} onClick={() => addStory(s)} className="w-full flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-white/5 transition-colors text-left group">
+                          <Plus size={12} className="text-text-muted group-hover:text-accent flex-shrink-0" />
+                          <span className="text-xs text-text-secondary truncate flex-1">{s.name}</span>
+                          {s.userId === userId && <span className="text-[10px] text-accent flex-shrink-0">propia</span>}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Assigned */}
+                <div>
+                  <p className="text-[11px] font-semibold text-text-muted uppercase tracking-wider mb-2">Asignados</p>
+                  <div className="space-y-0.5 max-h-72 overflow-y-auto pr-1 border border-accent/30 rounded-lg p-2">
+                    {tab === 'characters' ? (
+                      charsAssigned.length === 0 ? (
+                        <p className="text-xs text-text-muted py-4 text-center">Ninguno</p>
+                      ) : charsAssigned.map((c) => (
+                        <div key={c.id} className="w-full flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-white/5 transition-colors group">
+                          <span className="text-xs text-text-primary truncate flex-1">{c.name}</span>
+                          {c.userId === userId && <span className="text-[10px] text-accent flex-shrink-0">propio</span>}
+                          <button onClick={() => removeChar(c.id)} title="Quitar" className="text-text-muted hover:text-red-400 flex-shrink-0 transition-colors">
+                            <X size={13} />
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      storiesAssigned.length === 0 ? (
+                        <p className="text-xs text-text-muted py-4 text-center">Ninguna</p>
+                      ) : storiesAssigned.map((s) => (
+                        <div key={s.id} className="w-full flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-white/5 transition-colors group">
+                          <span className="text-xs text-text-primary truncate flex-1">{s.name}</span>
+                          {s.userId === userId && <span className="text-[10px] text-accent flex-shrink-0">propia</span>}
+                          <button onClick={() => removeStory(s.id)} title="Quitar" className="text-text-muted hover:text-red-400 flex-shrink-0 transition-colors">
+                            <X size={13} />
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-border flex-shrink-0">
+          <p className="text-[10px] text-text-muted leading-tight max-w-[40%]">
+            Los administradores siempre ven todo. Lo propio del usuario siempre es visible, esté o no en esta lista.
+          </p>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {saveError && <span className="text-xs text-red-400">{saveError}</span>}
+            <button onClick={onClose} className="px-3 py-2 rounded-lg text-sm text-text-muted hover:text-text-primary transition-colors">
+              Cancelar
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium bg-accent hover:bg-accent-hover text-white disabled:opacity-50 transition-colors"
+            >
+              {saving ? <><Loader size={13} className="animate-spin" /> Guardando…</> : 'Guardar cambios'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
