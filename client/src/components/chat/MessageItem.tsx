@@ -174,9 +174,20 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
     // The server guarantees it is the first line and in canonical form (see
     // normalizeWorldHeader), so anchoring to the start is safe. It stays a plain
     // paragraph for marked — a GFM table would need a delimiter row.
+    //
+    // Cada campo va en su propio <span> para que en móvil la barra fluya a varias
+    // líneas quebrando ENTRE campos, y no a mitad de una fecha. Con el texto en una
+    // sola tirada su ancho mínimo arrastraba el contenedor flex y generaba scroll
+    // horizontal en toda la página.
+    // Markup de confianza inyectado tras DOMPurify (mismo patrón que el avatar del
+    // hablante, más abajo): el propio regex excluye '<', así que los campos son
+    // texto ya saneado y no pueden reintroducir etiquetas.
     clean = clean.replace(
       /^\s*<p>(\s*\|(?:[^|<\n]*\|){4,}\s*)<\/p>/i,
-      '<p class="scene-header">$1</p>',
+      (_match, inner: string) => {
+        const fields = inner.split('|').map((f) => f.trim()).filter(Boolean);
+        return `<p class="scene-header">${fields.map((f) => `<span>${f}</span>`).join('')}</p>`;
+      },
     );
 
     if (!isNarrator) return clean;

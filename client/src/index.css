@@ -84,6 +84,16 @@ body {
    Rendered as a compact status bar, not as prose. `!important` on margin matches
    the stage-direction rule below: the `.prose p` base rule would otherwise win. */
 .prose p.scene-header {
+  /* Flex con wrap: en móvil la barra fluye a varias líneas quebrando ENTRE campos.
+     La versión anterior (white-space: nowrap + overflow-x: auto) no se contenía:
+     dentro de un contenedor flex, el ancho mínimo del texto en una sola línea
+     arrastraba al padre y generaba scroll horizontal en toda la página. */
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  max-width: 100%;
+  min-width: 0;
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
   font-size: 0.72rem;
   line-height: 1.5;
@@ -94,10 +104,20 @@ body {
   border-radius: 6px;
   padding: 5px 10px;
   margin: 0 0 10px !important;
-  /* Cabeceras largas (fechas de mundos con nombres extensos) no deben desbordar
-     ni forzar scroll horizontal en el chat. */
-  overflow-x: auto;
-  white-space: nowrap;
+}
+
+/* Separador entre campos, en ::after del campo que lo precede: así se queda al
+   FINAL de la línea al saltar de renglón. En ::before del campo siguiente viajaba
+   con él y aparecía huérfano abriendo la línea nueva. */
+.prose p.scene-header span:not(:last-child)::after {
+  content: "·";
+  margin-left: 8px;
+  opacity: 0.45;
+}
+
+/* Un nombre de lugar muy largo no debe ensanchar la barra: que parta si hace falta. */
+.prose p.scene-header span {
+  overflow-wrap: anywhere;
 }
 
 /* Full action/description paragraphs (whole <p> wrapped in <em>) — stage-direction style */
