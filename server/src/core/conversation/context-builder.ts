@@ -490,6 +490,106 @@ function buildDeathLoopDirective(loop: DeathLoopState): string {
   );
 }
 
+// ── Variedad — no repitas lo último que ya dijiste ──────────────────────────
+//
+// Nada en el sistema combatía la repetición: sin penalización de presencia por
+// defecto, sin ninguna instrucción de variedad, y la "trama pendiente" pedía
+// literalmente un gancho en CADA respuesta (ya corregido en buildPendingEventsBlock).
+// Este bloque es la pieza que faltaba: cálculo puro, sin LLM, sobre los últimos
+// turnos de la MISMA voz que va a hablar ahora (el narrador, o este personaje
+// concreto) — comparar contra otra voz no tendría sentido, cada una tiene su
+// propio registro.
+//
+// Dos señales, ambas deterministas:
+//   · Aperturas recientes: las primeras palabras de sus últimos turnos. Es el
+//     patrón de repetición más visible en rol por IA — "el mismo recurso
+//     atmosférico para empezar cada vez.
+//   · Frases repetidas: un fragmento de 5 palabras que aparece igual en dos o
+//     más de sus últimos turnos — una muletilla o giro que se ha instalado sin
+//     que nadie lo pidiera.
+// Ninguna de las dos requiere IA para detectarse; por eso vive aquí y no en el
+// director de escena (que sí necesita una llamada al LLM).
+
+const RECENT_TURNS_FOR_VARIETY = 6;
+const OPENING_WORDS = 9;
+const NGRAM_SIZE = 5;
+const MAX_FLAGGED_PHRASES = 3;
+
+/** Quita markdown y la etiqueta de hablante ("**Nombre:**") para comparar solo
+ *  el texto real. */
+function stripForComparison(content: string): string {
+  return content
+    .replace(/^\s*\*\*[^*\n]{1,40}:\*\*\s*/, '') // "**Nombre:** " inicial
+    .replace(/[*_`#]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function firstWords(text: string, n: number): string {
+  const words = text.split(' ').filter(Boolean);
+  return words.slice(0, n).join(' ');
+}
+
+/** N-gramas de `size` palabras en minúsculas, sin puntuación, de un texto. */
+function wordNgrams(text: string, size: number): string[] {
+  const words = text
+    .toLowerCase()
+    .replace(/[.,;:!?¿¡"«»()]/g, '')
+    .split(/\s+/)
+    .filter(Boolean);
+  const grams: string[] = [];
+  for (let i = 0; i + size <= words.length; i++) grams.push(words.slice(i, i + size).join(' '));
+  return grams;
+}
+
+export function buildVarietyBlock(
+  sourceMessages: Message[],
+  narratorMode: boolean,
+  activeCharacterId: string | null | undefined,
+): string | null {
+  const ownTurns = sourceMessages
+    .filter((m) => m.role === 'assistant' && m.content.trim())
+    .filter((m) => (narratorMode ? (m.metadata?.narrator || !m.characterId) : m.characterId === activeCharacterId))
+    .slice(-RECENT_TURNS_FOR_VARIETY)
+    .map((m) => stripForComparison(m.content));
+
+  if (ownTurns.length < 2) return null; // no hay suficiente historial propio para comparar
+
+  // Aperturas: las últimas 3, si al menos dos tienen contenido real.
+  const openings = ownTurns.slice(-3).map((t) => firstWords(t, OPENING_WORDS)).filter((o) => o.length > 8);
+  const uniqueOpenings = [...new Set(openings)];
+
+  // Frases repetidas: n-gramas que aparecen en ≥2 turnos DISTINTOS.
+  const ngramToTurns = new Map<string, Set<number>>();
+  ownTurns.forEach((turn, i) => {
+    for (const gram of wordNgrams(turn, NGRAM_SIZE)) {
+      (ngramToTurns.get(gram) ?? ngramToTurns.set(gram, new Set()).get(gram)!).add(i);
+    }
+  });
+  const repeated = [...ngramToTurns.entries()]
+    .filter(([, turns]) => turns.size >= 2)
+    .map(([gram]) => gram)
+    .slice(0, MAX_FLAGGED_PHRASES);
+
+  if (openings.length < 2 && repeated.length === 0) return null; // nada que de verdad se repita
+
+  const parts: string[] = ['## Variedad — no repitas lo último que ya dijiste'];
+  if (openings.length >= 2) {
+    parts.push(
+      `Tus últimas respuestas empezaron así:\n` +
+      uniqueOpenings.map((o) => `- «${o}…»`).join('\n') +
+      `\nEsta vez, abre de otra forma: otro punto de entrada a la escena (diálogo directo, una pregunta, algo que ya estaba en marcha) — no repitas el mismo recurso.`,
+    );
+  }
+  if (repeated.length > 0) {
+    parts.push(
+      `Estas frases ya las has usado más de una vez recientemente — no las repitas, busca otra forma de decir lo mismo:\n` +
+      repeated.map((g) => `- «${g}»`).join('\n'),
+    );
+  }
+  return parts.join('\n\n');
+}
+
 // ── Hilos narrativos abiertos ───────────────────────────────────────────────
 //
 // La deuda narrativa viva. A diferencia de la "trama pendiente" (eventos que el
@@ -1450,6 +1550,22 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     );
     if (dossier) {
       history.push({ role: 'system', content: dossier });
+      footerCount++;
+    }
+  }
+
+  // 9d-quater. Variedad — no repitas lo último que ya dijiste. Cálculo puro
+  // (sin LLM) sobre los últimos turnos de la MISMA voz que va a hablar ahora.
+  // Cerca de la generación, junto al resto de restricciones de comportamiento
+  // del turno.
+  if (needsSplit) {
+    const varietyBlock = buildVarietyBlock(
+      sourceMessages,
+      narratorMode,
+      !narratorMode ? character?.id : null,
+    );
+    if (varietyBlock) {
+      history.push({ role: 'system', content: varietyBlock });
       footerCount++;
     }
   }

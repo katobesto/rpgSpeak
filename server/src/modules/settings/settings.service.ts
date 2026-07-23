@@ -275,8 +275,15 @@ IMPORTANTISIMO: NO PUEDES INDICAR SI ES PRONTO PARA COMENZAR UNA RELACION, PORQU
   defaultContextLength: 32768,   // ventana de contexto de entrada
   generationTemperature: 0.7,    // tono global (equilibrado); manda sobre el del personaje
   generationTopP: 1.0,               // sin recorte por defecto
-  generationFrequencyPenalty: 0,     // sin penalizar por defecto
-  generationPresencePenalty: 0,      // sin penalizar por defecto
+  generationFrequencyPenalty: 0,     // sin penalizar — penaliza por FRECUENCIA de token,
+                                      // castigaría también nombres propios repetidos; no es la palanca correcta aquí
+  // Toque ligero (2026-07-23): antes 0, sin ningún mecanismo anti-repetición en
+  // todo el sistema. presencePenalty castiga reutilizar un token YA aparecido,
+  // sin importar cuántas veces — más fino que frequencyPenalty para "no vuelvas
+  // sobre el mismo tema/giro". 0.15 es un toque ligero, no un filtro agresivo.
+  // NOTA: esto solo afecta a instalaciones NUEVAS — una fila ya existente en la
+  // tabla settings de una instalación en marcha no se toca automáticamente.
+  generationPresencePenalty: 0.15,
   streamingEnabled: true,
   layoutMode: 'default',
   sidebarPosition: 'left',
