@@ -1,4 +1,4 @@
-import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem, PartyState, DeathLoopState, NarrativeThread, SceneDirectorState, CharacterSceneState } from '@rpgspeak/shared';
+import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem, PartyState, DeathLoopState, NarrativeThread, SceneDirectorState, CharacterSceneState, RpgStats } from '@rpgspeak/shared';
 import { MemoryRepository } from '../memory/memory.repository.js';
 import { ContextRepository, type ContextItemWithEmbedding } from '../../modules/context/context.repository.js';
 import { ProviderRepository } from '../../modules/providers/provider.repository.js';
@@ -55,6 +55,11 @@ export interface BuildContextOptions {
   currentLocation?: string | null;
   /** Persisted party HP/energy + shared inventory from the battle minigame — informational only */
   partyState?: PartyState;
+  /** Ficha RPG del jugador para esta conversación (clase, nivel, habilidades,
+   *  inventario). Base real contra la que contrastar poderes autoproclamados. */
+  playerSheet?: RpgStats | null;
+  /** Nombre a mostrar del jugador, para etiquetar su ficha. */
+  playerDisplayName?: string;
   /** IDs de eventos de historia (persistentEvents) ya ocurridos en esta conversación.
    *  Los eventos con trigger no ocurridos se inyectan como "trama pendiente" (destinos). */
   occurredEventIds?: Set<string>;
@@ -641,6 +646,46 @@ function buildThreadsBlock(threads: NarrativeThread[], currentIndex: number): st
   );
 }
 
+// ── Ficha del jugador ────────────────────────────────────────────────────────
+//
+// Sin esto, el mundo no puede reaccionar a lo que el jugador ES (un mago de
+// nivel 5 no se enfrenta a lo mismo que un pícaro de nivel 1), y la regla del
+// prompt global «nunca confirmes poderes autoproclamados sin base narrativa
+// previa» no tenía con qué operar — no había ninguna base contra la que
+// contrastar. Esta ficha ES esa base.
+//
+// Vive en `conversation.metadata.playerSheet` (no en el usuario: el mismo
+// jugador puede llevar un mago en una campaña y un guerrero en otra) y se
+// inyecta aquí, en el footer — cambia con el nivel o el inventario, así que
+// no puede ir en el prefijo estático. El HP en vivo NO viene de aquí: sigue
+// siendo `partyState` (la única fuente de verdad, igual que para el resto del
+// grupo) — este bloque solo se usa cuando no hay una partida de combate activa
+// que lo sustituya.
+function buildPlayerSheetBlock(sheet: RpgStats, playerName: string | undefined, liveHp?: { hp: number; maxHp: number }): string | null {
+  const lines: string[] = [];
+  if (sheet.class || sheet.level !== undefined) {
+    lines.push(`- Clase: ${sheet.class ?? '—'}  |  Nivel: ${sheet.level ?? '—'}`);
+  }
+  const hp = liveHp ?? (sheet.hp !== undefined || sheet.maxHp !== undefined ? { hp: sheet.hp ?? sheet.maxHp!, maxHp: sheet.maxHp ?? sheet.hp! } : null);
+  if (hp) lines.push(`- HP: ${hp.hp} / ${hp.maxHp}`);
+  if (sheet.stats && Object.keys(sheet.stats).length > 0) {
+    lines.push(`- Stats: ${Object.entries(sheet.stats).map(([k, v]) => `${k} ${v}`).join(' · ')}`);
+  }
+  if (sheet.abilities?.length) lines.push(`- Habilidades/hechizos conocidos: ${sheet.abilities.join(', ')}`);
+  if (sheet.inventory?.length) lines.push(`- Inventario: ${sheet.inventory.join(', ')}`);
+  if (sheet.notes?.trim()) lines.push(`- Notas: ${sheet.notes.trim()}`);
+
+  if (lines.length === 0) return null;
+
+  return (
+    `## Ficha del jugador${playerName ? ` — ${playerName}` : ''}\n` +
+    lines.join('\n') +
+    `\n\nEsta ficha es la ÚNICA base real de lo que el jugador puede hacer. Sus acciones declaradas deben ser coherentes con ` +
+    `ella: si dice tener un poder, hechizo u objeto que NO está aquí ni se estableció antes en la narrativa, es un intento o un ` +
+    `deseo, no un hecho consumado — narra las consecuencias reales del intento, no lo confirmes sin más.`
+  );
+}
+
 // ── Dossier de escena — estado interno mantenido por el director ────────────
 //
 // Los prompts piden profundidad («cada uno llega con un estado de ánimo, unas
@@ -858,6 +903,8 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     narrationStylePrompt,
     currentLocation,
     partyState,
+    playerSheet = null,
+    playerDisplayName,
     occurredEventIds = new Set<string>(),
     deathModeActive = false,
     deathLoop = null,
@@ -1534,6 +1581,23 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   if (needsSplit && threadsBlock) {
     history.push({ role: 'system', content: threadsBlock });
     footerCount++;
+  }
+
+  // 9d-bis-2. Ficha del jugador — la base real contra la que el modelo debe
+  // contrastar cualquier poder o recurso que el jugador declare tener. El HP en
+  // vivo, si ya hubo combate, viene de partyState (id fijo 'player') — nunca de
+  // la propia ficha, para no crear dos fuentes de verdad del mismo dato.
+  if (needsSplit && playerSheet) {
+    const livePlayerHp = partyState?.members.find((m) => m.id === 'player');
+    const sheetBlock = buildPlayerSheetBlock(
+      playerSheet,
+      playerDisplayName,
+      livePlayerHp ? { hp: Math.max(0, livePlayerHp.hp), maxHp: livePlayerHp.maxHp } : undefined,
+    );
+    if (sheetBlock) {
+      history.push({ role: 'system', content: sheetBlock });
+      footerCount++;
+    }
   }
 
   // 9d-ter. Dossier de escena — el estado interno que instancia la profundidad

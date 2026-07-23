@@ -35,5 +35,19 @@ export const partyStateSchema = z.object({
   updatedAt: z.string(),
 });
 
+// Misma forma que RpgStats (ver shared/types) — la ficha del jugador para ESTA
+// conversación. `hp` aquí es solo el punto de partida: el HP en vivo sigue
+// siendo partyState, igual que ya ocurre con los personajes del grupo.
+export const playerSheetSchema = z.object({
+  class: z.string().max(60).optional(),
+  level: z.number().int().min(1).max(20).optional(),
+  hp: z.number().optional(),
+  maxHp: z.number().optional(),
+  stats: z.record(z.string(), z.number()).optional(),
+  abilities: z.array(z.string().max(100)).max(30).optional(),
+  inventory: z.array(z.string().max(150)).max(50).optional(),
+  notes: z.string().max(1000).optional(),
+});
+
 export type CreateConversationInput = z.infer<typeof createConversationSchema>;
 export type UpdateConversationInput = z.infer<typeof updateConversationSchema>;

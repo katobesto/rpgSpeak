@@ -58,6 +58,18 @@ export interface RpgStats {
   notes?: string;
 }
 
+/**
+ * Ficha del JUGADOR (no de un Character) — misma forma que `RpgStats`, sin
+ * duplicar estructura: el jugador puede llevar un mago en una campaña y un
+ * guerrero en otra, así que vive POR CONVERSACIÓN en
+ * `conversation.metadata.playerSheet`, no en el usuario.
+ *
+ * `hp` aquí es solo el punto de partida/nivel — el HP EN VIVO sigue teniendo
+ * una única fuente de verdad: `PartyState` (ya usado por el minijuego de
+ * combate), igual que ya ocurre con los personajes del grupo.
+ */
+export type PlayerSheet = RpgStats;
+
 export interface Character {
   id: string;
   userId: string | null;

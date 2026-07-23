@@ -1,6 +1,6 @@
 import React, { useEffect, useReducer, useRef, useState } from 'react';
 import { ChevronLeft, DoorOpen, Package, Sparkles, Swords, X } from 'lucide-react';
-import type { Character, PartyState, User } from '@rpgspeak/shared';
+import type { Character, PartyState, PlayerSheet, User } from '@rpgspeak/shared';
 import { Avatar } from '../ui/Avatar.tsx';
 import { battleReducer, buildNarrationPrompt, buildPartyState, computeRewards, createInitialBattleState, type BattleRewards } from '../../lib/battle/engine.ts';
 import { applyPartyInventoryState, applyPartyMemberState, createAllyFromCharacter, createPlayerUnit } from '../../lib/battle/party.ts';
@@ -10,15 +10,18 @@ interface BattleModalProps {
   characters: Character[];
   user: User | null;
   partyState?: PartyState | null;
+  /** Ficha del jugador para esta conversación — deriva sus stats de combate,
+   *  igual que ya se hace con `character.rpgStats` para los aliados. */
+  playerSheet?: PlayerSheet | null;
   onClose: () => void;
   onBattleEnd?: (narrationPrompt: string, outcome: 'victory' | 'defeat' | 'fled', rewards: BattleRewards) => void;
   onPartyStateChange: (partyState: PartyState) => void;
 }
 
-export function BattleModal({ characters, user, partyState, onClose, onBattleEnd, onPartyStateChange }: BattleModalProps) {
+export function BattleModal({ characters, user, partyState, playerSheet, onClose, onBattleEnd, onPartyStateChange }: BattleModalProps) {
   const [state, dispatch] = useReducer(battleReducer, undefined, () => {
     const allies = applyPartyMemberState(
-      [createPlayerUnit(user), ...characters.slice(0, 3).map(createAllyFromCharacter)],
+      [createPlayerUnit(user, playerSheet), ...characters.slice(0, 3).map(createAllyFromCharacter)],
       partyState,
     );
     const partyLevel = Math.round(allies.reduce((sum, a) => sum + a.level, 0) / allies.length);

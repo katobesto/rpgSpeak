@@ -4,7 +4,7 @@ import { sql } from 'drizzle-orm';
 import { ConversationService } from './conversation.service.js';
 import { ConversationRepository } from './conversation.repository.js';
 import { MessageRepository } from '../messages/message.repository.js';
-import { createConversationSchema, updateConversationSchema, partyStateSchema } from './conversation.schema.js';
+import { createConversationSchema, updateConversationSchema, partyStateSchema, playerSheetSchema } from './conversation.schema.js';
 import { ValidationError, NotFoundError } from '../../shared/errors.js';
 import { getDb } from '../../db/index.js';
 import { exportConversation, importConversation, type ChatPackage } from '../chat-transfer/chat-transfer.service.js';
@@ -115,6 +115,22 @@ export const conversationRoutes: FastifyPluginAsync = async (app) => {
     const meta = (conv.metadata ?? {}) as Record<string, unknown>;
     const updated = convRepo.update(req.params.id, {
       metadata: { ...meta, partyState: result.data },
+    });
+    return reply.send({ success: true, data: updated });
+  });
+
+  // PATCH /api/conversations/:id/player-sheet — ficha RPG del jugador para esta
+  // conversación (clase, nivel, habilidades, inventario...). Vive en metadata,
+  // igual que partyState — el HP en vivo sigue siendo partyState, no esto.
+  app.patch<{ Params: { id: string } }>('/:id/player-sheet', async (req, reply) => {
+    const result = playerSheetSchema.safeParse(req.body);
+    if (!result.success) throw new ValidationError(result.error.issues[0].message);
+    const conv = convRepo.findById(req.params.id);
+    if (!conv) throw new NotFoundError('Conversation', req.params.id);
+
+    const meta = (conv.metadata ?? {}) as Record<string, unknown>;
+    const updated = convRepo.update(req.params.id, {
+      metadata: { ...meta, playerSheet: result.data },
     });
     return reply.send({ success: true, data: updated });
   });

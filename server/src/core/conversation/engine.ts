@@ -1,4 +1,4 @@
-import type { GenerateRequest, Character, Story, Message, Conversation, MemoryEntry, PartyState, DeathLoopState, WorldState, StoryCalendar, SceneDirectorState, CharacterSceneState, NpcSceneState } from '@rpgspeak/shared';
+import type { GenerateRequest, Character, Story, Message, Conversation, MemoryEntry, PartyState, DeathLoopState, WorldState, StoryCalendar, SceneDirectorState, CharacterSceneState, NpcSceneState, RpgStats } from '@rpgspeak/shared';
 import { matchCharacterName } from '@rpgspeak/shared';
 import {
   computeClock, formatHeader, normalizeWorldState, parseTimeAdvance, parseSceneTag,
@@ -827,6 +827,8 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       narrationStylePrompt,
       currentLocation:     conversation.currentLocation,
       partyState:          (conversation.metadata as { partyState?: PartyState } | null)?.partyState,
+      playerSheet:         (conversation.metadata as { playerSheet?: RpgStats } | null)?.playerSheet,
+      playerDisplayName:   opts.userDisplayName,
       occurredEventIds,
       deathModeActive,
       deathLoop: currentDeathLoop,
