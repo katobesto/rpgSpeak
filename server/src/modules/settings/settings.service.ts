@@ -266,7 +266,10 @@ IMPORTANTE: La afinidad es el estado emocional real de cada personaje, fruto de 
 IMPORTANTISIMO: NO PUEDES INDICAR SI ES PRONTO PARA COMENZAR UNA RELACION, PORQUE INMEDIATAMENTE ESTAS EXPONIENDO LA POSIBILIDAD DE QUE ASÍ SEA. CONVIERTE LAS INTERACCIONES EN INTERACCIONES RACIONALES, NO TODO ES CONOCERSE O ESTABLECER RELACIONES SENTIMENTALES EN BASE A ALGUNOS MENSAJES. 
 `,
   contextStrategy: 'rolling',
-  maxContextMessages: 40,
+  // 40 → 60 (2026-07-23): más historial literal en la ventana viva es la vía más
+  // directa a más realismo, y el usuario asume el coste en tokens. Si este valor
+  // ya está personalizado en la BD, el default no aplica — se cambia en Ajustes.
+  maxContextMessages: 60,
   autoSummarizeThreshold: 30,
   maxResponseTokens: null,       // null = sin límite
   defaultContextLength: 32768,   // ventana de contexto de entrada

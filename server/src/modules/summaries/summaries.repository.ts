@@ -1,4 +1,4 @@
-import { eq, and, gt, asc, desc } from 'drizzle-orm';
+import { eq, and, gt, asc, desc, inArray, sql } from 'drizzle-orm';
 import { getDb } from '../../db/index.js';
 import { conversationSummaries, type DbConversationSummary } from '../../db/schema.js';
 import type { ConversationSummary } from '@rpgspeak/shared';
@@ -13,7 +13,7 @@ function dbToSummary(row: DbConversationSummary): ConversationSummary {
     content: row.content,
     messageIndexFrom: row.messageIndexFrom,
     messageIndexTo: row.messageIndexTo,
-    kind: row.kind === 'block' ? 'block' : 'manual',
+    kind: row.kind === 'block' ? 'block' : row.kind === 'arc' ? 'arc' : 'manual',
     createdAt: row.createdAt,
   };
 }
@@ -41,12 +41,24 @@ export class SummariesRepository {
     return rows.map(dbToSummary);
   }
 
+  /** Resúmenes de arco (pasado lejano, un arco ≈ 4 bloques), orden cronológico. */
+  findArcs(conversationId: string): ConversationSummary[] {
+    const rows = this.db.select().from(conversationSummaries)
+      .where(and(
+        eq(conversationSummaries.conversationId, conversationId),
+        eq(conversationSummaries.kind, 'arc'),
+      ))
+      .orderBy(asc(conversationSummaries.messageIndexFrom))
+      .all();
+    return rows.map(dbToSummary);
+  }
+
   create(data: {
     conversationId: string;
     content: string;
     messageIndexFrom: number;
     messageIndexTo: number;
-    kind?: 'block' | 'manual';
+    kind?: 'block' | 'manual' | 'arc';
   }): ConversationSummary {
     const id = uuidv4();
     const ts = now();
@@ -68,14 +80,38 @@ export class SummariesRepository {
     this.db.delete(conversationSummaries).where(eq(conversationSummaries.id, id)).run();
   }
 
-  /** Borra los bloques cuyo rango se extiende más allá de `anchorIndex` — se usa
-   *  en el rebobinado por muerte: esos bloques narran una línea temporal borrada.
-   *  Los bloques totalmente anteriores al ancla siguen siendo válidos (inmutables). */
+  /** Elimina bloques duplicados (mismo messageIndexFrom), conservando el más
+   *  antiguo. Los duplicados existen por una carrera histórica: dos pasadas
+   *  fire-and-forget concurrentes veían el mismo bloque sin cubrir y lo creaban
+   *  ambas — y "Historia hasta ahora" inyectaba el contenido dos veces.
+   *  Devuelve cuántas filas ha borrado. */
+  dedupeBlocks(conversationId: string): number {
+    const res = this.db.run(sql`
+      DELETE FROM conversation_summaries
+      WHERE conversation_id = ${conversationId}
+        AND kind IN ('block', 'arc')
+        AND id NOT IN (
+          SELECT id FROM (
+            SELECT id, MIN(created_at)
+            FROM conversation_summaries
+            WHERE conversation_id = ${conversationId} AND kind IN ('block', 'arc')
+            GROUP BY kind, message_index_from
+          )
+        )
+    `);
+    return Number((res as { changes?: number }).changes ?? 0);
+  }
+
+  /** Borra los bloques Y ARCOS cuyo rango se extiende más allá de `anchorIndex` —
+   *  se usa en el rebobinado por muerte: esos resúmenes narran una línea temporal
+   *  borrada. Los totalmente anteriores al ancla siguen siendo válidos (inmutables).
+   *  Los arcos entran también: un arco que condensa bloques borrados envenenaría
+   *  el contexto con hechos que ya no ocurrieron. */
   deleteBlocksBeyond(conversationId: string, anchorIndex: number): void {
     this.db.delete(conversationSummaries)
       .where(and(
         eq(conversationSummaries.conversationId, conversationId),
-        eq(conversationSummaries.kind, 'block'),
+        inArray(conversationSummaries.kind, ['block', 'arc']),
         gt(conversationSummaries.messageIndexTo, anchorIndex),
       ))
       .run();

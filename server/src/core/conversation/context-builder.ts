@@ -1,4 +1,4 @@
-import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem, PartyState, DeathLoopState, NarrativeThread } from '@rpgspeak/shared';
+import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem, PartyState, DeathLoopState, NarrativeThread, SceneDirectorState, CharacterSceneState } from '@rpgspeak/shared';
 import { MemoryRepository } from '../memory/memory.repository.js';
 import { ContextRepository, type ContextItemWithEmbedding } from '../../modules/context/context.repository.js';
 import { ProviderRepository } from '../../modules/providers/provider.repository.js';
@@ -21,6 +21,10 @@ export interface BuildContextOptions {
    *  bloques que empiezan antes de la ventana de historial vivo — lo que el modelo
    *  ya ve literal no se re-resume. Narrador y modo personaje sin grupo. */
   blockSummaries?: Array<{ content: string; messageIndexFrom: number; messageIndexTo: number }>;
+  /** Resúmenes de arco: cada uno condensa ~4 bloques antiguos consecutivos. En la
+   *  inyección sustituyen a los bloques que cubren (pirámide: pasado lejano
+   *  comprimido, pasado cercano en detalle). */
+  arcSummaries?: Array<{ content: string; messageIndexFrom: number; messageIndexTo: number }>;
   /** Resumen personal del personaje activo (solo lo que él presenció). En modo
    *  personaje con grupo sustituye al resumen global, que filtraría escenas
    *  privadas del jugador con otros personajes. */
@@ -71,6 +75,9 @@ export interface BuildContextOptions {
    *  en el engine, o la continuidad de una escena íntima ya en marcha). Activa el
    *  reglamento detallado de consentimiento, que en el resto de turnos no se inyecta. */
   intimacyContext?: boolean;
+  /** Estado del director de escena (situación, tensión, estado interno por
+   *  personaje, PNJs). null hasta la primera pasada del director. */
+  sceneState?: SceneDirectorState | null;
   /** Hilos narrativos abiertos de la conversación, ya ordenados por prioridad. */
   openThreads?: NarrativeThread[];
   /** Índice del mensaje actual — para calcular la antigüedad de cada hilo. */
@@ -534,6 +541,73 @@ function buildThreadsBlock(threads: NarrativeThread[], currentIndex: number): st
   );
 }
 
+// ── Dossier de escena — estado interno mantenido por el director ────────────
+//
+// Los prompts piden profundidad («cada uno llega con un estado de ánimo, unas
+// preocupaciones y algo que quiere o teme AHORA») pero hasta ahora no existía
+// ningún DATO que la instanciara: el modelo improvisaba de cero cada turno.
+// Este bloque es ese dato. Es casi todo información y una sola instrucción,
+// así que no compite con las directivas de conducta.
+//
+// Frontera de conocimiento: en modo personaje solo se inyecta el estado del
+// personaje ACTIVO — el interior de los demás no le pertenece (misma regla que
+// el filtrado de historial por testigo). El dossier completo, con todos los
+// estados y los PNJs, es exclusivo del narrador omnisciente.
+function buildSceneDossierBlock(
+  state: SceneDirectorState,
+  narratorMode: boolean,
+  activeCharacterId: string | null,
+  charNameMap: Map<string, string>,
+  /** false en modo personaje con grupo: la situación describe la escena EN CURSO,
+   *  que puede ser privada con OTRO personaje — inyectarla al personaje activo
+   *  filtraría justo lo que el filtrado por testigo oculta. En 1:1 es true:
+   *  la escena en curso es por definición la suya. */
+  includeSceneContext: boolean,
+): string | null {
+  const parts: string[] = [];
+
+  if (includeSceneContext) {
+    if (state.situacion.trim()) parts.push(`SITUACIÓN INMEDIATA: ${state.situacion.trim()}`);
+    if (state.tension.trim())   parts.push(`TENSIÓN DE LA ESCENA: ${state.tension.trim()}`);
+  }
+
+  const fmtState = (name: string, s: CharacterSceneState) =>
+    `- **${name}** — quiere: ${s.quiere || '—'} · le preocupa: ${s.preocupa || '—'} · ` +
+    `pendiente con el jugador: ${s.pendiente || '—'} · última impresión: ${s.impresion || '—'}`;
+
+  if (narratorMode) {
+    const charLines = Object.entries(state.characters)
+      .map(([id, s]) => {
+        const name = charNameMap.get(id);
+        return name ? fmtState(name, s) : null;
+      })
+      .filter((l): l is string => l !== null);
+    if (charLines.length > 0) {
+      parts.push(`### Qué mueve por dentro a cada personaje AHORA\n${charLines.join('\n')}`);
+    }
+    if (state.npcs.length > 0) {
+      const npcLines = state.npcs.map(
+        (n) => `- **${n.nombre}** — ${n.rasgo || 'sin rasgo registrado'} · ahora: ${n.estado || '—'} · ` +
+               (n.conoceAlJugador ? 'ya conoce al jugador' : 'NO conoce al jugador de nada'),
+      );
+      parts.push(`### PNJs recurrentes (mismas personas que en escenas anteriores — no los reinventes)\n${npcLines.join('\n')}`);
+    }
+  } else if (activeCharacterId && state.characters[activeCharacterId]) {
+    const name = charNameMap.get(activeCharacterId) ?? 'Tu personaje';
+    parts.push(`### Tu estado interior AHORA\n${fmtState(name, state.characters[activeCharacterId])}`);
+  }
+
+  if (parts.length === 0) return null;
+
+  return (
+    `## DOSSIER DE ESCENA — estado interno actual\n` +
+    parts.join('\n\n') +
+    `\n\nEste dossier es contexto INTERNO: no lo enuncies ni lo resumas en la narración. ` +
+    `Deja que se note en lo que cada uno hace, dice y calla — el estado interior puede contradecir ` +
+    `lo que el personaje muestra por fuera, y esa distancia es precisamente el subtexto.`
+  );
+}
+
 // ── Cabecera ambiental — estado del mundo ───────────────────────────────────
 //
 // El servidor ya ha calculado la cabecera (fecha, hora, estación, luna) a partir
@@ -661,6 +735,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     maxMessages = 40,
     summary,
     blockSummaries = [],
+    arcSummaries = [],
     characterSummary,
     groupCharacters = [],
     narratorMode = false,
@@ -689,6 +764,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     worldHeader = null,
     worldTrackingEnabled = false,
     intimacyContext = false,
+    sceneState = null,
     openThreads = [],
     currentMessageIndex = messages.length,
   } = opts;
@@ -741,7 +817,9 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     // no había ningún sistema real detrás. La única diferencia observable era el
     // cierre con "¿Qué haces?" — que se puede añadir directamente al narratorPrompt.
     const allChars = character ? [character, ...groupCharacters] : groupCharacters;
-    const charBlocks = allChars.map((c) => buildCharacterBlock(c)).filter(Boolean);
+    // Con muestras de voz: el narrador necesita oír cómo suena cada personaje
+    // para no darles a todos la misma voz.
+    const charBlocks = allChars.map((c) => buildCharacterBlock(c, true)).filter(Boolean);
     // Delimitador visual fuerte entre fichas para que el modelo no funda
     // identidades cuando hay varios personajes en escena.
     const CHAR_DELIM = '═══════════════════════════════';
@@ -971,7 +1049,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // Example dialogue (injected as few-shot examples if present, single-char mode only)
   const fewShot: ChatMessage[] = [];
   if (!narratorMode && character?.exampleDialogue?.length > 0) {
-    systemParts.push('\n[Example conversations:]');
+    systemParts.push('\n[Ejemplos de conversación — la voz del personaje:]');
     for (const ex of character.exampleDialogue.slice(0, 3)) {
       fewShot.push({ role: 'user', content: ex.user });
       fewShot.push({ role: 'assistant', content: ex.assistant });
@@ -1239,17 +1317,44 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   } else if (windowStart > 0) {
     // Solo hay pasado fuera de la ventana si windowStart > 0; si todo el
     // historial cabe en el contexto, cualquier resumen sería redundante.
-    const pastBlocks = blockSummaries.filter((b) => b.messageIndexFrom < windowStart);
+    //
+    // Inyección PIRAMIDAL: el pasado lejano entra como ARCOS (cada uno condensa
+    // ~4 bloques, conservando el arco relacional); el pasado cercano entra como
+    // BLOQUES con su detalle completo. Un bloque cubierto por un arco no se
+    // inyecta — su contenido ya viaja dentro del arco.
+    // Dedupe defensivo por messageIndexFrom: en BD han existido bloques
+    // duplicados (carrera de pasadas concurrentes, ya corregida) y un duplicado
+    // aquí significa inyectar el mismo pasado dos veces.
+    const uniqueByFrom = <T extends { messageIndexFrom: number }>(xs: T[]): T[] => {
+      const seen = new Set<number>();
+      return xs.filter((x) => !seen.has(x.messageIndexFrom) && seen.add(x.messageIndexFrom));
+    };
+    const pastBlocks = uniqueByFrom(blockSummaries.filter((b) => b.messageIndexFrom < windowStart));
     if (pastBlocks.length > 0) {
-      const parts = pastBlocks.map(
-        (b) => `[Mensajes ${b.messageIndexFrom + 1}–${b.messageIndexTo + 1}]\n${b.content.trim()}`,
-      );
+      const pastArcs = uniqueByFrom(arcSummaries.filter((a) => a.messageIndexTo < windowStart));
+      const coveredByArc = (b: { messageIndexFrom: number; messageIndexTo: number }) =>
+        pastArcs.some((a) => a.messageIndexFrom <= b.messageIndexFrom && a.messageIndexTo >= b.messageIndexTo);
+
+      const entries = [
+        ...pastArcs.map((a) => ({
+          from: a.messageIndexFrom,
+          text: `[Mensajes ${a.messageIndexFrom + 1}–${a.messageIndexTo + 1} — arco condensado]\n${a.content.trim()}`,
+        })),
+        ...pastBlocks
+          .filter((b) => !coveredByArc(b))
+          .map((b) => ({
+            from: b.messageIndexFrom,
+            text: `[Mensajes ${b.messageIndexFrom + 1}–${b.messageIndexTo + 1}]\n${b.content.trim()}`,
+          })),
+      ].sort((x, y) => x.from - y.from);
+
       history.push({
         role: 'system',
         content:
           `## Historia hasta ahora\n` +
-          `Lo ocurrido antes del historial reciente, en orden cronológico (lo más antiguo primero):\n\n` +
-          parts.join('\n\n'),
+          `Lo ocurrido antes del historial reciente, en orden cronológico (lo más antiguo primero). ` +
+          `Los tramos marcados como «arco condensado» resumen etapas largas ya lejanas:\n\n` +
+          entries.map((e) => e.text).join('\n\n'),
       });
       footerCount++;
     } else if (summary?.trim()) {
@@ -1314,6 +1419,24 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     footerCount++;
   }
 
+  // 9d-ter. Dossier de escena — el estado interno que instancia la profundidad
+  // que las directivas piden. Pegado a la generación porque es EL dato desde el
+  // que debe salir la respuesta; en modo personaje se restringe al estado del
+  // personaje activo (frontera de conocimiento).
+  if (needsSplit && sceneState) {
+    const dossier = buildSceneDossierBlock(
+      sceneState,
+      narratorMode,
+      !narratorMode ? (character?.id ?? null) : null,
+      charNameMap,
+      narratorMode || groupCharacters.length === 0,
+    );
+    if (dossier) {
+      history.push({ role: 'system', content: dossier });
+      footerCount++;
+    }
+  }
+
   // 9e. Cabecera ambiental — ÚLTIMO bloque antes del mensaje del jugador.
   // Debe ser lo primero que el modelo escriba, así que va en la posición de
   // máxima obediencia (el mismo criterio que el auto-reporte de afinidad). Es
@@ -1334,30 +1457,50 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   return { messages: [systemMessage, ...fewShot, ...history], footerCount };
 }
 
-function buildCharacterBlock(char: Character): string {
-  const parts: string[] = [`# Character: ${char.name}`];
+// Cabeceras en español (antes «# Character:», «## Personality»…): en un prompt
+// íntegramente en español, las cabeceras en inglés empujan al modelo hacia los
+// patrones de rol en inglés de su entrenamiento — los más genéricos. Invalida el
+// prefix-cache una vez al desplegar; después vuelve a ser estable.
+//
+// `includeVoiceSamples`: en modo narrador se añaden las muestras de diálogo del
+// personaje DENTRO de su ficha. Antes solo existían como few-shot en modo
+// personaje individual, así que el narrador no tenía ninguna referencia de voz
+// y todos los personajes sonaban igual. Estático por personaje → cache-safe.
+function buildCharacterBlock(char: Character, includeVoiceSamples = false): string {
+  const parts: string[] = [`# Personaje: ${char.name}`];
 
   if (char.systemPrompt.trim()) {
     parts.push(char.systemPrompt.trim());
   }
 
   if (char.description.trim()) {
-    parts.push(`## Description\n${char.description.trim()}`);
+    parts.push(`## Descripción\n${char.description.trim()}`);
   }
 
   if (char.personality.trim()) {
-    parts.push(`## Personality\n${char.personality.trim()}`);
+    parts.push(`## Personalidad\n${char.personality.trim()}`);
   }
 
   if (char.lore.trim()) {
-    parts.push(`## Lore & Background\n${char.lore.trim()}`);
+    parts.push(`## Trasfondo e historia\n${char.lore.trim()}`);
   }
 
   if (char.relations.length > 0) {
     const relText = char.relations
       .map((r) => `- ${r.relationshipType}: ${r.description}`)
       .join('\n');
-    parts.push(`## Relationships\n${relText}`);
+    parts.push(`## Relaciones\n${relText}`);
+  }
+
+  if (includeVoiceSamples && char.exampleDialogue?.length > 0) {
+    const samples = char.exampleDialogue
+      .slice(0, 3)
+      .map((ex) => `Jugador: ${ex.user}\n${char.name}: ${ex.assistant}`)
+      .join('\n\n');
+    parts.push(
+      `## Muestras de voz — así habla ${char.name}\n` +
+      `Su registro, ritmo y muletillas. Cuando ${char.name} hable en la narración, debe SONAR así — distinto del resto del reparto:\n\n${samples}`,
+    );
   }
 
   const rpg = char.rpgStats;
@@ -1404,22 +1547,22 @@ function buildStoryBlock(story: Story): string {
     story.persistentEvents.length > 0 || (story.locations?.length ?? 0) > 0;
   if (!hasContent) return '';
 
-  const parts: string[] = [`# Story Context: ${story.name}`];
+  const parts: string[] = [`# Contexto de la historia: ${story.name}`];
 
   if (story.globalContext.trim()) {
     parts.push(story.globalContext.trim());
   }
 
   if (story.worldLore.trim()) {
-    parts.push(`## World & Lore\n${story.worldLore.trim()}`);
+    parts.push(`## Mundo y lore\n${story.worldLore.trim()}`);
   }
 
   if (story.narrativeRules.trim()) {
-    parts.push(`## Narrative Rules\n${story.narrativeRules.trim()}`);
+    parts.push(`## Reglas narrativas\n${story.narrativeRules.trim()}`);
   }
 
   if (story.behaviorRestrictions.length > 0) {
-    parts.push(`## Restrictions\n${story.behaviorRestrictions.map((r) => `- ${r}`).join('\n')}`);
+    parts.push(`## Restricciones\n${story.behaviorRestrictions.map((r) => `- ${r}`).join('\n')}`);
   }
 
   // Background facts: events WITHOUT a trigger. Always shown as world truths.
@@ -1431,7 +1574,7 @@ function buildStoryBlock(story: Story): string {
       .slice(0, 5)
       .map((e) => `- [${e.title}]: ${e.description}`)
       .join('\n');
-    parts.push(`## Key Events\n${events}`);
+    parts.push(`## Eventos clave\n${events}`);
   }
 
   if (story.locations && story.locations.length > 0) {
@@ -1442,7 +1585,7 @@ function buildStoryBlock(story: Story): string {
     const vars = Object.entries(story.stateVariables)
       .map(([k, v]) => `- ${k}: ${v}`)
       .join('\n');
-    parts.push(`## Current State\n${vars}`);
+    parts.push(`## Estado actual\n${vars}`);
   }
 
   return parts.join('\n\n');

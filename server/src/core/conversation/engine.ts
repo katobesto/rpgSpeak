@@ -1,4 +1,4 @@
-import type { GenerateRequest, Character, Story, Message, Conversation, MemoryEntry, PartyState, DeathLoopState, WorldState, StoryCalendar } from '@rpgspeak/shared';
+import type { GenerateRequest, Character, Story, Message, Conversation, MemoryEntry, PartyState, DeathLoopState, WorldState, StoryCalendar, SceneDirectorState, CharacterSceneState, NpcSceneState } from '@rpgspeak/shared';
 import { matchCharacterName } from '@rpgspeak/shared';
 import {
   computeClock, formatHeader, normalizeWorldState, parseTimeAdvance, parseSceneTag,
@@ -769,6 +769,11 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     // Índice del turno actual, para calcular la antigüedad de cada hilo.
     const currentMessageIndex = historyForContext.length + 1;
 
+    // Estado del director de escena (situación, tensión, estado interno por
+    // personaje, PNJs). Lo mantiene updateSceneStateAsync en segundo plano.
+    const sceneState =
+      ((conversation.metadata as { sceneState?: SceneDirectorState } | null)?.sceneState) ?? null;
+
     const { messages: rawContext, footerCount } = await buildContext({
       character: character ?? groupCharacters[0],
       stories: linkedStories,
@@ -778,6 +783,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       maxMessages,
       summary: conversation.summary,
       blockSummaries: summariesRepo.findBlocks(conversationId),
+      arcSummaries: summariesRepo.findArcs(conversationId),
       characterSummary: !narratorMode && character
         ? ((conversation.metadata as { characterSummaries?: Record<string, string> })
             ?.characterSummaries?.[character.id] ?? null)
@@ -809,6 +815,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       worldHeader,
       worldTrackingEnabled: true,
       intimacyContext: playerAction !== null,
+      sceneState,
       openThreads,
       currentMessageIndex,
     });
@@ -1407,9 +1414,12 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       updateSummaryAsync(
         conversationId, provider, modelId,
         !narratorMode && contextGroupChars.length > 0 ? character : null,
+        branchId,
       );
       // Anclaje de la escena: no-op salvo la primera vez de cada conversación.
       void bootstrapWorldStateAsync(conversationId, provider, modelId, worldCalendar);
+      // Director de escena: no-op salvo cada ~6 mensajes (cadencia interna).
+      void updateSceneStateAsync(conversationId, provider, modelId);
       const updatedConv = convRepo.findById(conversationId);
       if (updatedConv) void autoExtractContextAsync(conversationId, updatedConv.messageCount);
     }
@@ -1623,23 +1633,57 @@ function labelSpeakers(msgs: Message[]): string {
     .join('\n\n');
 }
 
+// ── Pirámide de resúmenes ────────────────────────────────────────────────────
+//
+// Dos niveles inmutables, generados con el LLM principal:
+//   · BLOQUE (~blockSize msgs): detalle alto, con textura relacional — no solo
+//     el inventario de la trama sino qué cambió entre los personajes, qué quedó
+//     sin decir y con qué ánimo terminó cada uno. Antes se pedían 5 frases de
+//     puro plot y el pasado perdía toda su textura.
+//   · ARCO (ARC_BLOCK_SPAN bloques consecutivos): el pasado lejano, más
+//     comprimido pero conservando el arco relacional y lo que sigue abierto.
+// Los ARC_DETAIL_RESERVE bloques más recientes nunca entran en un arco: son el
+// pasado cercano y se inyectan con su detalle completo (ver buildContext).
+
+const ARC_BLOCK_SPAN     = 4; // bloques por arco
+const ARC_DETAIL_RESERVE = 2; // bloques recientes que siempre quedan en detalle
+// Tope de arcos por pasada: una conversación larga preexistente puede deber
+// muchos arcos de golpe (puesta al día); se generan a razón de unos pocos por
+// turno para no convertir la tarea de fondo en una ráfaga de llamadas al LLM.
+const MAX_ARCS_PER_PASS  = 3;
+
 async function generateBlockSummaries(
   conversationId: string,
   provider: NonNullable<ReturnType<ProviderRepository['findById']>>,
   modelId: string,
+  branchId = 'main',
 ): Promise<void> {
+  // Los índices de los bloques se calculan sobre la lista de mensajes de la rama
+  // principal (la misma que ve buildContext). En una rama alternativa esa
+  // numeración no coincide y los bloques generados corromperían la inyección de
+  // TODAS las ramas — mejor no generar que generar mal.
+  if (branchId !== 'main') return;
+
   const conv = convRepo.findById(conversationId);
   if (!conv) return;
 
   const settings  = settingsService.getAll();
   const blockSize = Math.max(10, settings.summaryBlockSize ?? 40);
   const maxFrases = settings.summaryMaxLength ?? 5;
+  // Presupuestos de la pirámide, derivados del ajuste editable del usuario:
+  // bloque con textura ≈ el doble + 2 (12 con el default 5); arco ≈ el doble.
+  const blockFrases = maxFrases * 2 + 2;
+  const arcFrases   = maxFrases * 2;
 
-  // El mismo orden de mensajes que ve buildContext (rama principal) — los índices
-  // de los bloques deben coincidir con la ventana de historial que calcula.
   const allMessages     = msgRepo.findByConversation(conversationId);
   const completedBlocks = Math.floor(allMessages.length / blockSize);
   if (completedBlocks === 0) return;
+
+  // Limpieza de duplicados históricos (carrera de pasadas concurrentes): sin
+  // esto, `covered` y la agrupación de arcos trabajarían sobre datos repetidos
+  // y "Historia hasta ahora" inyectaría el mismo contenido dos veces.
+  const deduped = summariesRepo.dedupeBlocks(conversationId);
+  if (deduped > 0) console.warn(`[summary] ${deduped} resumen(es) duplicado(s) eliminados en conv ${conversationId}`);
 
   const existing = summariesRepo.findBlocks(conversationId);
   const covered  = new Set(existing.map((b) => b.messageIndexFrom));
@@ -1668,16 +1712,19 @@ async function generateBlockSummaries(
         ? `CONTEXTO — lo ocurrido justo antes (NO lo re-resumas, es solo referencia):\n---\n${prevContent}\n---\n\n`
         : '') +
       `FRAGMENTO A RESUMIR:\n---\n${messagesText}\n---\n\n` +
-      `Escribe un resumen SOLO del fragmento. Debe ser:\n` +
-      `- Objetivo y fiel a lo narrado\n` +
-      `- Conserva siempre: nombres propios, lugares, objetos relevantes, promesas, decisiones y heridas o cambios de estado\n` +
-      `- Máximo ${maxFrases} frases, en pasado narrativo\n` +
-      `- Sin explicaciones ni frases introductorias\n\n` +
+      `Escribe un resumen SOLO del fragmento, fiel a lo narrado y en pasado narrativo. Debe capturar DOS planos:\n` +
+      `1. LOS HECHOS: nombres propios, lugares, objetos relevantes, promesas, decisiones, heridas o cambios de estado.\n` +
+      `2. LA TEXTURA — esto es tan importante como los hechos:\n` +
+      `   - Qué cambió entre los personajes en este fragmento (acercamiento, fricción, una deuda nueva, un límite marcado)\n` +
+      `   - Qué quedó SIN decir o sin resolver: la pregunta esquivada, la verdad callada, la tensión que sigue viva\n` +
+      `   - Con qué estado de ánimo terminó cada personaje relevante el fragmento\n` +
+      `- Máximo ${blockFrases} frases. Prioriza la información que un narrador necesitaría para retomar la historia SIN aplanar a los personajes.\n` +
+      `- Sin explicaciones ni frases introductorias.\n\n` +
       `Responde SOLO con el texto del resumen.`;
 
     const response = await llm.generate({
       messages: [
-        { role: 'system', content: 'Eres un cronista que resume fragmentos de una historia colaborativa de rol.' },
+        { role: 'system', content: 'Eres un cronista que resume fragmentos de una historia colaborativa de rol, atendiendo tanto a los hechos como a la evolución de las relaciones.' },
         { role: 'user', content: prompt },
       ],
       model: modelId,
@@ -1692,6 +1739,55 @@ async function generateBlockSummaries(
     summariesRepo.create({ conversationId, content, messageIndexFrom: from, messageIndexTo: to, kind: 'block' });
     console.log(`[summary] Bloque ${from + 1}–${to + 1} resumido para conv ${conversationId}`);
     prevContent = content;
+  }
+
+  // ── Consolidación en arcos ─────────────────────────────────────────────────
+  // Se condensan grupos de ARC_BLOCK_SPAN bloques consecutivos, dejando siempre
+  // los ARC_DETAIL_RESERVE más recientes fuera (pasado cercano, en detalle).
+  // Trabaja sobre los TEXTOS de los bloques (no relee mensajes): barato, y los
+  // bloques ya llevan la textura que el arco debe conservar.
+  const blocks = summariesRepo.findBlocks(conversationId);
+  const arcs   = summariesRepo.findArcs(conversationId);
+  const arcable = blocks.slice(0, Math.max(0, blocks.length - ARC_DETAIL_RESERVE));
+
+  let arcsThisPass = 0;
+  for (let g = 0; g + ARC_BLOCK_SPAN <= arcable.length; g += ARC_BLOCK_SPAN) {
+    if (arcsThisPass >= MAX_ARCS_PER_PASS) break; // el resto, en próximos turnos
+    const group = arcable.slice(g, g + ARC_BLOCK_SPAN);
+    const from  = group[0].messageIndexFrom;
+    const to    = group[group.length - 1].messageIndexTo;
+    if (arcs.some((a) => a.messageIndexFrom === from)) continue; // ya condensado
+
+    const arcPrompt =
+      `Estos son ${group.length} resúmenes consecutivos de una historia de rol (mensajes ${from + 1}–${to + 1}). ` +
+      `Condénsalos en UN resumen de arco.\n\n` +
+      group.map((b, i) => `RESUMEN ${i + 1} [msgs ${b.messageIndexFrom + 1}–${b.messageIndexTo + 1}]:\n${b.content}`).join('\n\n') +
+      `\n\nEl arco debe conservar, por este orden de prioridad:\n` +
+      `1. El ARCO RELACIONAL: cómo evolucionó cada relación a lo largo del tramo (de dónde a dónde), y las deudas o tensiones que siguen ABIERTAS al final.\n` +
+      `2. Los hechos irreversibles: promesas, heridas, objetos que cambiaron de manos, secretos revelados, decisiones sin vuelta atrás.\n` +
+      `3. La cronología esencial de la trama.\n` +
+      `Puede DESCARTAR lo episódico ya cerrado y sin consecuencias.\n` +
+      `- Máximo ${arcFrases} frases, en pasado narrativo.\n` +
+      `- Sin explicaciones ni frases introductorias.\n\n` +
+      `Responde SOLO con el texto del arco.`;
+
+    const response = await llm.generate({
+      messages: [
+        { role: 'system', content: 'Eres un cronista que condensa tramos largos de una historia de rol conservando la evolución de las relaciones y lo que sigue abierto.' },
+        { role: 'user', content: arcPrompt },
+      ],
+      model: modelId,
+      temperature: 0.3,
+      stream: false,
+      disableFallbacks: settings.disableFallbacks,
+    } satisfies GenerateRequest);
+
+    const content = response.content.trim();
+    if (!content) return;
+
+    summariesRepo.create({ conversationId, content, messageIndexFrom: from, messageIndexTo: to, kind: 'arc' });
+    arcsThisPass++;
+    console.log(`[summary] Arco ${from + 1}–${to + 1} condensado (${group.length} bloques) para conv ${conversationId}`);
   }
 }
 
@@ -1727,8 +1823,11 @@ async function generateCharacterSummary(
 
   const settings  = settingsService.getAll();
   const maxFrases = settings.summaryMaxLength ?? 5;
-  // Ámbito personal (una sola relación) → presupuesto menor que el global (×3).
-  const maxFrasesTotal = maxFrases * 2;
+  // ×3 (antes ×2): el rodante se reescribe entero en cada pasada y con el
+  // presupuesto justo cada reescritura recomprimía lo anterior — a diez ciclos,
+  // el principio de la relación quedaba en media frase. Más techo + la regla de
+  // hitos de abajo frenan esa degradación.
+  const maxFrasesTotal = maxFrases * 3;
 
   const existing = (conv.metadata as { characterSummaries?: Record<string, string> })
     ?.characterSummaries ?? {};
@@ -1750,8 +1849,9 @@ ${messagesText}
 
 Escribe la versión ACTUALIZADA del resumen, integrando los nuevos intercambios:
 - Solo lo que ${character.name} vivió o presenció — nada de otras escenas
-- Conserva: nombres, lugares, objetos, promesas, decisiones y el estado de su relación con el jugador
-- Comprime lo antiguo y detalla lo reciente
+- HITOS INTOCABLES: los momentos que definieron la relación con el jugador (el primer encuentro, una confesión, una promesa, una traición, un límite marcado) se CONSERVAN como frases propias, con su detalle — no se funden ni se recomprimen en cada actualización. Si un hito ya está en el resumen anterior, cópialo casi literal.
+- Lo cotidiano sin consecuencias sí puede comprimirse o desaparecer para hacer sitio.
+- Conserva además: el estado ACTUAL de la relación, y lo que ${character.name} tiene pendiente o sin decir con el jugador
 - Máximo ${maxFrasesTotal} frases, en pasado narrativo
 - Sin explicaciones ni frases introductorias
 
@@ -1886,6 +1986,160 @@ export async function bootstrapWorldStateAsync(
   }
 }
 
+// ─── Director de escena ───────────────────────────────────────────────────────
+//
+// Mantiene el estado que convierte una ficha en una persona: situación inmediata,
+// tensión, qué quiere/teme cada personaje AHORA, y el registro de PNJs sin ficha.
+// Llamada dedicada al LLM PRINCIPAL cada ~SCENE_DIRECTOR_STALE_AFTER mensajes —
+// no etiquetas en mitad de la narración, que el modelo ignora (lección del
+// anclaje de escena), ni fast LLM, que en producción no existe.
+
+const SCENE_DIRECTOR_STALE_AFTER = 6;   // mensajes entre actualizaciones
+const SCENE_DIRECTOR_MAX_NPCS    = 6;
+
+export async function updateSceneStateAsync(
+  conversationId: string,
+  provider: ReturnType<ProviderRepository['findById']>,
+  modelId: string,
+): Promise<void> {
+  if (!provider) return;
+  try {
+    const conv = convRepo.findById(conversationId);
+    if (!conv) return;
+
+    const allMessages = msgRepo.findByConversation(conversationId)
+      .filter((m) => m.role !== 'system');
+    const currentIndex = allMessages.length;
+    if (currentIndex < 4) return; // aún no hay escena que dirigir
+
+    const prev = (conv.metadata as { sceneState?: SceneDirectorState } | null)?.sceneState ?? null;
+    if (prev && currentIndex - prev.updatedAtIndex < SCENE_DIRECTOR_STALE_AFTER) return;
+
+    const cast = conv.characters
+      .map((c) => charRepo.findById(c.characterId))
+      .filter((c): c is Character => c !== null);
+    const transcript = labelSpeakers(allMessages.slice(-14) as Message[]);
+
+    // Estado previo serializado: el director EVOLUCIONA estados, no los reinventa.
+    const prevCharLines = prev
+      ? cast
+          .filter((c) => prev.characters[c.id])
+          .map((c) => {
+            const s = prev.characters[c.id];
+            return `- ${c.name}: quiere «${s.quiere}» · le preocupa «${s.preocupa}» · pendiente «${s.pendiente}» · última impresión «${s.impresion}»`;
+          })
+          .join('\n')
+      : '';
+    const prevNpcLines = prev?.npcs.length
+      ? prev.npcs.map((n) => `- ${n.nombre}: ${n.rasgo} · ${n.estado} · ${n.conoceAlJugador ? 'conoce al jugador' : 'NO conoce al jugador'}`).join('\n')
+      : '';
+
+    const settings = settingsService.getAll();
+    const llm = createProvider(provider);
+    const response = await llm.generate({
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Eres el director de escena de una historia de rol: mantienes el estado interno de los personajes ' +
+            'entre bambalinas. Piensas en términos de deseos, miedos y cuentas pendientes — no de resúmenes de trama. ' +
+            'Respondes SOLO en el formato pedido, sin explicaciones.',
+        },
+        {
+          role: 'user',
+          content:
+            `PERSONAJES CON FICHA (los únicos válidos para [PERSONAJE:...]):\n${cast.map((c) => `- ${c.name}`).join('\n')}\n\n` +
+            (prevCharLines ? `ESTADO ANTERIOR (evolúcialo con lo nuevo, no lo reinventes):\n${prevCharLines}\n\n` : '') +
+            (prevNpcLines ? `PNJs YA REGISTRADOS:\n${prevNpcLines}\n\n` : '') +
+            `FRAGMENTO RECIENTE:\n---\n${transcript}\n---\n\n` +
+            `Responde EXACTAMENTE con este formato (una línea por etiqueta, nada más):\n\n` +
+            `SITUACION: qué está pasando AHORA y qué está en juego, en una o dos frases\n` +
+            `TENSION: calma | inquietud | alerta | peligro — causa breve\n` +
+            `[PERSONAJE:Nombre|qué quiere ahora|qué le preocupa|qué tiene pendiente con el jugador|qué se llevó del último encuentro]\n` +
+            `[PNJ:Nombre|rasgo dominante|estado emocional actual|conoce al jugador: sí/no]\n\n` +
+            `Reglas:\n` +
+            `- SOLO personajes y PNJs que aparecen o pesan en el fragmento. No inventes a nadie.\n` +
+            `- Cada campo: una frase corta y CONCRETA, anclada en lo narrado — nada de vaguedades («quiere ser feliz» no vale; «quiere que Javier se quede a dormir sin tener que pedírselo» sí).\n` +
+            `- El estado interno puede CONTRADECIR lo que el personaje muestra por fuera: eso es lo valioso.\n` +
+            `- PNJ = personaje sin ficha (un guardia, un tendero). Si no hay ninguno relevante, no emitas líneas [PNJ:...].`,
+        },
+      ],
+      model: modelId,
+      temperature: 0.4,
+      maxTokens: 700,
+      stream: false,
+      disableFallbacks: settings.disableFallbacks,
+    });
+
+    const raw = response.content.trim();
+    const situacion = raw.match(/SITUACI[OÓ]N:\s*(.+)/i)?.[1]?.trim() ?? prev?.situacion ?? '';
+    const tension   = raw.match(/TENSI[OÓ]N:\s*(.+)/i)?.[1]?.trim() ?? prev?.tension ?? '';
+
+    const characters: Record<string, CharacterSceneState> = { ...(prev?.characters ?? {}) };
+    const PERS_RE = /\[PERSONAJE:\s*([^|\]]+)\|([^|\]]*)\|([^|\]]*)\|([^|\]]*)\|([^\]]*)\]/gi;
+    for (const m of raw.matchAll(PERS_RE)) {
+      const found = matchCharacterName(m[1], cast);
+      if (!found) {
+        console.warn(`[scene-director] [PERSONAJE:${m[1].trim()}] no casa con el reparto — ignorado`);
+        continue;
+      }
+      characters[found.id] = {
+        quiere:    m[2].trim(),
+        preocupa:  m[3].trim(),
+        pendiente: m[4].trim(),
+        impresion: m[5].trim(),
+      };
+    }
+
+    // PNJs: merge por nombre (case/tildes-insensible vía lowercase simple); los
+    // recién mencionados van al final = se conservan al recortar por el cap.
+    const npcs: NpcSceneState[] = [...(prev?.npcs ?? [])];
+    const NPC_RE = /\[PNJ:\s*([^|\]]+)\|([^|\]]*)\|([^|\]]*)\|([^\]]*)\]/gi;
+    for (const m of raw.matchAll(NPC_RE)) {
+      const nombre = m[1].trim();
+      if (!nombre) continue;
+      const npc: NpcSceneState = {
+        nombre,
+        rasgo:  m[2].trim(),
+        estado: m[3].trim(),
+        conoceAlJugador: /s[ií]|yes|true/i.test(m[4]),
+      };
+      const idx = npcs.findIndex((n) => n.nombre.toLowerCase() === nombre.toLowerCase());
+      if (idx !== -1) npcs.splice(idx, 1);
+      npcs.push(npc);
+    }
+    const cappedNpcs = npcs.slice(-SCENE_DIRECTOR_MAX_NPCS);
+
+    if (!situacion && Object.keys(characters).length === 0) {
+      console.warn(`[scene-director] Respuesta no interpretable — se reintentará: "${raw.slice(0, 120)}"`);
+      return;
+    }
+
+    // Merge sobre metadata FRESCO (pueden haberse escrito resúmenes/worldState).
+    const fresh = convRepo.findById(conversationId);
+    if (!fresh) return;
+    convRepo.update(conversationId, {
+      metadata: {
+        ...fresh.metadata,
+        sceneState: {
+          situacion, tension, characters, npcs: cappedNpcs,
+          updatedAtIndex: currentIndex,
+          updatedAt: new Date().toISOString(),
+        } satisfies SceneDirectorState,
+      },
+    });
+    console.log(`[scene-director] Estado actualizado (msg ${currentIndex}): ${Object.keys(characters).length} personaje(s), ${cappedNpcs.length} PNJ(s) — «${situacion.slice(0, 80)}»`);
+  } catch (err) {
+    console.error('[scene-director] Error:', err);
+  }
+}
+
+/** Conversaciones con una pasada de resúmenes EN CURSO. Es el candado que evita
+ *  la carrera que dejó bloques duplicados en BD: la pasada es fire-and-forget y
+ *  tarda varios segundos (llamadas al LLM); sin candado, el turno siguiente
+ *  lanzaba otra pasada en paralelo y ambas creaban el mismo bloque. */
+const summaryPassInFlight = new Set<string>();
+
 async function updateSummaryAsync(
   conversationId: string,
   provider: ReturnType<ProviderRepository['findById']>,
@@ -1893,8 +2147,16 @@ async function updateSummaryAsync(
   /** Personaje activo del turno (solo modo personaje con grupo) — dispara además
    *  la actualización de su resumen personal. */
   characterForPersonalSummary?: Character | null,
+  /** Rama del turno: los bloques solo se generan en 'main' (sus índices se
+   *  calculan sobre esa lista de mensajes). */
+  branchId = 'main',
 ): Promise<void> {
   if (!provider) return;
+  if (summaryPassInFlight.has(conversationId)) {
+    console.log(`[summary] Pasada ya en curso para conv ${conversationId} — omitiendo`);
+    return;
+  }
+  summaryPassInFlight.add(conversationId);
   try {
     const SUMMARY_EVERY_N = 6; // cadencia del resumen personal (rodante)
     const conv = convRepo.findById(conversationId);
@@ -1907,7 +2169,7 @@ async function updateSummaryAsync(
 
     // Bloques globales: la comprobación es barata (no-op salvo que un bloque se
     // haya completado), así que se ejecuta en todos los turnos.
-    await generateBlockSummaries(conversationId, provider, modelId);
+    await generateBlockSummaries(conversationId, provider, modelId, branchId);
 
     // El resumen personal por personaje sigue siendo rodante (ventana de 6 msgs).
     if (characterForPersonalSummary && conv.messageCount % SUMMARY_EVERY_N === 0) {
@@ -1916,6 +2178,8 @@ async function updateSummaryAsync(
   } catch (err) {
     // Summary update is non-critical — log and continue
     console.error('[summary] Error updating summary:', err);
+  } finally {
+    summaryPassInFlight.delete(conversationId);
   }
 }
 

@@ -727,9 +727,11 @@ export interface ConversationSummary {
   messageIndexFrom: number;
   messageIndexTo: number;
   createdAt: string;
-  /** 'block' = bloque automático inmutable (se inyecta en el prompt);
+  /** 'block'  = bloque automático inmutable (se inyecta en el prompt);
+   *  'arc'    = resumen de arco: condensa ~4 bloques antiguos consecutivos — el
+   *             nivel superior de la pirámide (pasado lejano, más comprimido);
    *  'manual' = generado por el usuario desde la UI (solo informativo). */
-  kind: 'block' | 'manual';
+  kind: 'block' | 'manual' | 'arc';
 }
 
 // ─── Context Index Types ──────────────────────────────────────────────────────
@@ -772,6 +774,55 @@ export interface NarrativeThread {
   openedAtIndex: number;
   closedAtIndex: number | null;
   createdAt: string;
+  updatedAt: string;
+}
+
+// ─── Director de escena ───────────────────────────────────────────────────────
+//
+// El estado que hace que un personaje sea una persona y no una ficha: qué quiere
+// AHORA, qué le preocupa, qué tiene pendiente con el jugador y qué se llevó del
+// último encuentro. Los prompts lo pedían («cada uno llega con un estado de
+// ánimo…») pero no existía ningún dato que lo instanciara, así que el modelo lo
+// improvisaba de cero cada turno y rellenaba con lo genérico.
+//
+// Lo mantiene una llamada dedicada en segundo plano (LLM principal) — NO
+// etiquetas emitidas en mitad de la narración: ese patrón se probó con el
+// anclaje de escena y el modelo lo ignoraba sistemáticamente.
+
+/** Estado interno de un personaje con ficha, dentro de la conversación. */
+export interface CharacterSceneState {
+  /** Objetivo inmediato: qué quiere conseguir en esta escena o etapa. */
+  quiere: string;
+  /** Tensión interna: qué le preocupa o le pesa ahora mismo. */
+  preocupa: string;
+  /** Lo no resuelto con el jugador: lo que no ha dicho, lo que espera de él. */
+  pendiente: string;
+  /** Qué se llevó del último encuentro con el jugador. */
+  impresion: string;
+}
+
+/** PNJ sin ficha (un guardia, un tendero) con continuidad entre escenas. */
+export interface NpcSceneState {
+  nombre: string;
+  /** Rasgo dominante en una línea — lo que lo hace él y no otro. */
+  rasgo: string;
+  /** Estado emocional actual (paranoico y en alerta, jovial, harto…). */
+  estado: string;
+  /** true si ya ha interactuado con el jugador — si no, no lo conoce de nada. */
+  conoceAlJugador: boolean;
+}
+
+/** Estado completo del director de escena, en conversation.metadata.sceneState. */
+export interface SceneDirectorState {
+  /** Qué está pasando AHORA y qué está en juego (1-2 frases). */
+  situacion: string;
+  /** Nivel de tensión de la escena + causa breve. */
+  tension: string;
+  /** Estado interno por characterId. */
+  characters: Record<string, CharacterSceneState>;
+  npcs: NpcSceneState[];
+  /** Índice de mensaje en el que se actualizó — controla la cadencia. */
+  updatedAtIndex: number;
   updatedAt: string;
 }
 
