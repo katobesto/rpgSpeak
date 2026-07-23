@@ -16,7 +16,7 @@ import { SettingsService } from '../../modules/settings/settings.service.js';
 import { MemoryRepository } from '../memory/memory.repository.js';
 import { NotFoundError, ProviderError, ValidationError } from '../../shared/errors.js';
 import { getUserById } from '../../modules/auth/auth.service.js';
-import { autoExtractContextAsync } from '../context/context-extractor.js';
+import { autoExtractContextAsync, hasPendingContextExtraction } from '../context/context-extractor.js';
 import { SummariesRepository } from '../../modules/summaries/summaries.repository.js';
 import { EventStatusRepository } from '../../modules/stories/event-status.repository.js';
 import { ThreadRepository } from '../../modules/threads/thread.repository.js';
@@ -54,6 +54,14 @@ export interface AffinityUpdate {
   previousAffinity?: number;
 }
 
+/** Un paso del enriquecimiento en segundo plano tras generar la respuesta
+ *  (director de escena, resúmenes, anclaje del mundo…). `index` es 1-based. */
+export interface EnrichStepInfo {
+  index: number;
+  total: number;
+  label: string;
+}
+
 export interface StreamOptions extends GenerateOptions {
   signal?: AbortSignal;
   onToken: (token: string) => void;
@@ -61,6 +69,16 @@ export interface StreamOptions extends GenerateOptions {
   onThinkToken?: (token: string) => void;
   onDone: (response: { messageId: string; userMessageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null; thinkContent?: string; deathLoop?: DeathLoopState | null }) => void;
   onError: (error: Error) => void;
+  /** Se llama justo ANTES de ejecutar cada paso del enriquecimiento de fondo
+   *  (las ráfagas de llamadas al LLM que mantienen el estado del mundo, el
+   *  director de escena y los resúmenes). El mensaje ya está persistido y
+   *  visible en este punto (onDone ya se llamó) — esto es progreso informativo,
+   *  no bloquea el chat. Solo se llama para pasos que de verdad van a hacer
+   *  trabajo; una respuesta sin ninguno debido no dispara esta señal. */
+  onEnrichStep?: (step: EnrichStepInfo) => void;
+  /** Se llama una vez, al terminar la pasada de enriquecimiento (incluso si no
+   *  hubo ningún paso pendiente), para que la UI pueda ocultar el indicador. */
+  onEnrichDone?: () => void;
 }
 
 async function resolveCharacterAndProvider(
@@ -614,7 +632,7 @@ async function checkNsfwContent(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function generateStream(opts: StreamOptions): Promise<void> {
-  const { conversationId, userMessage, branchId = 'main', onToken, onDone, onError } = opts;
+  const { conversationId, userMessage, branchId = 'main', onToken, onDone, onError, onEnrichStep, onEnrichDone } = opts;
 
   // Mensaje SIN las notas OOC (paréntesis): lo que ven los analizadores de
   // afinidad, memoria y detección de acciones — para que la nota de dirección
@@ -1408,20 +1426,78 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     if (!aborted) {
       convRepo.incrementCounts(conversationId, finalTokens);
       onDone({ messageId: assistantMsg.id, userMessageId: userMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, locationUpdate, thinkContent: thinkAccumulated || undefined, deathLoop: deathLoopUpdate });
-      // Fire-and-forget background tasks (non-blocking)
-      // En modo personaje con grupo se actualiza además el resumen personal del
-      // personaje activo (su "memoria de lo presenciado").
-      updateSummaryAsync(
-        conversationId, provider, modelId,
-        !narratorMode && contextGroupChars.length > 0 ? character : null,
-        branchId,
-      );
-      // Anclaje de la escena: no-op salvo la primera vez de cada conversación.
-      void bootstrapWorldStateAsync(conversationId, provider, modelId, worldCalendar);
-      // Director de escena: no-op salvo cada ~6 mensajes (cadencia interna).
-      void updateSceneStateAsync(conversationId, provider, modelId);
-      const updatedConv = convRepo.findById(conversationId);
-      if (updatedConv) void autoExtractContextAsync(conversationId, updatedConv.messageCount);
+
+      // ── Enriquecimiento de fondo, secuencial y con progreso visible ─────────
+      //
+      // El mensaje ya está persistido y visible (onDone ya se llamó): esto NO
+      // bloquea el chat, el jugador puede seguir escribiendo de inmediato. Antes
+      // estas llamadas eran fire-and-forget (`void ...Async(...)`) y corrían en
+      // silencio; el usuario veía pausas largas entre turnos sin saber que el
+      // servidor seguía llamando al LLM de fondo (anclaje del mundo, director de
+      // escena, resúmenes, índice de contexto).
+      //
+      // Se ejecutan en secuencia (no en paralelo) por dos motivos: evitar
+      // carreras de escritura sobre el mismo conversation.metadata (cada una
+      // hace su propio merge "leer-modificar-persistir"), y para que el
+      // progreso "paso N/M" reportado al cliente sea literal, no una foto
+      // aproximada de tareas en vuelo.
+      //
+      // La lista de pasos se decide ANTES de ejecutar nada, con comprobaciones
+      // baratas (sin LLM) que reflejan exactamente la condición de "no-op" de
+      // cada función real — así el total mostrado es el nº de llamadas al LLM
+      // que de verdad van a ocurrir, ni una más ni una menos salvo la rara
+      // carrera de un segundo turno concurrente en la misma conversación.
+      const updatedConvForCount = convRepo.findById(conversationId);
+      const currentTotalMessages = updatedConvForCount?.messageCount ?? 0;
+      const personalSummaryChar = !narratorMode && contextGroupChars.length > 0 ? character : null;
+      const personalSummaryDue = Boolean(personalSummaryChar) && currentTotalMessages % SUMMARY_EVERY_N === 0;
+      const blockSummaryDue = hasPendingSummaryWork(conversationId, branchId);
+
+      const enrichSteps: Array<{ label: string; run: () => Promise<void> }> = [];
+
+      if (!worldState.established) {
+        enrichSteps.push({
+          label: 'Anclando la escena en el tiempo y el lugar…',
+          run: () => bootstrapWorldStateAsync(conversationId, provider, modelId, worldCalendar),
+        });
+      }
+      if (isSceneDirectorDue(sceneState, currentMessageIndex + 1)) {
+        enrichSteps.push({
+          label: 'Actualizando lo que piensa y siente cada personaje…',
+          run: () => updateSceneStateAsync(conversationId, provider, modelId),
+        });
+      }
+      if (blockSummaryDue || personalSummaryDue) {
+        const label =
+          blockSummaryDue && personalSummaryDue
+            ? `Actualizando la memoria de la historia y el resumen de ${personalSummaryChar!.name}…`
+            : blockSummaryDue
+            ? 'Actualizando la memoria de la historia…'
+            : `Actualizando el resumen personal de ${personalSummaryChar!.name}…`;
+        enrichSteps.push({
+          label,
+          run: () => updateSummaryAsync(conversationId, provider, modelId, personalSummaryChar, branchId),
+        });
+      }
+      if (hasPendingContextExtraction(conversationId, currentTotalMessages)) {
+        enrichSteps.push({
+          label: 'Actualizando el índice de contexto…',
+          run: () => autoExtractContextAsync(conversationId, currentTotalMessages),
+        });
+      }
+
+      for (let i = 0; i < enrichSteps.length; i++) {
+        onEnrichStep?.({ index: i + 1, total: enrichSteps.length, label: enrichSteps[i].label });
+        try {
+          await enrichSteps[i].run();
+        } catch (err) {
+          // Cada función ya se protege internamente (non-critical, log y sigue);
+          // esta captura es solo para que un fallo inesperado no tumbe el resto
+          // de la pasada de enriquecimiento.
+          console.error(`[enrich] Paso "${enrichSteps[i].label}" falló:`, err);
+        }
+      }
+      onEnrichDone?.();
     }
 
   } catch (err) {
@@ -1645,12 +1721,45 @@ function labelSpeakers(msgs: Message[]): string {
 // Los ARC_DETAIL_RESERVE bloques más recientes nunca entran en un arco: son el
 // pasado cercano y se inyectan con su detalle completo (ver buildContext).
 
+// Cadencia del resumen personal por personaje (rodante). Nivel de módulo (antes
+// local a updateSummaryAsync) porque el chequeo de elegibilidad del indicador
+// de progreso necesita la misma constante ANTES de llamar a la función real.
+const SUMMARY_EVERY_N = 6;
+
 const ARC_BLOCK_SPAN     = 4; // bloques por arco
 const ARC_DETAIL_RESERVE = 2; // bloques recientes que siempre quedan en detalle
 // Tope de arcos por pasada: una conversación larga preexistente puede deber
 // muchos arcos de golpe (puesta al día); se generan a razón de unos pocos por
 // turno para no convertir la tarea de fondo en una ráfaga de llamadas al LLM.
 const MAX_ARCS_PER_PASS  = 3;
+
+/**
+ * Chequeo barato (sin llamadas al LLM) de si `generateBlockSummaries` va a
+ * tener trabajo real que hacer. Lo usa el indicador de progreso del turno para
+ * saber, ANTES de ejecutar nada, si este paso merece anunciarse.
+ *
+ * Duplica la aritmética de arriba (no la lógica de condensación) a propósito:
+ * es una comprobación de unas pocas lecturas de BD, y math desincronizada aquí
+ * en el peor caso hace que el paso se anuncie y resulte un no-op casi
+ * instantáneo — nunca al revés (trabajo real sin anunciar).
+ */
+export function hasPendingSummaryWork(conversationId: string, branchId: string): boolean {
+  if (branchId !== 'main') return false;
+  const settings  = settingsService.getAll();
+  const blockSize = Math.max(10, settings.summaryBlockSize ?? 40);
+
+  const totalMessages   = msgRepo.findByConversation(conversationId).length;
+  const completedBlocks = Math.floor(totalMessages / blockSize);
+  if (completedBlocks === 0) return false;
+
+  const blocks = summariesRepo.findBlocks(conversationId);
+  if (completedBlocks > blocks.length) return true; // bloque nuevo pendiente
+
+  const arcs    = summariesRepo.findArcs(conversationId);
+  const arcable = blocks.length - ARC_DETAIL_RESERVE;
+  const nextArcFrom = arcs.length * ARC_BLOCK_SPAN;
+  return arcable - nextArcFrom >= ARC_BLOCK_SPAN; // arco nuevo pendiente
+}
 
 async function generateBlockSummaries(
   conversationId: string,
@@ -1997,6 +2106,15 @@ export async function bootstrapWorldStateAsync(
 const SCENE_DIRECTOR_STALE_AFTER = 6;   // mensajes entre actualizaciones
 const SCENE_DIRECTOR_MAX_NPCS    = 6;
 
+/** Único punto de verdad de "¿toca actualizar el director de escena?". La usa
+ *  tanto la función real como el indicador de progreso del turno (necesita
+ *  saber, ANTES de ejecutar nada, si este paso va a hacer trabajo real). */
+export function isSceneDirectorDue(prev: SceneDirectorState | null, currentIndex: number): boolean {
+  if (currentIndex < 4) return false; // aún no hay escena que dirigir
+  if (prev && currentIndex - prev.updatedAtIndex < SCENE_DIRECTOR_STALE_AFTER) return false;
+  return true;
+}
+
 export async function updateSceneStateAsync(
   conversationId: string,
   provider: ReturnType<ProviderRepository['findById']>,
@@ -2010,10 +2128,9 @@ export async function updateSceneStateAsync(
     const allMessages = msgRepo.findByConversation(conversationId)
       .filter((m) => m.role !== 'system');
     const currentIndex = allMessages.length;
-    if (currentIndex < 4) return; // aún no hay escena que dirigir
 
     const prev = (conv.metadata as { sceneState?: SceneDirectorState } | null)?.sceneState ?? null;
-    if (prev && currentIndex - prev.updatedAtIndex < SCENE_DIRECTOR_STALE_AFTER) return;
+    if (!isSceneDirectorDue(prev, currentIndex)) return;
 
     const cast = conv.characters
       .map((c) => charRepo.findById(c.characterId))
@@ -2158,7 +2275,6 @@ async function updateSummaryAsync(
   }
   summaryPassInFlight.add(conversationId);
   try {
-    const SUMMARY_EVERY_N = 6; // cadencia del resumen personal (rodante)
     const conv = convRepo.findById(conversationId);
     if (!conv) return;
 

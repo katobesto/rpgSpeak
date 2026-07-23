@@ -452,6 +452,13 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
             </>
           )}
 
+          {/* Enriquecimiento de fondo (director de escena, resúmenes…): el
+              mensaje ya está terminado y es interactivo, esto es solo un aviso
+              transitorio de que el servidor sigue trabajando detrás. */}
+          {!isStreaming && !isUser && message.metadata?.enrichStep && (
+            <EnrichIndicator step={message.metadata.enrichStep} />
+          )}
+
           {/* ── TTS player inline ────────────────────────────────────────── */}
           {!isUser && !isStreaming && !editing && (
             <TtsPlayerBar
@@ -975,6 +982,23 @@ function GeneratingIndicator() {
         <span className="think-dot" />
         <span className="think-dot" />
         <span className="think-dot" />
+      </span>
+    </div>
+  );
+}
+
+/** Indicador del enriquecimiento de fondo: la ráfaga de llamadas al LLM que
+ *  sigue corriendo tras un mensaje ya visible (director de escena, resúmenes,
+ *  anclaje del mundo…). Antes esto era invisible — el usuario veía pausas
+ *  entre turnos sin saber por qué. Mismo cerebro giratorio que el indicador de
+ *  "generando", con la etiqueta del paso actual y el contador "N/M". */
+function EnrichIndicator({ step }: { step: { index: number; total: number; label: string } }) {
+  return (
+    <div className="flex items-center gap-2 py-1 mt-1 opacity-60">
+      <Brain size={12} className="text-accent animate-brain-spin flex-shrink-0" />
+      <span className="text-xs text-text-muted truncate">
+        {step.label}
+        {step.total > 1 && <span className="opacity-60"> · paso {step.index}/{step.total}</span>}
       </span>
     </div>
   );

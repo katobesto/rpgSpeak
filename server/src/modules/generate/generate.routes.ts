@@ -229,9 +229,21 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       'X-Accel-Buffering': 'no',
     });
 
+    // Los pasos de enriquecimiento de fondo (director de escena, resúmenes…)
+    // ahora se ejecutan DENTRO de generateStream() —ya no fire-and-forget— para
+    // poder avisar al cliente de cada uno ("paso 2/3: ..."). Eso mantiene esta
+    // conexión SSE abierta bastante más tiempo que antes (varias llamadas al LLM
+    // en fila), así que send() debe tolerar que el socket ya no esté vivo — el
+    // usuario pudo cerrar la pestaña mientras el enriquecimiento seguía en curso.
     const send = (data: object) => {
+      if (reply.raw.writableEnded || reply.raw.destroyed) return;
       reply.raw.write(`data: ${JSON.stringify(data)}\n\n`);
     };
+    // Sin este listener, escribir en un socket cuyo otro extremo ya cerró puede
+    // emitir un 'error' no gestionado en el ServerResponse y tumbar el proceso.
+    reply.raw.on('error', (err) => {
+      console.warn('[generate/stream] Error de escritura en la conexión SSE (probablemente el cliente ya cerró):', err.message);
+    });
 
     // Detect client disconnect (user clicked Stop or navigated away).
     // Must listen on reply.raw (ServerResponse), NOT req.raw (IncomingMessage) —
@@ -257,13 +269,23 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       onThinkToken: (token) => send({ type: 'think', token }),
       onDone: ({ messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent, deathLoop }) => {
         send({ type: 'done', messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent, deathLoop });
-        reply.raw.end();
+        // OJO: la conexión NO se cierra aquí. El mensaje ya es visible e
+        // interactivo para el usuario (el store del cliente marca isStreaming =
+        // false al recibir este evento), pero la conexión sigue abierta para
+        // los eventos 'enrich_step'/'enrich_done' que vienen a continuación —
+        // se cierra al final del handler, cuando generateStream() resuelve.
       },
+      onEnrichStep: ({ index, total, label }) => send({ type: 'enrich_step', index, total, label }),
+      onEnrichDone: () => send({ type: 'enrich_done' }),
       onError: (error) => {
         send({ type: 'error', error: error.message });
         reply.raw.end();
       },
     });
+
+    // Cierra la conexión al terminar TODO (respuesta + enriquecimiento de fondo).
+    // Con guardia por si el camino de error ya la cerró antes.
+    if (!reply.raw.writableEnded) reply.raw.end();
   });
 
   app.post('/sync', async (req) => {

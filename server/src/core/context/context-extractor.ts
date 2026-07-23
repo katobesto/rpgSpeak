@@ -225,6 +225,23 @@ export async function extractContextBatch(opts: ExtractOptions): Promise<Extract
  * Checks if enough new messages have accumulated since the last extraction,
  * and if so, runs a background extraction without blocking the response.
  */
+/**
+ * Chequeo barato (sin llamadas al LLM) de si `autoExtractContextAsync` va a
+ * tener trabajo real que hacer. Lo usa el indicador de progreso del turno.
+ */
+export function hasPendingContextExtraction(conversationId: string, currentMessageCount: number): boolean {
+  const settings = new SettingsService();
+  const s = settings.getAll();
+  if (!s.contextAutoExtractEnabled) return false;
+
+  const interval = s.contextAutoExtractInterval ?? 8;
+  const ctxRepo  = new ContextRepository();
+  const lastExtracted = ctxRepo.findMaxMessageIndexTo(conversationId);
+  if (currentMessageCount - lastExtracted < interval) return false;
+
+  return Boolean(s.contextAutoExtractProviderId || (s.fastLlmEnabled && s.fastLlmProviderId) || s.defaultProviderId);
+}
+
 export async function autoExtractContextAsync(
   conversationId:    string,
   currentMessageCount: number,

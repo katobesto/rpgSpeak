@@ -355,6 +355,9 @@ export interface MessageMetadata {
   cachedTokens?: number;
   sceneImageUrl?: string;
   sceneImagePending?: boolean;  // true mientras el upscale 4K sigue procesando
+  /** Paso EN CURSO del enriquecimiento de fondo (director de escena, resúmenes…)
+   *  tras generar esta respuesta. Ausente = sin ninguno pendiente / ya terminado. */
+  enrichStep?: { index: number; total: number; label: string };
   [key: string]: unknown;
 }
 

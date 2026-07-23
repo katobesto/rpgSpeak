@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Conversation, Message, DeathLoopState } from '@rpgspeak/shared';
+import type { Conversation, Message, MessageMetadata, DeathLoopState } from '@rpgspeak/shared';
 import { streamGenerate, type AffinityUpdate } from '../api/client.ts';
 import { messagesApi } from '../api/conversations.ts';
 
@@ -69,6 +69,15 @@ interface ChatState extends StreamingState {
 
   stopStreaming: (() => void) | null;
   abort: () => void;
+}
+
+/** Quita `enrichStep` de la metadata de un mensaje, sin dejar una variable
+ *  descartada por el `...rest` — solo se usa al terminar el enriquecimiento
+ *  de fondo, para ocultar el indicador transitorio. */
+function withoutEnrichStep(metadata: MessageMetadata): MessageMetadata {
+  const rest = { ...metadata };
+  delete rest.enrichStep;
+  return rest;
 }
 
 function makeErrorMessage(convId: string, text: string): Message {
@@ -213,6 +222,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     set({ isStreaming: true, streamingContent: '', streamingMessageId: placeholderId, lastAttemptedMessage: message });
 
+    // El mensaje pasa de `placeholderId` a su id real dentro de onDone, pero los
+    // eventos de progreso del enriquecimiento de fondo (onEnrichStep/onEnrichDone)
+    // llegan DESPUÉS por la misma conexión — necesitan saber a qué mensaje final
+    // atarse. Esta variable la actualiza onDone y la leen los closures de abajo.
+    let resolvedMessageId = placeholderId;
+
     const abort = await streamGenerate(
       {
         conversationId: activeConversationId,
@@ -257,6 +272,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           });
         },
         onDone: ({ messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent, deathLoop }) => {
+          resolvedMessageId = messageId;
           set((s) => ({
             isStreaming: false,
             streamingContent: '',
@@ -297,6 +313,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (affinityUpdates?.length) get().updateCharacterAffinities(affinityUpdates);
           if (locationUpdate !== undefined) get().updateCurrentLocation(locationUpdate);
           if (deathLoop !== undefined) get().setDeathLoop(deathLoop);
+        },
+        // Ráfaga de llamadas al LLM en segundo plano (director de escena,
+        // resúmenes...) tras un mensaje que YA está terminado y visible. Se
+        // guarda en la metadata del propio mensaje para que MessageItem la
+        // muestre como un indicador transitorio bajo la respuesta.
+        onEnrichStep: (step) => {
+          set((s) => ({
+            messages: s.messages.map((m) =>
+              m.id === resolvedMessageId ? { ...m, metadata: { ...m.metadata, enrichStep: step } } : m
+            ),
+          }));
+        },
+        onEnrichDone: () => {
+          set((s) => ({
+            messages: s.messages.map((m) => {
+              if (m.id !== resolvedMessageId || !('enrichStep' in m.metadata)) return m;
+              return { ...m, metadata: withoutEnrichStep(m.metadata) };
+            }),
+          }));
         },
         onError: (err) => {
           // Show error as assistant bubble — no silent failure
@@ -408,6 +443,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
     set({ isStreaming: true, streamingContent: '', streamingMessageId: placeholderId, lastAttemptedMessage: userContent });
 
+    // Ver comentario equivalente en sendMessage: onEnrichStep/onEnrichDone
+    // llegan después de onDone y necesitan el id YA resuelto del mensaje.
+    let resolvedMessageId = placeholderId;
+
     const abort = await streamGenerate(
       {
         conversationId: activeConversationId,
@@ -441,6 +480,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           });
         },
         onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId: doneCharId, content, locationUpdate, thinkContent, deathLoop }) => {
+          resolvedMessageId = messageId;
           set((s) => ({
             isStreaming: false,
             streamingContent: '',
@@ -471,6 +511,21 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (affinityUpdates?.length) get().updateCharacterAffinities(affinityUpdates);
           if (locationUpdate !== undefined) get().updateCurrentLocation(locationUpdate);
           if (deathLoop !== undefined) get().setDeathLoop(deathLoop);
+        },
+        onEnrichStep: (step) => {
+          set((s) => ({
+            messages: s.messages.map((m) =>
+              m.id === resolvedMessageId ? { ...m, metadata: { ...m.metadata, enrichStep: step } } : m
+            ),
+          }));
+        },
+        onEnrichDone: () => {
+          set((s) => ({
+            messages: s.messages.map((m) => {
+              if (m.id !== resolvedMessageId || !('enrichStep' in m.metadata)) return m;
+              return { ...m, metadata: withoutEnrichStep(m.metadata) };
+            }),
+          }));
         },
         onError: (err) => {
           set((s) => ({
