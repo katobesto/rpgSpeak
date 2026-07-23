@@ -1040,11 +1040,28 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   //   · Narrator mode  → all memories for the conversation (narrator controls all characters)
   //   · Single-char    → only memories for THIS character (avoid poisoning its context with
   //                       events the character wasn't part of / doesn't know about)
-  const MAX_MEMORIES = 12; // cap to avoid context bloat
+  // 12 → 20 (2026-07-23), con reparto en vez de un solo corte por importancia.
+  // `findByConversation` ya devuelve todo ordenado por importancia desc; un
+  // simple `.slice(0, N)` favorece SIEMPRE los hechos antiguos de alta
+  // importancia (heridas, objetos) y nunca deja hueco a lo nuevo de importancia
+  // media (un gusto revelado, una confidencia) que ahora sí se registra —
+  // quedaría enterrado para siempre bajo memorias más viejas y más "grandes".
+  // Reservando un cupo por RECENCIA se asegura que lo último vivido entre
+  // siempre, aunque no sea lo más importante del historial completo.
+  const MEMORIES_BY_IMPORTANCE = 14;
+  const MEMORIES_BY_RECENCY    = 6;
   const rawMemories = narratorMode
     ? memRepo.findByConversation(conversationId)
     : memRepo.findByConversation(conversationId, character?.id);
-  const allMemories = rawMemories.slice(0, MAX_MEMORIES);
+  const topByImportance = rawMemories.slice(0, MEMORIES_BY_IMPORTANCE);
+  // El resto (fuera del cupo de importancia) se reordena por fecha: los
+  // MEMORIES_BY_RECENCY más nuevos de ESE resto entran también. `remaining` ya
+  // excluye `topByImportance`, así que no hace falta dedupe.
+  const remaining = rawMemories.slice(MEMORIES_BY_IMPORTANCE);
+  const topByRecency = [...remaining]
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    .slice(0, MEMORIES_BY_RECENCY);
+  const allMemories = [...topByImportance, ...topByRecency];
 
   // Example dialogue (injected as few-shot examples if present, single-char mode only)
   const fewShot: ChatMessage[] = [];

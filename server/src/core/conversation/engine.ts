@@ -1463,8 +1463,14 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       }
       if (isSceneDirectorDue(sceneState, currentMessageIndex + 1)) {
         enrichSteps.push({
-          label: 'Actualizando lo que piensa y siente cada personaje…',
-          run: () => updateSceneStateAsync(conversationId, provider, modelId),
+          label: useFastLlm
+            ? 'Actualizando lo que piensa y siente cada personaje…'
+            : 'Actualizando lo que piensa y siente cada personaje, y su memoria…',
+          // Sin LLM rápido, esta es la ÚNICA vía de creación de memorias
+          // (analyzeExchangeAsync, más abajo, nunca se ejecuta). Con LLM rápido
+          // activo se deja en false para no duplicar — ese analizador ya cubre
+          // memoria con su propia cadencia por turno.
+          run: () => updateSceneStateAsync(conversationId, provider, modelId, !useFastLlm),
         });
       }
       if (blockSummaryDue || personalSummaryDue) {
@@ -2115,10 +2121,57 @@ export function isSceneDirectorDue(prev: SceneDirectorState | null, currentIndex
   return true;
 }
 
+// ── Umbrales de importancia para memorias extraídas por el director ─────────
+//
+// Antes la ÚNICA vía para crear memorias era `analyzeExchangeAsync` (LLM
+// rápido), con un filtro deliberadamente brutal ("90% NINGUNO", tipos
+// relación/preferencia PROHIBIDOS) porque corría en CADA turno — sin ese
+// filtro, cada charla trivial generaría ruido.
+//
+// Aquí el cálculo es distinto: esto corre cada SCENE_DIRECTOR_STALE_AFTER
+// mensajes (~6), no cada turno, así que la densidad esperada de "algo memorable
+// en esta ventana" es mayor y el filtro puede aflojarse. Y a diferencia del
+// analizador rápido, aquí SÍ se admite relación/preferencia — un gusto revelado
+// o un patrón en cómo trata al jugador es exactamente lo que hace a un
+// personaje distinto de una ficha en blanco, y antes estaba prohibido guardarlo.
+const MEMORY_TYPE_MAP: Record<string, MemoryEntry['type']> = {
+  evento: 'event', hecho: 'fact', ofensa: 'offense', trauma: 'trauma',
+  relacion: 'relationship', preferencia: 'preference',
+};
+const MEMORY_MIN_IMPORTANCE: Record<MemoryEntry['type'], number> = {
+  event: 7, fact: 7, offense: 7, trauma: 7,
+  relationship: 5, preference: 5, summary: 7,
+};
+
+// Formato con PIPES, igual que [PERSONAJE:...] y [PNJ:...] de arriba — a
+// propósito. La primera versión usaba dos puntos + etiqueta de cierre
+// ([MEMORIA:Nombre:tipo:importancia]…[/MEMORIA]), y en pruebas reales el
+// modelo la confundía con el resto del formato del propio prompt: escribía
+// literalmente la palabra "importancia" donde debía ir un número, o mezclaba
+// tipo e importancia, e ignoraba el cierre — probablemente por chocar con la
+// convención de pipes que el MISMO prompt usa dos líneas antes. Unificar a
+// pipes (que el modelo ya rellena bien para PERSONAJE/PNJ en esta misma
+// respuesta) resolvió la incoherencia. Incluye un ejemplo con un número real:
+// un placeholder abstracto ("importancia") es la puerta que llevaba a copiarlo
+// literal en vez de sustituirlo.
+const MEMORY_EXTRACTION_INSTRUCTION =
+  `\n\nADEMÁS: si algo de este fragmento merece recordarse de forma DURADERA (para conversaciones futuras, no solo para esta escena), añade una etiqueta por hecho, con el MISMO formato de pipes que arriba:\n` +
+  `[MEMORIA:Nombre|tipo|importancia|descripción concisa en tercera persona]\n` +
+  `Ejemplo real (fíjate en que "importancia" es un NÚMERO, no la palabra "importancia"): [MEMORIA:Rika|trauma|8|Rika reveló que su padre la abandonó de niña y aún le cuesta confiar]\n\n` +
+  `TIPOS (usa exactamente una de estas seis palabras) Y UMBRAL DE IMPORTANCIA (1-10):\n` +
+  `- evento, hecho, ofensa, trauma → SOLO si importancia ≥ 7 (objeto entregado, herida o cicatriz, promesa o juramento, secreto revelado por primera vez, traición, daño psicológico duradero)\n` +
+  `- relacion, preferencia → SOLO si importancia ≥ 5 (un gusto o costumbre que el personaje reveló, un patrón en cómo trata al jugador, una confidencia genuina)\n` +
+  `La mayoría de fragmentos de 6 mensajes no dejan nada de este calibre — no fuerces una etiqueta si no la hay. Pero a diferencia de la situación/tensión de arriba, esto debe capturar lo que hace a cada personaje distinto: sus gustos, manías y la forma particular en que trata al jugador, no solo los hechos de la trama.`;
+
 export async function updateSceneStateAsync(
   conversationId: string,
   provider: ReturnType<ProviderRepository['findById']>,
   modelId: string,
+  /** true cuando el LLM rápido está apagado: sin él, `analyzeExchangeAsync`
+   *  nunca corre y esta es la ÚNICA vía de creación de memorias. Con el LLM
+   *  rápido activo, se deja false para no duplicar — ese analizador ya cubre
+   *  memoria (y afinidad) con su propia cadencia por turno. */
+  extractMemories = false,
 ): Promise<void> {
   if (!provider) return;
   try {
@@ -2178,17 +2231,20 @@ export async function updateSceneStateAsync(
             `- SOLO personajes y PNJs que aparecen o pesan en el fragmento. No inventes a nadie.\n` +
             `- Cada campo: una frase corta y CONCRETA, anclada en lo narrado — nada de vaguedades («quiere ser feliz» no vale; «quiere que Javier se quede a dormir sin tener que pedírselo» sí).\n` +
             `- El estado interno puede CONTRADECIR lo que el personaje muestra por fuera: eso es lo valioso.\n` +
-            `- PNJ = personaje sin ficha (un guardia, un tendero). Si no hay ninguno relevante, no emitas líneas [PNJ:...].`,
+            `- PNJ = personaje sin ficha (un guardia, un tendero). Si no hay ninguno relevante, no emitas líneas [PNJ:...].` +
+            (extractMemories ? MEMORY_EXTRACTION_INSTRUCTION : ''),
         },
       ],
       model: modelId,
       temperature: 0.4,
-      maxTokens: 700,
+      // +200 tok de margen cuando también se piden etiquetas [MEMORIA:...].
+      maxTokens: extractMemories ? 900 : 700,
       stream: false,
       disableFallbacks: settings.disableFallbacks,
     });
 
     const raw = response.content.trim();
+    if (process.env.DEBUG_SCENE_DIRECTOR) console.log('[scene-director][DEBUG] raw:\n' + raw);
     const situacion = raw.match(/SITUACI[OÓ]N:\s*(.+)/i)?.[1]?.trim() ?? prev?.situacion ?? '';
     const tension   = raw.match(/TENSI[OÓ]N:\s*(.+)/i)?.[1]?.trim() ?? prev?.tension ?? '';
 
@@ -2226,6 +2282,36 @@ export async function updateSceneStateAsync(
       npcs.push(npc);
     }
     const cappedNpcs = npcs.slice(-SCENE_DIRECTOR_MAX_NPCS);
+
+    // Memorias — solo cuando el LLM rápido está apagado (ver `extractMemories`).
+    // Formato de PIPES (no el de dos-puntos+cierre de `analyzeExchangeAsync` más
+    // abajo): ver el comentario de MEMORY_EXTRACTION_INSTRUCTION — es el que de
+    // verdad rellena bien este modelo en ESTE prompt, al ser consistente con
+    // [PERSONAJE:...]/[PNJ:...] que ya usa arriba.
+    let memoriesCreated = 0;
+    if (extractMemories) {
+      const MEMORY_RE = /\[MEMORIA:\s*([^|\]]+)\|([^|\]]*)\|(\d+)\|([^\]]*)\]/gi;
+      for (const m of raw.matchAll(MEMORY_RE)) {
+        const charName   = m[1].trim();
+        const typeRaw    = m[2].trim().toLowerCase();
+        const importance = parseInt(m[3], 10);
+        const content    = m[4].trim();
+        const type = MEMORY_TYPE_MAP[typeRaw];
+        if (!type) {
+          console.warn(`[scene-director] [MEMORIA:...:${typeRaw}:...] tipo desconocido — ignorada`);
+          continue;
+        }
+        if (!Number.isFinite(importance) || importance < MEMORY_MIN_IMPORTANCE[type]) continue; // backstop de umbral
+        const found = matchCharacterName(charName, cast);
+        if (!found) {
+          console.warn(`[scene-director] [MEMORIA:${charName}:...] no casa con el reparto — ignorada`);
+          continue;
+        }
+        memRepo.create({ conversationId, characterId: found.id, type, content, importance, isActive: true });
+        memoriesCreated++;
+      }
+      if (memoriesCreated > 0) console.log(`[scene-director] ${memoriesCreated} memoria(s) nueva(s) (LLM principal, sin analizador rápido)`);
+    }
 
     if (!situacion && Object.keys(characters).length === 0) {
       console.warn(`[scene-director] Respuesta no interpretable — se reintentará: "${raw.slice(0, 120)}"`);

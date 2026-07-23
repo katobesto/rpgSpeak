@@ -361,8 +361,9 @@ TIPOS válidos: evento · hecho · ofensa · trauma`,
   embeddingEnabled:    false,
   embeddingProviderId: null,
   embeddingModel:      null,
-  // Inyección del Índice de Contexto en el LLM
-  contextIndexInjectionEnabled:  false,
+  // Inyección del Índice de Contexto en el LLM. Activada por defecto junto con
+  // la extracción de arriba — de nada sirve extraer si no se inyecta.
+  contextIndexInjectionEnabled:  true,
   contextIndexInjectionMaxItems: 10,
   contextIndexInjectionPrompt: `## Índice de contexto — Estado del mundo
 
@@ -435,8 +436,13 @@ Reglas estrictas:
 - CONQUISTA: solo para misiones completadas/activas, objetos con peso narrativo, o revelaciones que cambian la historia
 - No inventes ni extrapoles — solo lo que está explícito en el fragmento`,
   contextIndexContextSize: 18192,
-  // Auto-extracción del Índice de Contexto
-  contextAutoExtractEnabled:    false,
+  // Auto-extracción del Índice de Contexto. Activado por defecto (2026-07-23):
+  // ya no depende del LLM rápido — su cadena de resolución de provider cae a
+  // `defaultProviderId` cuando no hay uno dedicado ni LLM rápido configurado
+  // (ver autoExtractContextAsync). NOTA: esto solo afecta a instalaciones
+  // NUEVAS — una fila ya existente en la tabla settings de una instalación en
+  // marcha no se toca; hay que cambiarla a mano en Ajustes si se quiere activa.
+  contextAutoExtractEnabled:    true,
   contextAutoExtractInterval:   8,
   contextAutoExtractProviderId: null,
   contextAutoExtractModelId:    null,
