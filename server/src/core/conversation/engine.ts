@@ -1199,6 +1199,10 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     // capturaba → se colaba al final del mensaje y la ubicación no se actualizaba.
     const LOCATION_RE = /\[(?:UBICACI[OÓ]N|LOCATION):\s*([^\]]+?)\s*\]/gi;
     let locationUpdate: string | null | undefined;
+    // true cuando el turno cayó en el avance de tiempo plano por defecto (ni
+    // [ESCENA:] ni un [TIEMPO:] válido) — le dice al paso de fondo
+    // updateWorldTimeAsync si debe refinar el avance con una llamada dedicada.
+    let usedDefaultTimeAdvance = false;
     const locationMatches = [...cleanContent.matchAll(LOCATION_RE)];
     if (locationMatches.length > 0) {
       locationUpdate = locationMatches[locationMatches.length - 1][1].trim();
@@ -1314,6 +1318,14 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
           : null;
         if (rawAdvance && parsed === null) {
           console.warn(`[world] [TIEMPO:${rawAdvance}] no reconocido — aplicando avance por defecto`);
+        }
+        if (parsed === null && worldState.established) {
+          // El modelo no suele emitir [TIEMPO:...] de forma fiable (ver
+          // updateWorldTimeAsync, más abajo, que corrige esto en segundo plano
+          // con una llamada dedicada). Este avance por defecto es solo el
+          // placeholder síncrono para la cabecera de ESTE turno.
+          usedDefaultTimeAdvance = true;
+          console.log(`[world] Avance provisional de ${DEFAULT_ADVANCE_MINUTES}min este turno (se refinará en segundo plano)`);
         }
         // Mientras la escena no esté anclada el reloj NO corre: avanzar un tiempo
         // que no sabemos desde cuándo cuenta solo acumula error.
@@ -1522,6 +1534,15 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
         enrichSteps.push({
           label: 'Anclando la escena en el tiempo y el lugar…',
           run: () => bootstrapWorldStateAsync(conversationId, provider, modelId, worldCalendar),
+        });
+      } else if (usedDefaultTimeAdvance) {
+        // El modelo no emitió [TIEMPO:...] este turno (ver arriba): una llamada
+        // dedicada, de único cometido, determina el avance real — mismo patrón
+        // que el anclaje inicial, que tampoco funcionaba pidiéndoselo al turno
+        // narrativo principal.
+        enrichSteps.push({
+          label: 'Calculando cuánto tiempo ha pasado…',
+          run: () => updateWorldTimeAsync(conversationId, provider, modelId, worldCalendar),
         });
       }
       if (isSceneDirectorDue(sceneState, currentMessageIndex + 1)) {
@@ -2184,6 +2205,90 @@ export async function bootstrapWorldStateAsync(
     console.log(`[world] Escena anclada automáticamente: ${raw}`);
   } catch (err) {
     console.error('[world] Error en el anclaje automático:', err);
+  }
+}
+
+// ─── Reloj del mundo — avance por turno vía llamada dedicada ─────────────────
+//
+// El modelo no emite [TIEMPO:...] de forma fiable turno a turno, ni haciéndolo
+// obligatorio en el prompt principal: compite con demasiadas otras
+// instrucciones en una escena ya de por sí cargada. Mismo diagnóstico —y misma
+// solución— que el anclaje inicial de arriba: una llamada aparte, con un único
+// cometido, no compite con nada. Se dispara SOLO cuando el turno cayó en el
+// avance plano por defecto (ver `usedDefaultTimeAdvance` en generateStream);
+// si el modelo ya declaró [ESCENA:] o un [TIEMPO:] válido, no hace falta.
+export async function updateWorldTimeAsync(
+  conversationId: string,
+  provider: ReturnType<ProviderRepository['findById']>,
+  modelId: string,
+  calendar: StoryCalendar | null,
+): Promise<void> {
+  if (!provider) return;
+  try {
+    const conv = convRepo.findById(conversationId);
+    if (!conv) return;
+    const state = normalizeWorldState((conv.metadata as { worldState?: WorldState } | null)?.worldState);
+    if (!state.established) return; // el reloj no corre hasta el anclaje inicial
+
+    const recent = msgRepo.findByConversation(conversationId)
+      .filter((m) => m.role !== 'system')
+      .slice(-4); // el último intercambio (jugador + respuesta) basta para juzgar la duración
+    if (recent.length < 2) return;
+
+    const transcript = labelSpeakers(recent as Message[]);
+    const settings = settingsService.getAll();
+    const llm = createProvider(provider);
+
+    const response = await llm.generate({
+      messages: [
+        {
+          role: 'system',
+          content: 'Eres un cronómetro narrativo: lees un fragmento de una historia de rol y determinas SOLO cuánto tiempo de la ficción ha transcurrido en él. Respondes solo con el dato pedido, sin explicaciones.',
+        },
+        {
+          role: 'user',
+          content:
+            `Lee este fragmento reciente y determina cuánto tiempo ha pasado DENTRO DE LA HISTORIA (no cuánto se tarda en leerlo).\n\n` +
+            `---\n${transcript}\n---\n\n` +
+            `Responde EXACTAMENTE en uno de estos formatos, sin nada más:\n` +
+            `+Xm  — minutos, para un intercambio breve de diálogo o una acción corta\n` +
+            `+Xh  — horas, para una escena más larga (una comida, un trayecto, una tarea)\n` +
+            `NOMBRE  — una de: amanecer, mediodia, tarde, atardecer, anochecer, noche, medianoche — si el fragmento narra llegar a ese momento del día (irse a dormir y despertar, un salto explícito "al día siguiente")\n\n` +
+            `Ejemplos válidos: "+5m", "+3h", "amanecer".\n` +
+            `Responde con un ÚNICO valor, nada más.`,
+        },
+      ],
+      model: modelId,
+      temperature: 0.1,
+      maxTokens: 15,
+      stream: false,
+      disableFallbacks: settings.disableFallbacks,
+    });
+
+    recordBgUsage(conversationId, 'reloj-mundo', response.tokens);
+    const raw = response.content.trim().split('\n')[0].replace(/[`*[\]]/g, '').trim();
+    const advance = parseTimeAdvance(raw, currentMinuteOfDay(state, calendar));
+    if (advance == null) {
+      console.warn(`[world-clock] Respuesta no interpretable: "${raw}" — se mantiene el avance provisional`);
+      return;
+    }
+
+    // Merge sobre metadata FRESCO: sustituye el avance provisional
+    // (DEFAULT_ADVANCE_MINUTES, aplicado de forma síncrona para poder mostrar
+    // la cabecera de ese turno) por el real que determinó esta llamada.
+    const fresh = convRepo.findById(conversationId);
+    if (!fresh) return;
+    const freshState = normalizeWorldState((fresh.metadata as { worldState?: WorldState } | null)?.worldState);
+    const correctedMinutes = Math.max(0, freshState.minutesElapsed - DEFAULT_ADVANCE_MINUTES + advance);
+    convRepo.update(conversationId, {
+      metadata: {
+        ...fresh.metadata,
+        worldState: { ...freshState, minutesElapsed: correctedMinutes, updatedAt: new Date().toISOString() } satisfies WorldState,
+      },
+    });
+    console.log(`[world-clock] Avance real: +${advance}min ("${raw}") — el provisional era +${DEFAULT_ADVANCE_MINUTES}min`);
+  } catch (err) {
+    console.error('[world-clock] Error determinando el paso del tiempo:', err);
   }
 }
 

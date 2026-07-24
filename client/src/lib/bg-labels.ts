@@ -8,6 +8,7 @@ export const BG_LABEL_NAMES: Record<string, string> = {
   'resumen-arco':      'Resumen de arco',
   'resumen-personaje': 'Resumen personal',
   'anclaje-mundo':     'Anclaje del mundo',
+  'reloj-mundo':       'Reloj del mundo',
   'director-escena':   'Director de escena',
   'hilo-fatal':        'Hilo fatal',
   'indice-contexto':   'Índice de contexto',
