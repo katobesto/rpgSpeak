@@ -1580,50 +1580,63 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     footerCount++;
   }
 
-  // 9d-bis. Hilos narrativos abiertos — cerca de la generación, a propósito.
-  // La "trama pendiente" (#2) va al principio del footer porque es guion escrito
-  // de antemano y cambia poco; estos hilos son lo que la partida ha planteado de
-  // verdad y es lo que más riesgo corre de diluirse, así que se pone donde el
-  // modelo más pondera.
-  const threadsBlock = buildThreadsBlock(openThreads, currentMessageIndex);
-  if (needsSplit && threadsBlock) {
-    history.push({ role: 'system', content: threadsBlock });
-    footerCount++;
-  }
+  // 9d-bis. Dossier de escena — UN solo bloque, pegado a la generación a
+  // propósito. Antes eran tres mensajes de sistema separados (hilos, ficha,
+  // estado interno); fusionarlos en un único bloque narrativo denso reduce la
+  // fragmentación justo en la zona de máxima atención del modelo — es la
+  // diferencia entre leer tres avisos sueltos y recibir un briefing coherente
+  // de "esto es lo que está pasando" justo antes de escribir. Cada pieza
+  // conserva su propio contenido e instrucciones; solo se degrada su
+  // encabezado de nivel 1 (##) a nivel 2 (###) para que cuelguen del mismo
+  // bloque en vez de competir como secciones independientes.
+  const demoteHeading = (block: string) => block.replace(/^## /, '### ');
 
-  // 9d-bis-2. Ficha del jugador — la base real contra la que el modelo debe
-  // contrastar cualquier poder o recurso que el jugador declare tener. El HP en
-  // vivo, si ya hubo combate, viene de partyState (id fijo 'player') — nunca de
-  // la propia ficha, para no crear dos fuentes de verdad del mismo dato.
-  if (needsSplit && playerSheet) {
+  const threadsBlock = buildThreadsBlock(openThreads, currentMessageIndex);
+
+  let sheetBlock: string | null = null;
+  if (playerSheet) {
     const livePlayerHp = partyState?.members.find((m) => m.id === 'player');
-    const sheetBlock = buildPlayerSheetBlock(
+    sheetBlock = buildPlayerSheetBlock(
       playerSheet,
       playerDisplayName,
       livePlayerHp ? { hp: Math.max(0, livePlayerHp.hp), maxHp: livePlayerHp.maxHp } : undefined,
     );
-    if (sheetBlock) {
-      history.push({ role: 'system', content: sheetBlock });
-      footerCount++;
-    }
   }
 
-  // 9d-ter. Dossier de escena — el estado interno que instancia la profundidad
-  // que las directivas piden. Pegado a la generación porque es EL dato desde el
-  // que debe salir la respuesta; en modo personaje se restringe al estado del
-  // personaje activo (frontera de conocimiento).
-  if (needsSplit && sceneState) {
-    const dossier = buildSceneDossierBlock(
+  let dossier: string | null = null;
+  if (sceneState) {
+    dossier = buildSceneDossierBlock(
       sceneState,
       narratorMode,
       !narratorMode ? (character?.id ?? null) : null,
       charNameMap,
       narratorMode || groupCharacters.length === 0,
     );
-    if (dossier) {
-      history.push({ role: 'system', content: dossier });
-      footerCount++;
+  }
+
+  // Quién está presente en la escena AHORA — solo en modo narrador: es
+  // información nueva (el reparto que el director de escena viene siguiendo
+  // de verdad), a diferencia del modo personaje, donde el elenco visible ya
+  // vive en el prefijo estático ("Otros personajes presentes en la escena").
+  let presentLine: string | null = null;
+  if (narratorMode && sceneState) {
+    const presentNames = [
+      ...Object.keys(sceneState.characters).map((id) => charNameMap.get(id)).filter((n): n is string => Boolean(n)),
+      ...sceneState.npcs.map((n) => n.nombre),
+    ];
+    if (presentNames.length > 0) {
+      presentLine = `Presentes en la escena ahora mismo: ${presentNames.join(', ')}.`;
     }
+  }
+
+  const dossierParts = [threadsBlock, sheetBlock, dossier].filter((b): b is string => b !== null).map(demoteHeading);
+  if (needsSplit && (presentLine || dossierParts.length > 0)) {
+    const combined =
+      `## DOSSIER DE ESCENA — lo que está pasando ahora mismo\n` +
+      (presentLine ? `${presentLine}\n\n` : '') +
+      dossierParts.join('\n\n');
+    history.push({ role: 'system', content: combined });
+    footerCount++;
   }
 
   // 9d-quater. Variedad — no repitas lo último que ya dijiste. Cálculo puro
