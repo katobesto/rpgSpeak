@@ -202,6 +202,19 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
       '<p class="stage-direction">$1</p>',
     );
 
+    // Step 4b — separar un gesto que ABRE el mismo párrafo que el nombre del
+    // hablante ("*Nami sonríe con suavidad.* **Nami:** Una estrategia...").
+    // Sin salto de línea entre ambos, ni la regla anterior (exige que el <p>
+    // sea SOLO cursiva) ni la de abajo (exige que el <p> empiece por el
+    // nombre) lo detectan, y el párrafo cae sin ningún estilo — plano y sin
+    // distinguirse del resto. Se separa en dos párrafos: el gesto recibe el
+    // mismo encuadre que el resto de la narración, y el nombre+diálogo queda
+    // en su propia línea para que la barra de foto/avatar (Step 5) sí lo capte.
+    clean = clean.replace(
+      /<p>\s*<em>([^<]+)<\/em>\s*(<strong>[^<:]+?(?::<\/strong>|<\/strong>:)[\s\S]*?)<\/p>/gi,
+      '<p class="stage-direction"><em>$1</em></p><p>$2</p>',
+    );
+
     // Step 5 — inject trusted speaker-avatar markup.
     // Handles both LLM variants:
     //   **Name:**  → marked → <strong>Name:</strong>   (colon inside bold — normal)

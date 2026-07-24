@@ -22,6 +22,7 @@ import { EventStatusRepository } from '../../modules/stories/event-status.reposi
 import { ThreadRepository } from '../../modules/threads/thread.repository.js';
 import { stripOocNotes } from './ooc.js';
 import { DICE_ROLL_RE, resolveRollSheet, resolveRollModifier, rollDice, type DiceRollResult } from './dice.js';
+import { fixDanglingActionPunctuation } from './narrative-format.js';
 import { recordBgUsage, readBgUsage, diffBgUsage } from './bg-usage.js';
 
 const providerRepo   = new ProviderRepository();
@@ -1419,6 +1420,15 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     // retroceden, días de la semana que dejan de cuadrar con la fecha).
     if (!aborted && cleanContent.trim()) {
       cleanContent = normalizeWorldHeader(cleanContent, headerForDisplay);
+    }
+
+    // Red de seguridad tipográfica: un gesto entre asteriscos pegado sin punto
+    // al texto que sigue ("*la mira* El espíritu...") se lee como una frase
+    // cortada. El prompt ya lo pide con puntuación, pero los modelos rápidos
+    // no lo cumplen de forma fiable — esto corrige el patrón siempre, sin
+    // depender de que el modelo obedezca.
+    if (!aborted && cleanContent) {
+      cleanContent = fixDanglingActionPunctuation(cleanContent);
     }
 
     // Observabilidad del guardián de voz: avisa en cuanto una respuesta narra en

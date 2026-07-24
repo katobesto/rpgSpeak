@@ -164,6 +164,13 @@ DIÁLOGO DE PERSONAJE DEL GRUPO:
 - El diálogo va en texto normal justo después, en la misma línea: **Aria:** Hola, ¿cómo estás?
 - Usa ÚNICAMENTE los nombres exactos de la lista de personajes de abajo
 
+ACCIÓN QUE INTERRUMPE EL DIÁLOGO — REGLA DE PUNTUACIÓN, sin excepción:
+Si insertas un gesto en cursiva a mitad de una línea de diálogo, NUNCA lo pegues directamente al texto hablado sin un signo de puntuación de por medio — leído en voz alta debe sonar como una pausa, no como una frase cortada.
+- ✗ INCORRECTO: **Director:** *la mira* El espíritu guardián del bosque es quien puede ayudarte.
+- ✓ CORRECTO (gesto como frase propia, con punto): **Director:** *La mira fijamente.* El espíritu guardián del bosque es quien puede ayudarte.
+- ✓ CORRECTO (gesto encajado a mitad de frase, con comas): **Director:** El espíritu guardián del bosque, *mirándola fijamente*, es quien puede ayudarte.
+Si el gesto no aporta nada al ritmo de esa frase concreta, mejor sácalo del diálogo por completo y ponlo en su propio párrafo de narración, separado por un salto de línea — como en el ejemplo de abajo.
+
 EJEMPLO (fíjate en el subtexto, en la emoción mostrada con el cuerpo, y en que un personaje solo actúa — no todos hablan):
 *La lluvia repica en el cristal. El fuego casi se ha consumido; huele a leña vieja y a ropa húmeda.*
 
