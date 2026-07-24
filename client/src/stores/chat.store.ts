@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { Conversation, Message, MessageMetadata, DeathLoopState } from '@rpgspeak/shared';
+import type { Conversation, Message, MessageMetadata, DeathLoopState, DiceRollResult } from '@rpgspeak/shared';
 import { streamGenerate, type AffinityUpdate } from '../api/client.ts';
 import { messagesApi } from '../api/conversations.ts';
 
@@ -78,6 +78,22 @@ function withoutEnrichStep(metadata: MessageMetadata): MessageMetadata {
   const rest = { ...metadata };
   delete rest.enrichStep;
   return rest;
+}
+
+/** Nota OOC con el desenlace de una tirada [TIRADA:...] — el mismo canal que ya
+ *  usa el jugador para dirigir la escena sin que los personajes "oigan" nada
+ *  (ver ooc.ts en el servidor). Aquí lo reutilizamos en sentido inverso: el
+ *  servidor informa a la IA de un hecho consumado (el número), no del jugador. */
+function formatDiceOutcome(diceRoll: DiceRollResult): string {
+  const resultLabel =
+    diceRoll.critical === 'success' ? '¡ÉXITO CRÍTICO!' :
+    diceRoll.critical === 'failure' ? '¡FALLO CRÍTICO!' :
+    diceRoll.success ? 'ÉXITO' : 'FALLO';
+  return (
+    `(Resultado de la tirada — ${diceRoll.who}, ${diceRoll.attribute} (CD ${diceRoll.cd}): ` +
+    `${diceRoll.natural} natural + ${diceRoll.modifier} = ${diceRoll.total} → ${resultLabel}. ` +
+    `Continúa narrando el desenlace a partir de este resultado, sin repetir la tirada.)`
+  );
 }
 
 function makeErrorMessage(convId: string, text: string): Message {
@@ -271,7 +287,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             };
           });
         },
-        onDone: ({ messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent, deathLoop }) => {
+        onDone: ({ messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent, deathLoop, diceRoll }) => {
           resolvedMessageId = messageId;
           set((s) => ({
             isStreaming: false,
@@ -305,6 +321,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                       ...(fastLlmDebug ? { fastLlmDebug } : {}),
                       ...(affinityUpdates?.length ? { affinityUpdates } : {}),
                       ...(thinkContent ? { thinkContent } : {}),
+                      ...(diceRoll ? { diceRoll } : {}),
                     },
                   }
                 : m
@@ -313,6 +330,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (affinityUpdates?.length) get().updateCharacterAffinities(affinityUpdates);
           if (locationUpdate !== undefined) get().updateCurrentLocation(locationUpdate);
           if (deathLoop !== undefined) get().setDeathLoop(deathLoop);
+          // La tirada pausa la narración a propósito (ver DICE_ROLL_INSTRUCTION);
+          // el servidor ya tiene el número, así que disparamos el desenlace solo
+          // — el jugador no necesita escribir nada para que la escena continúe.
+          if (diceRoll) {
+            void get().sendMessage({
+              message: formatDiceOutcome(diceRoll),
+              characterId: characterId ?? undefined,
+              forceNarratorMode: Boolean(narrator),
+            });
+          }
         },
         // Ráfaga de llamadas al LLM en segundo plano (director de escena,
         // resúmenes...) tras un mensaje que YA está terminado y visible. Se
@@ -479,7 +506,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             };
           });
         },
-        onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId: doneCharId, content, locationUpdate, thinkContent, deathLoop }) => {
+        onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId: doneCharId, content, locationUpdate, thinkContent, deathLoop, diceRoll }) => {
           resolvedMessageId = messageId;
           set((s) => ({
             isStreaming: false,
@@ -503,6 +530,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
                       ...(fastLlmDebug ? { fastLlmDebug } : {}),
                       ...(affinityUpdates?.length ? { affinityUpdates } : {}),
                       ...(thinkContent ? { thinkContent } : {}),
+                      ...(diceRoll ? { diceRoll } : {}),
                     },
                   }
                 : m
@@ -511,6 +539,13 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (affinityUpdates?.length) get().updateCharacterAffinities(affinityUpdates);
           if (locationUpdate !== undefined) get().updateCurrentLocation(locationUpdate);
           if (deathLoop !== undefined) get().setDeathLoop(deathLoop);
+          if (diceRoll) {
+            void get().sendMessage({
+              message: formatDiceOutcome(diceRoll),
+              characterId: doneCharId ?? undefined,
+              forceNarratorMode: Boolean(narrator),
+            });
+          }
         },
         onEnrichStep: (step) => {
           set((s) => ({

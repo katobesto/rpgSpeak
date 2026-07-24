@@ -267,8 +267,8 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       signal: abortController.signal,
       onToken: (token) => send({ type: 'token', token }),
       onThinkToken: (token) => send({ type: 'think', token }),
-      onDone: ({ messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent, deathLoop }) => {
-        send({ type: 'done', messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent, deathLoop });
+      onDone: ({ messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent, deathLoop, diceRoll }) => {
+        send({ type: 'done', messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent, deathLoop, diceRoll });
         // OJO: la conexión NO se cierra aquí. El mensaje ya es visible e
         // interactivo para el usuario (el store del cliente marca isStreaming =
         // false al recibir este evento), pero la conexión sigue abierta para

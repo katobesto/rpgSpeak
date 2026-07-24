@@ -70,6 +70,23 @@ export interface RpgStats {
  */
 export type PlayerSheet = RpgStats;
 
+/**
+ * Resultado de una tirada [TIRADA:...] resuelta por el servidor. Persistido en
+ * `message.metadata.diceRoll` para que el cliente pinte el dado, y devuelto en
+ * el evento `done` para que el store dispare la narración del desenlace.
+ */
+export interface DiceRollResult {
+  who: string;
+  attribute: string;
+  cd: number;
+  description: string;
+  natural: number;
+  modifier: number;
+  total: number;
+  success: boolean;
+  critical: 'success' | 'failure' | null;
+}
+
 export interface Character {
   id: string;
   userId: string | null;
@@ -370,6 +387,8 @@ export interface MessageMetadata {
   /** Paso EN CURSO del enriquecimiento de fondo (director de escena, resúmenes…)
    *  tras generar esta respuesta. Ausente = sin ninguno pendiente / ya terminado. */
   enrichStep?: { index: number; total: number; label: string };
+  /** Tirada [TIRADA:...] resuelta por el servidor para ESTE mensaje, si pidió una. */
+  diceRoll?: DiceRollResult;
   [key: string]: unknown;
 }
 

@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
-import { Copy, Edit2, RefreshCw, Trash2, Check, Bug, X, Pin, Volume2, VolumeX, Loader, Wand2, Image as ImageIcon, Zap, ChevronDown, RotateCcw, Rewind, Play, Square, Pause, Download, Share2, Upload, Brain, AlertTriangle } from 'lucide-react';
+import { Copy, Edit2, RefreshCw, Trash2, Check, Bug, X, Pin, Volume2, VolumeX, Loader, Wand2, Image as ImageIcon, Zap, ChevronDown, RotateCcw, Rewind, Play, Square, Pause, Download, Share2, Upload, Brain, AlertTriangle, Dices } from 'lucide-react';
 import type { Message, ChatMessage } from '@rpgspeak/shared';
 import { matchCharacterName } from '@rpgspeak/shared';
 import { Avatar } from '../ui/Avatar.tsx';
@@ -472,6 +472,11 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
           )}
         </div>
 
+        {/* Tirada de dados resuelta por el servidor */}
+        {!isUser && !isStreaming && message.metadata?.diceRoll ? (
+          <DiceRollBadge diceRoll={message.metadata.diceRoll as import('@rpgspeak/shared').DiceRollResult} />
+        ) : null}
+
         {/* Affinity change indicator */}
         {!isUser && !isStreaming && (message.metadata?.affinityUpdates as import('@rpgspeak/shared').AffinityUpdate[] | undefined)?.length ? (
           <AffinityChangeBar
@@ -726,6 +731,31 @@ function AffinityChangeBar({
           </span>
         );
       })}
+    </div>
+  );
+}
+
+function DiceRollBadge({ diceRoll }: { diceRoll: import('@rpgspeak/shared').DiceRollResult }) {
+  const isCritSuccess = diceRoll.critical === 'success';
+  const isCritFailure = diceRoll.critical === 'failure';
+  const colors = isCritFailure
+    ? 'bg-red-500/10 border-red-500/25 text-red-400'
+    : diceRoll.success
+    ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400'
+    : 'bg-red-500/10 border-red-500/20 text-red-300';
+  const label = isCritSuccess ? '¡Éxito crítico!' : isCritFailure ? '¡Fallo crítico!' : diceRoll.success ? 'Éxito' : 'Fallo';
+  const modifierLabel = diceRoll.modifier === 0 ? '' : diceRoll.modifier > 0 ? `+${diceRoll.modifier}` : `${diceRoll.modifier}`;
+
+  return (
+    <div
+      className={`inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-full border font-mono mt-1.5 ${colors}`}
+      title={diceRoll.description}
+    >
+      <Dices className="w-3 h-3 shrink-0" />
+      <span className="opacity-80">{diceRoll.who} · {diceRoll.attribute}</span>
+      <span className="font-semibold">{diceRoll.natural}{modifierLabel}={diceRoll.total}</span>
+      <span className="opacity-50">vs CD {diceRoll.cd}</span>
+      <span className="font-semibold">{label}</span>
     </div>
   );
 }

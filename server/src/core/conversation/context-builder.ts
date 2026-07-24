@@ -1,5 +1,6 @@
 import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem, PartyState, DeathLoopState, NarrativeThread, SceneDirectorState, CharacterSceneState, RpgStats } from '@rpgspeak/shared';
 import { MemoryRepository } from '../memory/memory.repository.js';
+import { DICE_ROLL_INSTRUCTION } from './dice.js';
 import { ContextRepository, type ContextItemWithEmbedding } from '../../modules/context/context.repository.js';
 import { ProviderRepository } from '../../modules/providers/provider.repository.js';
 import { createProvider } from '../llm/provider.factory.js';
@@ -955,6 +956,13 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // personajes y modos → dentro del prefijo cacheable).
   if (deathModeActive) {
     systemParts.push(DEATH_MODE_BLOCK);
+  }
+
+  // Tiradas de dados — solo en modo aventura. Estático (no depende del turno),
+  // compartido entre narrador y personaje: quien narre una acción arriesgada
+  // puede pedir una tirada real en vez de decidir el desenlace por su cuenta.
+  if (adventureMode) {
+    systemParts.push(DICE_ROLL_INSTRUCTION);
   }
 
   if (narratorMode) {

@@ -89,7 +89,7 @@ export interface EnrichStep {
 export interface StreamCallbacks {
   onToken: (token: string) => void;
   onThinkToken?: (token: string) => void;
-  onDone: (result: { messageId: string; userMessageId: string; tokens: number; tokenBreakdown?: TokenBreakdown; promptMessages?: unknown[]; affinityUpdates?: AffinityUpdate[]; fastLlmDebug?: string; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null; thinkContent?: string; deathLoop?: import('@rpgspeak/shared').DeathLoopState | null }) => void;
+  onDone: (result: { messageId: string; userMessageId: string; tokens: number; tokenBreakdown?: TokenBreakdown; promptMessages?: unknown[]; affinityUpdates?: AffinityUpdate[]; fastLlmDebug?: string; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null; thinkContent?: string; deathLoop?: import('@rpgspeak/shared').DeathLoopState | null; diceRoll?: import('@rpgspeak/shared').DiceRollResult }) => void;
   /** El mensaje ya es visible e interactivo (onDone ya se llamó); esto informa
    *  de las llamadas de fondo al LLM que siguen en curso (director de escena,
    *  resúmenes...). Solo llega cuando de verdad hay un paso pendiente. */
@@ -156,6 +156,7 @@ export async function streamGenerate(
               content?: string;
               locationUpdate?: string | null;
               deathLoop?: import('@rpgspeak/shared').DeathLoopState | null;
+              diceRoll?: import('@rpgspeak/shared').DiceRollResult;
               thinkContent?: string;
               index?: number;
               total?: number;
@@ -168,7 +169,7 @@ export async function streamGenerate(
             } else if (event.type === 'think' && event.token) {
               callbacks.onThinkToken?.(event.token);
             } else if (event.type === 'done') {
-              callbacks.onDone({ messageId: event.messageId!, userMessageId: event.userMessageId!, tokens: event.tokens!, tokenBreakdown: event.tokenBreakdown, promptMessages: event.promptMessages, affinityUpdates: event.affinityUpdates, fastLlmDebug: event.fastLlmDebug, narrator: event.narrator, characterId: event.characterId, content: event.content, locationUpdate: event.locationUpdate, thinkContent: event.thinkContent, deathLoop: event.deathLoop });
+              callbacks.onDone({ messageId: event.messageId!, userMessageId: event.userMessageId!, tokens: event.tokens!, tokenBreakdown: event.tokenBreakdown, promptMessages: event.promptMessages, affinityUpdates: event.affinityUpdates, fastLlmDebug: event.fastLlmDebug, narrator: event.narrator, characterId: event.characterId, content: event.content, locationUpdate: event.locationUpdate, thinkContent: event.thinkContent, deathLoop: event.deathLoop, diceRoll: event.diceRoll });
             } else if (event.type === 'enrich_step') {
               callbacks.onEnrichStep?.({ index: event.index!, total: event.total!, label: event.label ?? '' });
             } else if (event.type === 'enrich_done') {

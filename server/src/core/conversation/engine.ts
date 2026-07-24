@@ -21,6 +21,7 @@ import { SummariesRepository } from '../../modules/summaries/summaries.repositor
 import { EventStatusRepository } from '../../modules/stories/event-status.repository.js';
 import { ThreadRepository } from '../../modules/threads/thread.repository.js';
 import { stripOocNotes } from './ooc.js';
+import { DICE_ROLL_RE, resolveRollSheet, resolveRollModifier, rollDice, type DiceRollResult } from './dice.js';
 
 const providerRepo   = new ProviderRepository();
 const charRepo       = new CharacterRepository();
@@ -67,7 +68,7 @@ export interface StreamOptions extends GenerateOptions {
   onToken: (token: string) => void;
   /** Called for each token inside a &lt;think&gt;...&lt;/think&gt; block (reasoning models). */
   onThinkToken?: (token: string) => void;
-  onDone: (response: { messageId: string; userMessageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null; thinkContent?: string; deathLoop?: DeathLoopState | null }) => void;
+  onDone: (response: { messageId: string; userMessageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null; thinkContent?: string; deathLoop?: DeathLoopState | null; diceRoll?: DiceRollResult }) => void;
   onError: (error: Error) => void;
   /** Se llama justo ANTES de ejecutar cada paso del enriquecimiento de fondo
    *  (las ráfagas de llamadas al LLM que mantienen el estado del mundo, el
@@ -761,6 +762,10 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     // trigger se inyectan como "trama pendiente" en el footer del contexto)
     const occurredEventIds = eventStatusRepo.findOccurredIds(conversationId);
 
+    // Ficha del jugador — se reutiliza más abajo para resolver el modificador
+    // real de las tiradas de dados ([TIRADA:...]).
+    const playerSheet = (conversation.metadata as { playerSheet?: RpgStats } | null)?.playerSheet ?? null;
+
     // ── Estado del mundo (cabecera ambiental) ─────────────────────────────────
     // El calendario lo aporta la PRIMERA historia vinculada que defina uno; sin
     // ninguno se usa el gregoriano. El reloj es autoridad del servidor: aquí se
@@ -827,7 +832,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       narrationStylePrompt,
       currentLocation:     conversation.currentLocation,
       partyState:          (conversation.metadata as { partyState?: PartyState } | null)?.partyState,
-      playerSheet:         (conversation.metadata as { playerSheet?: RpgStats } | null)?.playerSheet,
+      playerSheet,
       playerDisplayName:   opts.userDisplayName,
       occurredEventIds,
       deathModeActive,
@@ -1406,6 +1411,26 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       }
     }
 
+    // ── Tirada de dados: [TIRADA:Quién|Atributo|CD|descripción] ────────────────
+    // La ÚLTIMA ocurrencia manda (mismo criterio que UBICACION/EVENTO_OCURRIDO):
+    // si el modelo la repite por error de formato, solo la más reciente cuenta.
+    // El servidor tira el d20 — el modelo nunca decide el resultado.
+    let diceRoll: DiceRollResult | undefined;
+    if (!aborted && cleanContent) {
+      const diceMatches = [...cleanContent.matchAll(DICE_ROLL_RE)];
+      if (diceMatches.length > 0) {
+        const m = diceMatches[diceMatches.length - 1];
+        const [, whoRaw, attributeRaw, cdRaw, descriptionRaw] = m;
+        const cd = Math.min(20, Math.max(1, parseInt(cdRaw, 10) || 10));
+        const { sheet, resolvedWho } = resolveRollSheet(whoRaw, playerSheet, opts.userDisplayName, allCharsInConv);
+        const modifier = resolveRollModifier(sheet, attributeRaw.trim());
+        diceRoll = rollDice(resolvedWho, attributeRaw.trim(), cd, descriptionRaw.trim(), modifier);
+        console.log(`[dice] ${diceRoll.who} · ${diceRoll.attribute} (CD ${diceRoll.cd}): ${diceRoll.natural}+${diceRoll.modifier}=${diceRoll.total} → ${diceRoll.critical ?? (diceRoll.success ? 'éxito' : 'fallo')}`);
+      }
+      cleanContent = cleanContent.replace(DICE_ROLL_RE, '').trimEnd();
+    }
+    // ─────────────────────────────────────────────────────────────────────────
+
     // Always persist whatever content was generated (full or partial)
     msgRepo.update(assistantMsg.id, {
       content: cleanContent,
@@ -1421,13 +1446,14 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
         ...(aborted ? { aborted: true } : {}),
         ...(narratorMode ? { narrator: true } : {}),
         ...(thinkAccumulated ? { thinkContent: thinkAccumulated } : {}),
+        ...(diceRoll ? { diceRoll } : {}),
         promptMessages: trimmedMessages,
       },
     });
 
     if (!aborted) {
       convRepo.incrementCounts(conversationId, finalTokens);
-      onDone({ messageId: assistantMsg.id, userMessageId: userMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, locationUpdate, thinkContent: thinkAccumulated || undefined, deathLoop: deathLoopUpdate });
+      onDone({ messageId: assistantMsg.id, userMessageId: userMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, locationUpdate, thinkContent: thinkAccumulated || undefined, deathLoop: deathLoopUpdate, diceRoll });
 
       // ── Enriquecimiento de fondo, secuencial y con progreso visible ─────────
       //
