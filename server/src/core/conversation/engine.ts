@@ -1530,22 +1530,38 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
 
       const enrichSteps: Array<{ label: string; run: () => Promise<void> }> = [];
 
+      // Calculado una sola vez: lo usa tanto el director de escena como el
+      // chequeo de ubicación de abajo (misma cadencia — la ubicación, a
+      // diferencia del tiempo, casi nunca cambia entre turnos, así que
+      // preguntarla en CADA turno arriesgaría introducir deriva; atada a la
+      // cadencia ya establecida del director es la frecuencia correcta).
+      const sceneDirectorDue = isSceneDirectorDue(sceneState, currentMessageIndex + 1);
+      // Ubicación sin confirmar este turno (ni [UBICACION:] ni [ESCENA:...|lugar]).
+      const fixLocation = sceneDirectorDue && locationUpdate == null;
+
       if (!worldState.established) {
         enrichSteps.push({
           label: 'Anclando la escena en el tiempo y el lugar…',
           run: () => bootstrapWorldStateAsync(conversationId, provider, modelId, worldCalendar),
         });
-      } else if (usedDefaultTimeAdvance) {
-        // El modelo no emitió [TIEMPO:...] este turno (ver arriba): una llamada
-        // dedicada, de único cometido, determina el avance real — mismo patrón
-        // que el anclaje inicial, que tampoco funcionaba pidiéndoselo al turno
-        // narrativo principal.
+      } else if (usedDefaultTimeAdvance || fixLocation) {
+        // El modelo no emitió [TIEMPO:...] y/o [UBICACION:] de forma fiable
+        // este turno: una llamada dedicada, de único cometido, determina el
+        // dato real — mismo patrón que el anclaje inicial, que tampoco
+        // funcionaba pidiéndoselo al turno narrativo principal.
         enrichSteps.push({
-          label: 'Calculando cuánto tiempo ha pasado…',
-          run: () => updateWorldTimeAsync(conversationId, provider, modelId, worldCalendar),
+          label: usedDefaultTimeAdvance && fixLocation
+            ? 'Calculando cuánto tiempo ha pasado y dónde estáis…'
+            : usedDefaultTimeAdvance
+            ? 'Calculando cuánto tiempo ha pasado…'
+            : 'Comprobando dónde transcurre la escena…',
+          run: () => refineWorldStateAsync(conversationId, provider, modelId, worldCalendar, {
+            fixTime: usedDefaultTimeAdvance,
+            fixLocation,
+          }),
         });
       }
-      if (isSceneDirectorDue(sceneState, currentMessageIndex + 1)) {
+      if (sceneDirectorDue) {
         enrichSteps.push({
           label: useFastLlm
             ? 'Actualizando lo que piensa y siente cada personaje…'
@@ -2208,22 +2224,28 @@ export async function bootstrapWorldStateAsync(
   }
 }
 
-// ─── Reloj del mundo — avance por turno vía llamada dedicada ─────────────────
+// ─── Reloj y ubicación del mundo — refinado por turno vía llamada dedicada ───
 //
-// El modelo no emite [TIEMPO:...] de forma fiable turno a turno, ni haciéndolo
-// obligatorio en el prompt principal: compite con demasiadas otras
-// instrucciones en una escena ya de por sí cargada. Mismo diagnóstico —y misma
-// solución— que el anclaje inicial de arriba: una llamada aparte, con un único
-// cometido, no compite con nada. Se dispara SOLO cuando el turno cayó en el
-// avance plano por defecto (ver `usedDefaultTimeAdvance` en generateStream);
-// si el modelo ya declaró [ESCENA:] o un [TIEMPO:] válido, no hace falta.
-export async function updateWorldTimeAsync(
+// El modelo no emite [TIEMPO:...]/[UBICACIÓN:...] de forma fiable turno a
+// turno, ni haciéndolo obligatorio en el prompt principal: compite con
+// demasiadas otras instrucciones en una escena ya de por sí cargada. Mismo
+// diagnóstico —y misma solución— que el anclaje inicial de arriba: una
+// llamada aparte, con un único cometido, no compite con nada.
+//
+// Se dispara con dos gatillos independientes (`fixTime`/`fixLocation`, ver
+// generateStream): tiempo cuando el turno cayó en el avance plano por
+// defecto, ubicación con la misma cadencia que el director de escena (a
+// diferencia del tiempo, que SIEMPRE avanza algo, la ubicación casi nunca
+// cambia entre turnos — preguntarla en cada turno arriesgaría introducir
+// deriva en vez de corregirla).
+export async function refineWorldStateAsync(
   conversationId: string,
   provider: ReturnType<ProviderRepository['findById']>,
   modelId: string,
   calendar: StoryCalendar | null,
+  opts: { fixTime: boolean; fixLocation: boolean },
 ): Promise<void> {
-  if (!provider) return;
+  if (!provider || (!opts.fixTime && !opts.fixLocation)) return;
   try {
     const conv = convRepo.findById(conversationId);
     if (!conv) return;
@@ -2232,63 +2254,118 @@ export async function updateWorldTimeAsync(
 
     const recent = msgRepo.findByConversation(conversationId)
       .filter((m) => m.role !== 'system')
-      .slice(-4); // el último intercambio (jugador + respuesta) basta para juzgar la duración
+      .slice(-4) // el último intercambio (jugador + respuesta) basta para juzgar duración/lugar
+      // La cabecera de pipes puede llevar YA el lugar/hora obsoletos (es
+      // justo lo que esta llamada existe para corregir) — si se la dejamos
+      // ver, el modelo la copia en vez de leer la prosa real de la escena.
+      .map((m) => {
+        const lines = m.content.split('\n');
+        const firstIdx = lines.findIndex((l) => l.trim() !== '');
+        if (firstIdx !== -1 && HEADER_LINE_RE.test(lines[firstIdx])) {
+          return { ...m, content: lines.slice(firstIdx + 1).join('\n').trimStart() };
+        }
+        return m;
+      });
     if (recent.length < 2) return;
 
     const transcript = labelSpeakers(recent as Message[]);
     const settings = settingsService.getAll();
     const llm = createProvider(provider);
 
+    const asksBoth = opts.fixTime && opts.fixLocation;
+    const instructions: string[] = [];
+    if (opts.fixTime) {
+      instructions.push(
+        `TIEMPO: cuánto tiempo ha pasado DENTRO DE LA HISTORIA en este fragmento (no cuánto se tarda en leerlo). ` +
+        `Formato: "+Xm" (minutos, intercambio breve) / "+Xh" (horas, escena más larga) / uno de estos nombres si el ` +
+        `fragmento narra llegar a ese momento del día: amanecer, mediodia, tarde, atardecer, anochecer, noche, medianoche.`,
+      );
+    }
+    if (opts.fixLocation) {
+      instructions.push(
+        `LUGAR: dónde transcurre la escena AHORA MISMO, tal como se llama en la historia (p. ej. "Bosque Susurrante", ` +
+        `"dormitorio de Kira"). Si el grupo sigue en el mismo sitio de siempre, repite ese mismo lugar.`,
+      );
+    }
+    const responseFormat = asksBoth ? 'TIEMPO|LUGAR' : opts.fixTime ? 'TIEMPO' : 'LUGAR';
+    const example = asksBoth ? '+1h|Bosque Susurrante' : opts.fixTime ? '+1h' : 'Bosque Susurrante';
+
     const response = await llm.generate({
       messages: [
         {
           role: 'system',
-          content: 'Eres un cronómetro narrativo: lees un fragmento de una historia de rol y determinas SOLO cuánto tiempo de la ficción ha transcurrido en él. Respondes solo con el dato pedido, sin explicaciones.',
+          content: 'Eres un cronista técnico: lees un fragmento de una historia de rol y extraes SOLO los datos pedidos. Respondes exactamente en el formato indicado, sin explicaciones.',
         },
         {
           role: 'user',
           content:
-            `Lee este fragmento reciente y determina cuánto tiempo ha pasado DENTRO DE LA HISTORIA (no cuánto se tarda en leerlo).\n\n` +
-            `---\n${transcript}\n---\n\n` +
-            `Responde EXACTAMENTE en uno de estos formatos, sin nada más:\n` +
-            `+Xm  — minutos, para un intercambio breve de diálogo o una acción corta\n` +
-            `+Xh  — horas, para una escena más larga (una comida, un trayecto, una tarea)\n` +
-            `NOMBRE  — una de: amanecer, mediodia, tarde, atardecer, anochecer, noche, medianoche — si el fragmento narra llegar a ese momento del día (irse a dormir y despertar, un salto explícito "al día siguiente")\n\n` +
-            `Ejemplos válidos: "+5m", "+3h", "amanecer".\n` +
-            `Responde con un ÚNICO valor, nada más.`,
+            `Lee este fragmento reciente.\n\n---\n${transcript}\n---\n\n` +
+            `Determina:\n${instructions.map((i, idx) => `${idx + 1}. ${i}`).join('\n')}\n\n` +
+            `Responde EXACTAMENTE en este formato, una sola línea, sin nada más (sin comillas):\n${responseFormat}\n\n` +
+            `Ejemplo de respuesta válida: ${example}`,
         },
       ],
       model: modelId,
       temperature: 0.1,
-      maxTokens: 15,
+      maxTokens: 30,
       stream: false,
       disableFallbacks: settings.disableFallbacks,
     });
 
     recordBgUsage(conversationId, 'reloj-mundo', response.tokens);
-    const raw = response.content.trim().split('\n')[0].replace(/[`*[\]]/g, '').trim();
-    const advance = parseTimeAdvance(raw, currentMinuteOfDay(state, calendar));
-    if (advance == null) {
-      console.warn(`[world-clock] Respuesta no interpretable: "${raw}" — se mantiene el avance provisional`);
-      return;
+    // Defensa extra: el modelo a veces envuelve la respuesta en comillas
+    // imitando el ejemplo, aunque se le pida explícitamente que no lo haga.
+    const raw = response.content.trim().split('\n')[0].replace(/[`*[\]"'“”‘’]/g, '').trim();
+
+    let timeRaw: string | undefined;
+    let locationRaw: string | undefined;
+    if (asksBoth) {
+      const sep = raw.indexOf('|');
+      if (sep === -1) {
+        console.warn(`[world-clock] Respuesta no interpretable (esperaba TIEMPO|LUGAR): "${raw}"`);
+      } else {
+        timeRaw = raw.slice(0, sep).trim();
+        locationRaw = raw.slice(sep + 1).trim();
+      }
+    } else if (opts.fixTime) {
+      timeRaw = raw;
+    } else {
+      locationRaw = raw;
     }
 
     // Merge sobre metadata FRESCO: sustituye el avance provisional
     // (DEFAULT_ADVANCE_MINUTES, aplicado de forma síncrona para poder mostrar
     // la cabecera de ese turno) por el real que determinó esta llamada.
-    const fresh = convRepo.findById(conversationId);
-    if (!fresh) return;
-    const freshState = normalizeWorldState((fresh.metadata as { worldState?: WorldState } | null)?.worldState);
-    const correctedMinutes = Math.max(0, freshState.minutesElapsed - DEFAULT_ADVANCE_MINUTES + advance);
-    convRepo.update(conversationId, {
-      metadata: {
-        ...fresh.metadata,
-        worldState: { ...freshState, minutesElapsed: correctedMinutes, updatedAt: new Date().toISOString() } satisfies WorldState,
-      },
-    });
-    console.log(`[world-clock] Avance real: +${advance}min ("${raw}") — el provisional era +${DEFAULT_ADVANCE_MINUTES}min`);
+    if (timeRaw) {
+      const advance = parseTimeAdvance(timeRaw, currentMinuteOfDay(state, calendar));
+      if (advance == null) {
+        console.warn(`[world-clock] Tiempo no interpretable: "${timeRaw}" — se mantiene el avance provisional`);
+      } else {
+        const fresh = convRepo.findById(conversationId);
+        if (fresh) {
+          const freshState = normalizeWorldState((fresh.metadata as { worldState?: WorldState } | null)?.worldState);
+          const correctedMinutes = Math.max(0, freshState.minutesElapsed - DEFAULT_ADVANCE_MINUTES + advance);
+          convRepo.update(conversationId, {
+            metadata: {
+              ...fresh.metadata,
+              worldState: { ...freshState, minutesElapsed: correctedMinutes, updatedAt: new Date().toISOString() } satisfies WorldState,
+            },
+          });
+          console.log(`[world-clock] Avance real: +${advance}min ("${timeRaw}") — el provisional era +${DEFAULT_ADVANCE_MINUTES}min`);
+        }
+      }
+    }
+
+    if (locationRaw) {
+      const cleanLocation = locationRaw.replace(/^["'*]+|["'*]+$/g, '').trim();
+      const freshConv = convRepo.findById(conversationId);
+      if (cleanLocation && cleanLocation.toLowerCase() !== (freshConv?.currentLocation ?? '').trim().toLowerCase()) {
+        convRepo.updateLocation(conversationId, cleanLocation);
+        console.log(`[world-clock] Ubicación corregida: "${cleanLocation}"`);
+      }
+    }
   } catch (err) {
-    console.error('[world-clock] Error determinando el paso del tiempo:', err);
+    console.error('[world-clock] Error refinando tiempo/ubicación:', err);
   }
 }
 
