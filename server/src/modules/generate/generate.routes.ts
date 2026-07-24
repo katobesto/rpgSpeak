@@ -276,7 +276,7 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
         // se cierra al final del handler, cuando generateStream() resuelve.
       },
       onEnrichStep: ({ index, total, label }) => send({ type: 'enrich_step', index, total, label }),
-      onEnrichDone: () => send({ type: 'enrich_done' }),
+      onEnrichDone: (info) => send({ type: 'enrich_done', ...(info?.bgTokens ? { bgTokens: info.bgTokens } : {}) }),
       onError: (error) => {
         send({ type: 'error', error: error.message });
         reply.raw.end();

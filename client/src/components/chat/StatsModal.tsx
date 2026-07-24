@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { charactersApi } from '../../api/characters.ts';
 import { storiesApi } from '../../api/stories.ts';
+import { BG_LABEL_NAMES } from '../../lib/bg-labels.ts';
 import type { Conversation, Message } from '@rpgspeak/shared';
 
 interface StatsModalProps {
@@ -71,9 +72,20 @@ export function StatsModal({ open, onClose, conversation, messages = [] }: Stats
     ? Math.round((totalCached / totalPrompt) * 100)
     : 0;
 
+  // Tokens de llamadas en segundo plano (director de escena, resúmenes, índice
+  // de contexto...) — acumulados por el servidor en conversation.metadata.
+  // Sin esto, el coste mostrado no era el coste real.
+  const bg = conversation.metadata?.bgTokens as import('@rpgspeak/shared').BackgroundTokenUsage | undefined;
+  const bgTotal = bg ? bg.prompt + bg.completion : 0;
+  const realTotal = conversation.tokenCount + bgTotal;
+
   const rows: { label: string; value: string; accent?: boolean }[] = [
     { label: 'Mensajes', value: String(conversation.messageCount) },
-    { label: 'Tokens totales', value: conversation.tokenCount.toLocaleString('es-ES') },
+    { label: 'Tokens del chat', value: conversation.tokenCount.toLocaleString('es-ES') },
+    ...(bgTotal > 0 ? [
+      { label: 'Tokens de fondo', value: bgTotal.toLocaleString('es-ES') },
+      { label: 'Tokens totales (coste real)', value: realTotal.toLocaleString('es-ES'), accent: true },
+    ] : []),
     { label: 'Creada', value: formatDate(conversation.createdAt) },
     { label: 'Modo', value: conversation.mode },
     {
@@ -149,6 +161,33 @@ export function StatsModal({ open, onClose, conversation, messages = [] }: Stats
                 </div>
               </div>
             </>
+          )}
+
+          {/* Llamadas de fondo — coste real, nada oculto */}
+          {bg && bgTotal > 0 && (
+            <div className="border-t border-border pt-3 mt-1">
+              <p className="text-[10px] font-semibold text-violet-400 uppercase tracking-wider mb-2">
+                Llamadas en segundo plano · {bg.calls} llamada{bg.calls !== 1 ? 's' : ''}
+              </p>
+              <div className="space-y-2">
+                {Object.entries(bg.byLabel).map(([label, t]) => (
+                  <div key={label} className="flex justify-between gap-4">
+                    <span className="text-xs text-text-muted">{BG_LABEL_NAMES[label] ?? label}</span>
+                    <span className="text-xs text-text-primary tabular-nums">{fmt(t.prompt + t.completion)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between gap-4 border-t border-border/60 pt-2">
+                  <span className="text-xs text-text-muted font-medium">Total fondo</span>
+                  <span className="text-xs text-violet-400 tabular-nums font-medium">{fmt(bgTotal)}</span>
+                </div>
+                {bg.cached > 0 && (
+                  <div className="flex justify-between gap-4">
+                    <span className="text-xs text-text-muted">Caché de fondo</span>
+                    <span className="text-xs text-emerald-400 tabular-nums">{fmt(bg.cached)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
           )}
         </div>
 

@@ -162,9 +162,10 @@ export const conversationRoutes: FastifyPluginAsync = async (app) => {
     type RawConvRow = {
       id: string; title: string; token_count: number; message_count: number;
       updated_at: string; is_archived: number; user_id: string | null; display_name: string | null;
+      metadata: string;
     };
 
-    const COLS = sql`c.id, c.title, c.token_count, c.message_count, c.updated_at, c.is_archived, c.user_id, u.display_name`;
+    const COLS = sql`c.id, c.title, c.token_count, c.message_count, c.updated_at, c.is_archived, c.user_id, u.display_name, c.metadata`;
     const FROM  = sql`FROM conversations c LEFT JOIN users u ON c.user_id = u.id`;
 
     let rawRows: RawConvRow[];
@@ -176,7 +177,7 @@ export const conversationRoutes: FastifyPluginAsync = async (app) => {
       rawRows = db.all<RawConvRow>(sql`SELECT ${COLS} ${FROM} WHERE c.user_id = ${userId ?? ''} ORDER BY c.updated_at DESC`);
     }
 
-    // Enrich with cached token sum from messages metadata
+    // Enrich with cached token sum from messages metadata + background usage
     const convRows = rawRows.map((row) => {
       const messages = msgRepo.findByConversation(row.id);
       let cachedTokens = 0;
@@ -187,12 +188,26 @@ export const conversationRoutes: FastifyPluginAsync = async (app) => {
           cachedTokens += meta.cachedTokens;
         }
       }
+      // Tokens de llamadas en segundo plano (director de escena, resúmenes...):
+      // acumulados en conversation.metadata.bgTokens. Coste real, nada oculto.
+      let bgTokens = 0, bgCached = 0, bgCalls = 0;
+      try {
+        const meta = JSON.parse(row.metadata || '{}') as { bgTokens?: { prompt?: number; completion?: number; cached?: number; calls?: number } };
+        if (meta.bgTokens) {
+          bgTokens = (meta.bgTokens.prompt ?? 0) + (meta.bgTokens.completion ?? 0);
+          bgCached = meta.bgTokens.cached ?? 0;
+          bgCalls  = meta.bgTokens.calls  ?? 0;
+        }
+      } catch { /* metadata corrupto: se ignora */ }
       return {
         id:           row.id,
         title:        row.title,
         tokens:       row.token_count,
         messages:     row.message_count,
         cachedTokens,
+        bgTokens,
+        bgCached,
+        bgCalls,
         updatedAt:    row.updated_at,
         isArchived:   Boolean(row.is_archived),
         userName:     row.display_name ?? null,
@@ -205,6 +220,9 @@ export const conversationRoutes: FastifyPluginAsync = async (app) => {
       totalMessages:      convRows.reduce((s, r) => s + r.messages,     0),
       totalConversations: convRows.length,
       cachedTokens:       convRows.reduce((s, r) => s + r.cachedTokens, 0),
+      bgTokens:           convRows.reduce((s, r) => s + r.bgTokens,     0),
+      bgCached:           convRows.reduce((s, r) => s + r.bgCached,     0),
+      bgCalls:            convRows.reduce((s, r) => s + r.bgCalls,      0),
     };
 
     return reply.send({ success: true, data: { global, conversations: convRows } });

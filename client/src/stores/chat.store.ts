@@ -352,11 +352,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ),
           }));
         },
-        onEnrichDone: () => {
+        onEnrichDone: (info) => {
           set((s) => ({
             messages: s.messages.map((m) => {
-              if (m.id !== resolvedMessageId || !('enrichStep' in m.metadata)) return m;
-              return { ...m, metadata: withoutEnrichStep(m.metadata) };
+              if (m.id !== resolvedMessageId) return m;
+              const metadata = withoutEnrichStep(m.metadata);
+              // Coste real de las llamadas de fondo del turno — el servidor ya
+              // lo persistió en el mensaje; esto lo refleja sin recargar.
+              if (info?.bgTokens) metadata.bgTokens = info.bgTokens;
+              return { ...m, metadata };
             }),
           }));
         },
@@ -554,11 +558,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
             ),
           }));
         },
-        onEnrichDone: () => {
+        onEnrichDone: (info) => {
           set((s) => ({
             messages: s.messages.map((m) => {
-              if (m.id !== resolvedMessageId || !('enrichStep' in m.metadata)) return m;
-              return { ...m, metadata: withoutEnrichStep(m.metadata) };
+              if (m.id !== resolvedMessageId) return m;
+              const metadata = withoutEnrichStep(m.metadata);
+              // Coste real de las llamadas de fondo del turno — el servidor ya
+              // lo persistió en el mensaje; esto lo refleja sin recargar.
+              if (info?.bgTokens) metadata.bgTokens = info.bgTokens;
+              return { ...m, metadata };
             }),
           }));
         },

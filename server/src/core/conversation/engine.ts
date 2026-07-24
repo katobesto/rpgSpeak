@@ -22,6 +22,7 @@ import { EventStatusRepository } from '../../modules/stories/event-status.reposi
 import { ThreadRepository } from '../../modules/threads/thread.repository.js';
 import { stripOocNotes } from './ooc.js';
 import { DICE_ROLL_RE, resolveRollSheet, resolveRollModifier, rollDice, type DiceRollResult } from './dice.js';
+import { recordBgUsage, readBgUsage, diffBgUsage } from './bg-usage.js';
 
 const providerRepo   = new ProviderRepository();
 const charRepo       = new CharacterRepository();
@@ -78,8 +79,10 @@ export interface StreamOptions extends GenerateOptions {
    *  trabajo; una respuesta sin ninguno debido no dispara esta señal. */
   onEnrichStep?: (step: EnrichStepInfo) => void;
   /** Se llama una vez, al terminar la pasada de enriquecimiento (incluso si no
-   *  hubo ningún paso pendiente), para que la UI pueda ocultar el indicador. */
-  onEnrichDone?: () => void;
+   *  hubo ningún paso pendiente), para que la UI pueda ocultar el indicador.
+   *  `bgTokens` es el coste de fondo de ESTE turno (moderación, pre-análisis,
+   *  enriquecimiento) — solo presente cuando hubo alguna llamada. */
+  onEnrichDone?: (info?: { bgTokens?: import('@rpgspeak/shared').BackgroundTokenUsage }) => void;
 }
 
 async function resolveCharacterAndProvider(
@@ -319,6 +322,7 @@ async function fastLlmPreAnalysis(
   recentMemories: import('@rpgspeak/shared').MemoryEntry[],
   fastProviderId: string,
   fastModelId: string,
+  conversationId?: string,
 ): Promise<string | null> {
   try {
     const fastProvider = providerRepo.findById(fastProviderId);
@@ -403,6 +407,9 @@ async function fastLlmPreAnalysis(
       return null;
     }
 
+    if (conversationId) {
+      recordBgUsage(conversationId, 'pre-analisis', (result as import('@rpgspeak/shared').GenerateResponse).tokens);
+    }
     const response = (result as import('@rpgspeak/shared').GenerateResponse).content.trim();
     console.log(`[pre-llm] Response: ${response.slice(0, 150)}`);
 
@@ -556,6 +563,7 @@ async function checkNsfwContent(
   userMessage: string,
   fastProviderId: string | null,
   fastModelId: string | null,
+  conversationId?: string,
 ): Promise<boolean> {
   // ── Layer 1: regex ──────────────────────────────────────────────────────────
   const NSFW_REGEX = new RegExp(
@@ -620,6 +628,9 @@ async function checkNsfwContent(
       return false;
     }
 
+    if (conversationId) {
+      recordBgUsage(conversationId, 'moderacion', (result as import('@rpgspeak/shared').GenerateResponse).tokens);
+    }
     const answer = (result as import('@rpgspeak/shared').GenerateResponse).content.trim().toUpperCase();
     const isNsfw = answer.startsWith('NSFW');
     if (isNsfw) console.log('[nsfw-guard] LLM classifier blocked message');
@@ -645,6 +656,12 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
   try {
     const conversation = convRepo.findById(conversationId);
     if (!conversation) throw new NotFoundError('Conversation', conversationId);
+
+    // Instantánea del acumulado de tokens de fondo ANTES de cualquier llamada
+    // del turno (moderación, pre-análisis, enriquecimiento...). Al final del
+    // turno la diferencia es el coste de fondo de ESTE turno, que se adjunta
+    // al mensaje y viaja en el evento enrich_done.
+    const bgUsageBefore = readBgUsage(conversation.metadata);
 
     const narratorMode = opts.narratorMode ?? false;
 
@@ -718,6 +735,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
         userMessage,
         useFastLlm ? (settings.fastLlmProviderId ?? null) : null,
         useFastLlm ? (settings.fastLlmModelId ?? null)   : null,
+        conversationId,
       );
       if (isNsfw) {
         const blockedText = settings.nsfwBlockedMessage ||
@@ -895,6 +913,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
         recentMemories,
         settings.fastLlmProviderId!,
         settings.fastLlmModelId!,
+        conversationId,
       );
     }
 
@@ -1531,7 +1550,25 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
           console.error(`[enrich] Paso "${enrichSteps[i].label}" falló:`, err);
         }
       }
-      onEnrichDone?.();
+
+      // Coste de fondo del turno = diferencia entre el acumulado de la
+      // conversación al empezar y al terminar. Cubre TODAS las llamadas de
+      // fondo del turno (moderación y pre-análisis incluidas, que corren antes
+      // de generar). Se adjunta al mensaje para que el desglose sobreviva a la
+      // recarga, y viaja en enrich_done para pintarse al momento.
+      let turnBgTokens: import('@rpgspeak/shared').BackgroundTokenUsage | undefined;
+      const convAfterEnrich = convRepo.findById(conversationId);
+      if (convAfterEnrich) {
+        const delta = diffBgUsage(bgUsageBefore, readBgUsage(convAfterEnrich.metadata));
+        if (delta.calls > 0) {
+          turnBgTokens = delta;
+          const freshMsg = msgRepo.findById(assistantMsg.id);
+          if (freshMsg) {
+            msgRepo.update(assistantMsg.id, { metadata: { ...freshMsg.metadata, bgTokens: delta } });
+          }
+        }
+      }
+      onEnrichDone?.(turnBgTokens ? { bgTokens: turnBgTokens } : undefined);
     }
 
   } catch (err) {
@@ -1621,6 +1658,7 @@ async function analyzeExchangeAsync(
       return { affinityUpdates: [], rawResponse: '(timeout)', rawPrompt: analysisPrompt };
     }
 
+    recordBgUsage(conversationId, 'analisis-fast', (result as import('@rpgspeak/shared').GenerateResponse).tokens);
     const responseText = (result as import('@rpgspeak/shared').GenerateResponse).content;
     console.log(`[fast-llm] Response: ${responseText.slice(0, 200)}${responseText.length > 200 ? '…' : ''}`);
 
@@ -1876,6 +1914,7 @@ async function generateBlockSummaries(
       disableFallbacks: settings.disableFallbacks,
     } satisfies GenerateRequest);
 
+    recordBgUsage(conversationId, 'resumen-bloque', response.tokens);
     const content = response.content.trim();
     if (!content) return; // el LLM falló: se reintentará en el próximo turno
 
@@ -1925,6 +1964,7 @@ async function generateBlockSummaries(
       disableFallbacks: settings.disableFallbacks,
     } satisfies GenerateRequest);
 
+    recordBgUsage(conversationId, 'resumen-arco', response.tokens);
     const content = response.content.trim();
     if (!content) return;
 
@@ -2024,6 +2064,7 @@ Responde SOLO con el texto del resumen.`;
     stream: false,
     disableFallbacks: settings.disableFallbacks,
   });
+  recordBgUsage(conversationId, 'resumen-personaje', response.tokens);
   const newSummary = response.content.trim();
   if (!newSummary) return;
 
@@ -2098,6 +2139,7 @@ export async function bootstrapWorldStateAsync(
       disableFallbacks: settings.disableFallbacks,
     });
 
+    recordBgUsage(conversationId, 'anclaje-mundo', response.tokens);
     const raw = response.content.trim().split('\n')[0].replace(/[`*[\]]/g, '').trim();
     const scene = parseSceneTag(raw);
     if (scene.minuteOfDay == null) {
@@ -2271,6 +2313,7 @@ export async function updateSceneStateAsync(
       disableFallbacks: settings.disableFallbacks,
     });
 
+    recordBgUsage(conversationId, 'director-escena', response.tokens);
     const raw = response.content.trim();
     if (process.env.DEBUG_SCENE_DIRECTOR) console.log('[scene-director][DEBUG] raw:\n' + raw);
     const situacion = raw.match(/SITUACI[OÓ]N:\s*(.+)/i)?.[1]?.trim() ?? prev?.situacion ?? '';
@@ -2505,6 +2548,7 @@ async function summarizeFatalThread(
       }),
       timeout,
     ]);
+    if (result) recordBgUsage(conv.id, 'hilo-fatal', (result as import('@rpgspeak/shared').GenerateResponse).tokens);
     const text = (result as import('@rpgspeak/shared').GenerateResponse | null)?.content?.trim();
     return text || excerpt;
   } catch (err) {

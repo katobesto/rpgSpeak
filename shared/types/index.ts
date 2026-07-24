@@ -374,6 +374,21 @@ export interface Message {
   updatedAt: string;
 }
 
+/**
+ * Acumulador de tokens consumidos por llamadas al LLM en SEGUNDO PLANO
+ * (director de escena, resúmenes, anclaje del mundo, índice de contexto,
+ * analizadores del fast LLM...). Vive en `conversation.metadata.bgTokens`
+ * (acumulado histórico) y en `message.metadata.bgTokens` (delta del turno).
+ * Sin esto, esas llamadas consumían tokens invisibles para las estadísticas.
+ */
+export interface BackgroundTokenUsage {
+  prompt: number;
+  completion: number;
+  cached: number;
+  calls: number;
+  byLabel: Record<string, { prompt: number; completion: number; cached: number; calls: number }>;
+}
+
 export interface MessageMetadata {
   model?: string;
   provider?: string;
@@ -389,6 +404,8 @@ export interface MessageMetadata {
   enrichStep?: { index: number; total: number; label: string };
   /** Tirada [TIRADA:...] resuelta por el servidor para ESTE mensaje, si pidió una. */
   diceRoll?: DiceRollResult;
+  /** Tokens consumidos por las llamadas de fondo de ESTE turno (delta). */
+  bgTokens?: BackgroundTokenUsage;
   [key: string]: unknown;
 }
 

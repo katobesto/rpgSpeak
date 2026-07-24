@@ -16,6 +16,7 @@ import { SceneDebugModal } from './SceneDebugModal.tsx';
 
 import { useTtsStore } from '../../stores/tts.store.ts';
 import { useLightboxStore } from '../../stores/lightbox.store.ts';
+import { BG_LABEL_NAMES } from '../../lib/bg-labels.ts';
 
 // Configure marked for safe rendering (marked v12 requires .use() — setOptions is a no-op)
 marked.use({ breaks: true, gfm: true });
@@ -1373,6 +1374,11 @@ function TokenBadge({ message }: { message: Message }) {
   const completion = (message.metadata?.completionTokens as number | undefined) ?? 0;
   const cached     = (message.metadata?.cachedTokens     as number | undefined) ?? 0;
   const hasCached  = cached > 0;
+  // Coste de las llamadas de fondo de ESTE turno (director de escena,
+  // resúmenes...) — persistido por el servidor en el mensaje. Coste real:
+  // sin él, el contador del chat oculta parte de lo que se está pagando.
+  const bg      = message.metadata?.bgTokens as import('@rpgspeak/shared').BackgroundTokenUsage | undefined;
+  const bgTotal = bg ? bg.prompt + bg.completion : 0;
 
   const fmt = (n: number) =>
     n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n);
@@ -1393,11 +1399,14 @@ function TokenBadge({ message }: { message: Message }) {
         {hasCached && (
           <span className="text-emerald-400/80">↑{fmt(cached)}</span>
         )}
+        {bgTotal > 0 && (
+          <span className="text-violet-400/90" title="Tokens de llamadas en segundo plano">+{fmt(bgTotal)}</span>
+        )}
       </button>
 
       {open && (
         <div
-          className="absolute bottom-full left-0 mb-1.5 z-50 min-w-[170px] rounded-xl border border-border bg-surface-1 shadow-xl text-xs p-3 flex flex-col gap-1.5"
+          className="absolute bottom-full left-0 mb-1.5 z-50 min-w-[190px] rounded-xl border border-border bg-surface-1 shadow-xl text-xs p-3 flex flex-col gap-1.5"
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex items-center justify-between font-medium text-text-primary mb-0.5">
@@ -1413,6 +1422,19 @@ function TokenBadge({ message }: { message: Message }) {
               <div className="border-t border-border/60 my-0.5" />
               <Row label="Caché ↑"   value={cached}   color="text-emerald-400" />
               <Row label="Ahorro"     value={`${Math.round(cached / Math.max(prompt, 1) * 100)}%`} color="text-emerald-400" />
+            </>
+          )}
+          {bg && bgTotal > 0 && (
+            <>
+              <div className="border-t border-border/60 my-0.5" />
+              <div className="text-[10px] font-medium text-violet-400 uppercase tracking-wide">Segundo plano</div>
+              {Object.entries(bg.byLabel).map(([label, t]) => (
+                <Row key={label} label={BG_LABEL_NAMES[label] ?? label} value={t.prompt + t.completion} />
+              ))}
+              <Row label="Total fondo" value={bgTotal} bold color="text-violet-400" />
+              {bg.cached > 0 && (
+                <Row label="Caché fondo ↑" value={bg.cached} color="text-emerald-400" />
+              )}
             </>
           )}
         </div>

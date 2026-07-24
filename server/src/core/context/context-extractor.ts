@@ -9,6 +9,7 @@
 
 import { ContextRepository }      from '../../modules/context/context.repository.js';
 import { stripOocNotes }          from '../conversation/ooc.js';
+import { recordBgUsage }          from '../conversation/bg-usage.js';
 import { MessageRepository }      from '../../modules/messages/message.repository.js';
 import { ConversationRepository } from '../../modules/conversations/conversation.repository.js';
 import { CharacterRepository }    from '../../modules/characters/character.repository.js';
@@ -188,6 +189,7 @@ export async function extractContextBatch(opts: ExtractOptions): Promise<Extract
     stream:      false,
   });
 
+  recordBgUsage(conversationId, 'indice-contexto', result.tokens);
   const parsed  = parseItems(result.content);
   const created = parsed.map((p) =>
     ctxRepo.create({ conversationId, ...p, messageIndexFrom: batchStart, messageIndexTo: batchEnd })

@@ -94,8 +94,9 @@ export interface StreamCallbacks {
    *  de las llamadas de fondo al LLM que siguen en curso (director de escena,
    *  resúmenes...). Solo llega cuando de verdad hay un paso pendiente. */
   onEnrichStep?: (step: EnrichStep) => void;
-  /** Fin de la pasada de enriquecimiento (incluso si no hubo ningún paso). */
-  onEnrichDone?: () => void;
+  /** Fin de la pasada de enriquecimiento (incluso si no hubo ningún paso).
+   *  `bgTokens` = coste real de fondo del turno, solo si hubo llamadas. */
+  onEnrichDone?: (info?: { bgTokens?: import('@rpgspeak/shared').BackgroundTokenUsage }) => void;
   onError: (err: Error) => void;
 }
 
@@ -157,6 +158,7 @@ export async function streamGenerate(
               locationUpdate?: string | null;
               deathLoop?: import('@rpgspeak/shared').DeathLoopState | null;
               diceRoll?: import('@rpgspeak/shared').DiceRollResult;
+              bgTokens?: import('@rpgspeak/shared').BackgroundTokenUsage;
               thinkContent?: string;
               index?: number;
               total?: number;
@@ -173,7 +175,7 @@ export async function streamGenerate(
             } else if (event.type === 'enrich_step') {
               callbacks.onEnrichStep?.({ index: event.index!, total: event.total!, label: event.label ?? '' });
             } else if (event.type === 'enrich_done') {
-              callbacks.onEnrichDone?.();
+              callbacks.onEnrichDone?.(event.bgTokens ? { bgTokens: event.bgTokens } : undefined);
             } else if (event.type === 'error') {
               callbacks.onError(new Error(event.error ?? 'Unknown stream error'));
             }

@@ -3676,7 +3676,7 @@ function StatsSection() {
       <div className="grid grid-cols-2 gap-3">
         <StatCard
           icon={<Zap size={16} />}
-          label={selectedUser ? `Tokens — ${selectedUser.displayName}` : 'Tokens totales'}
+          label={selectedUser ? `Tokens de chat — ${selectedUser.displayName}` : 'Tokens de chat'}
           value={fmt(g.totalTokens)}
           sub={g.cachedTokens > 0 ? `${fmt(g.cachedTokens)} en caché (${cacheRatio}%)` : undefined}
           accent={g.cachedTokens > 0}
@@ -3687,6 +3687,24 @@ function StatsSection() {
           value={fmt(g.totalMessages)}
           sub={`en ${g.totalConversations} conversaciones`}
         />
+        {/* Coste real = chat + llamadas en segundo plano (director de escena,
+            resúmenes, índice…). Sin esta tarjeta, parte del gasto quedaba oculto. */}
+        {g.bgTokens > 0 && (
+          <>
+            <StatCard
+              icon={<Brain size={16} />}
+              label="Tokens en segundo plano"
+              value={fmt(g.bgTokens)}
+              sub={`${fmt(g.bgCalls)} llamadas de fondo${g.bgCached > 0 ? ` · ${fmt(g.bgCached)} en caché` : ''}`}
+            />
+            <StatCard
+              icon={<Zap size={16} />}
+              label="Coste real total"
+              value={fmt(g.totalTokens + g.bgTokens)}
+              sub="chat + segundo plano"
+            />
+          </>
+        )}
       </div>
 
       {/* Per-conversation table */}
@@ -3701,7 +3719,8 @@ function StatsSection() {
                 {showUserCol && (
                   <th className="text-left px-3 py-2.5 text-text-muted font-medium">Usuario</th>
                 )}
-                <th className="text-right px-3 py-2.5 text-text-muted font-medium">Tokens</th>
+                <th className="text-right px-3 py-2.5 text-text-muted font-medium">Chat</th>
+                <th className="text-right px-3 py-2.5 text-text-muted font-medium">Fondo</th>
                 <th className="text-right px-3 py-2.5 text-text-muted font-medium">Caché</th>
                 <th className="text-right px-4 py-2.5 text-text-muted font-medium">Msgs</th>
               </tr>
@@ -3727,6 +3746,13 @@ function StatsSection() {
                     )}
                     <td className="px-3 py-2.5 text-right text-text-secondary tabular-nums">
                       {fmt(conv.tokens)}
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">
+                      {conv.bgTokens > 0 ? (
+                        <span className="text-violet-400" title={`${conv.bgCalls} llamadas de fondo`}>{fmt(conv.bgTokens)}</span>
+                      ) : (
+                        <span className="text-text-muted">—</span>
+                      )}
                     </td>
                     <td className="px-3 py-2.5 text-right tabular-nums">
                       {conv.cachedTokens > 0 ? (
