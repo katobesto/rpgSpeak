@@ -5,11 +5,13 @@ import { MessageInput } from './MessageInput.tsx';
 import { GroupPanel } from './GroupPanel.tsx';
 import { SummaryModal } from './SummaryModal.tsx';
 import { ContextModal } from './ContextModal.tsx';
+import { ThreadsModal } from './ThreadsModal.tsx';
 import { StatsModal } from './StatsModal.tsx';
 import { ChatSearchModal } from './ChatSearchModal.tsx';
 import { ImageGalleryModal } from './ImageGalleryModal.tsx';
 import { BackgroundGeneratorModal } from './BackgroundGeneratorModal.tsx';
 import { BattleModal } from './BattleModal.tsx';
+import { PlayerSheetModal } from './PlayerSheetModal.tsx';
 import { useChatStore, STORY_KICKOFF_MSG } from '../../stores/chat.store.ts';
 import { useAuthStore } from '../../stores/auth.store.ts';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -46,9 +48,10 @@ import {
   RotateCcw,
   Download,
   Upload,
+  GitBranch,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar.tsx';
-import type { Character, Story, Conversation, User, ConversationBackground, PartyState, DeathLoopState } from '@rpgspeak/shared';
+import type { Character, Story, Conversation, User, ConversationBackground, PartyState, PlayerSheet, DeathLoopState } from '@rpgspeak/shared';
 
 export function ChatWindow() {
   const {
@@ -70,10 +73,12 @@ export function ChatWindow() {
   const [summaryModalOpen, setSummaryModalOpen] = useState(false);
   const [statsModalOpen, setStatsModalOpen] = useState(false);
   const [contextModalOpen, setContextModalOpen] = useState(false);
+  const [threadsModalOpen, setThreadsModalOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [anchorModalOpen, setAnchorModalOpen] = useState(false);
   const [locationsModalOpen, setLocationsModalOpen] = useState(false);
+  const [playerSheetModalOpen, setPlayerSheetModalOpen] = useState(false);
   const [backgroundModalOpen, setBackgroundModalOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [battleOpen, setBattleOpen] = useState(false);
@@ -129,21 +134,24 @@ export function ChatWindow() {
 
   // Close topmost open modal/panel on mobile swipe-back
   const anyModalOpen = groupPanelOpen || summaryModalOpen || statsModalOpen ||
-    contextModalOpen || galleryOpen || anchorModalOpen || locationsModalOpen || searchOpen || battleOpen ||
-    exportDialogOpen;
+    contextModalOpen || threadsModalOpen || galleryOpen || anchorModalOpen || locationsModalOpen || searchOpen ||
+    battleOpen || exportDialogOpen || playerSheetModalOpen;
   const closeTopModal = useCallback(() => {
-    if (exportDialogOpen)   { setExportDialogOpen(false);   return; }
-    if (battleOpen)         { setBattleOpen(false);         return; }
-    if (searchOpen)         { setSearchOpen(false);         return; }
-    if (galleryOpen)        { setGalleryOpen(false);        return; }
-    if (anchorModalOpen)    { setAnchorModalOpen(false);    return; }
-    if (locationsModalOpen) { setLocationsModalOpen(false); return; }
-    if (groupPanelOpen)     { setGroupPanelOpen(false);     return; }
-    if (summaryModalOpen)   { setSummaryModalOpen(false);   return; }
-    if (statsModalOpen)     { setStatsModalOpen(false);     return; }
-    if (contextModalOpen)   { setContextModalOpen(false);   return; }
-  }, [battleOpen, searchOpen, galleryOpen, anchorModalOpen, locationsModalOpen,
-      groupPanelOpen, summaryModalOpen, statsModalOpen, contextModalOpen, exportDialogOpen]);
+    if (exportDialogOpen)     { setExportDialogOpen(false);     return; }
+    if (battleOpen)           { setBattleOpen(false);           return; }
+    if (searchOpen)           { setSearchOpen(false);           return; }
+    if (galleryOpen)          { setGalleryOpen(false);          return; }
+    if (anchorModalOpen)      { setAnchorModalOpen(false);      return; }
+    if (locationsModalOpen)   { setLocationsModalOpen(false);   return; }
+    if (playerSheetModalOpen) { setPlayerSheetModalOpen(false); return; }
+    if (groupPanelOpen)       { setGroupPanelOpen(false);       return; }
+    if (summaryModalOpen)     { setSummaryModalOpen(false);     return; }
+    if (statsModalOpen)       { setStatsModalOpen(false);       return; }
+    if (contextModalOpen)     { setContextModalOpen(false);     return; }
+    if (threadsModalOpen)     { setThreadsModalOpen(false);     return; }
+  }, [battleOpen, searchOpen, galleryOpen, anchorModalOpen, locationsModalOpen, playerSheetModalOpen,
+      groupPanelOpen, summaryModalOpen, statsModalOpen, contextModalOpen, threadsModalOpen,
+      exportDialogOpen]);
   useBackHandler(anyModalOpen, closeTopModal);
   const messageListRef = useRef<MessageListHandle>(null);
 
@@ -461,6 +469,13 @@ export function ChatWindow() {
             <Map size={15} />
           </button>
           <button
+            onClick={() => setPlayerSheetModalOpen(true)}
+            className="p-2 rounded-lg hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors"
+            title="Ficha del jugador"
+          >
+            <Sword size={15} />
+          </button>
+          <button
             onClick={() => setBackgroundModalOpen(true)}
             className="p-2 rounded-lg hover:bg-white/8 text-text-muted hover:text-text-primary transition-colors"
             title="Fondo de la conversación"
@@ -503,6 +518,13 @@ export function ChatWindow() {
                 >
                   <Zap size={13} className="text-text-muted" />
                   <span className="text-xs text-text-primary">Índice de Contexto</span>
+                </button>
+                <button
+                  onClick={() => { setThreadsModalOpen(true); setMoreMenuOpen(false); }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-white/5 text-left"
+                >
+                  <GitBranch size={13} className="text-text-muted" />
+                  <span className="text-xs text-text-primary">Hilos narrativos</span>
                 </button>
                 <button
                   onClick={() => { setStatsModalOpen(true); setMoreMenuOpen(false); }}
@@ -642,6 +664,13 @@ export function ChatWindow() {
         messages={messages}
       />
 
+      <ThreadsModal
+        open={threadsModalOpen}
+        onClose={() => setThreadsModalOpen(false)}
+        conversationId={convId!}
+        messageCount={activeConversation.messageCount}
+      />
+
       {anchorModalOpen && (
         <ContextAnchorModal
           onClose={() => setAnchorModalOpen(false)}
@@ -685,6 +714,14 @@ export function ChatWindow() {
         />
       )}
 
+      {playerSheetModalOpen && (
+        <PlayerSheetModal
+          conversationId={convId!}
+          sheet={(activeConversation.metadata?.playerSheet as PlayerSheet | undefined) ?? null}
+          onClose={() => setPlayerSheetModalOpen(false)}
+        />
+      )}
+
       {backgroundModalOpen && (
         <BackgroundGeneratorModal
           conversationId={convId!}
@@ -697,6 +734,7 @@ export function ChatWindow() {
           characters={characters}
           user={user}
           partyState={activeConversation.metadata?.partyState as PartyState | undefined}
+          playerSheet={(activeConversation.metadata?.playerSheet as PlayerSheet | undefined) ?? null}
           onClose={() => setBattleOpen(false)}
           onBattleEnd={async (narrationPrompt, outcome, rewards) => {
             // 1. Compact system anchor visible in chat
