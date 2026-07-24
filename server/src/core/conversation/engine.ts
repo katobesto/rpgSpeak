@@ -20,6 +20,7 @@ import { autoExtractContextAsync, hasPendingContextExtraction } from '../context
 import { SummariesRepository } from '../../modules/summaries/summaries.repository.js';
 import { EventStatusRepository } from '../../modules/stories/event-status.repository.js';
 import { ThreadRepository } from '../../modules/threads/thread.repository.js';
+import { NoteRepository } from '../../modules/notes/note.repository.js';
 import { stripOocNotes } from './ooc.js';
 import { DICE_ROLL_RE, resolveRollSheet, resolveRollModifier, rollDice, type DiceRollResult } from './dice.js';
 import { fixDanglingActionPunctuation } from './narrative-format.js';
@@ -35,6 +36,7 @@ const memRepo        = new MemoryRepository();
 const summariesRepo  = new SummariesRepository();
 const eventStatusRepo = new EventStatusRepository();
 const threadRepo     = new ThreadRepository();
+const noteRepo       = new NoteRepository();
 
 export interface GenerateOptions {
   conversationId: string;
@@ -811,6 +813,9 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     // Índice del turno actual, para calcular la antigüedad de cada hilo.
     const currentMessageIndex = historyForContext.length + 1;
 
+    // Notas de coherencia del jugador — lista fija que gestiona desde la UI.
+    const conversationNotes = noteRepo.findByConversation(conversationId);
+
     // Estado del director de escena (situación, tensión, estado interno por
     // personaje, PNJs). Lo mantiene updateSceneStateAsync en segundo plano.
     const sceneState =
@@ -862,6 +867,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       sceneState,
       openThreads,
       currentMessageIndex,
+      notes: conversationNotes,
     });
 
     // The global "Ajustes → Contexto" value (settings.defaultContextLength) is the

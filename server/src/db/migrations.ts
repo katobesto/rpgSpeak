@@ -235,6 +235,27 @@ export function runMigrations(db: Db): void {
     `);
   } catch { /* already exists */ }
 
+  // ─── Conversation Notes — notas fijas de coherencia gestionadas por el jugador ─
+  // A diferencia de los hilos/memoria (que genera la IA), estas las escribe el
+  // usuario para anclar hechos que la narración debe respetar. Se inyectan
+  // siempre, en orden, justo antes del mensaje del jugador (context-builder).
+  db.run(sql`
+    CREATE TABLE IF NOT EXISTS conversation_notes (
+      id              TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+      content         TEXT NOT NULL,
+      position        INTEGER NOT NULL DEFAULT 0,
+      created_at      TEXT NOT NULL,
+      updated_at      TEXT NOT NULL
+    )
+  `);
+  try {
+    db.run(sql`
+      CREATE INDEX IF NOT EXISTS idx_conversation_notes_conv
+      ON conversation_notes (conversation_id, position)
+    `);
+  } catch { /* already exists */ }
+
   // ─── Stories — calendario del mundo (NULL = gregoriano por defecto) ─────────
   // JSON StoryCalendar: meses, días por mes, días de la semana, estaciones,
   // ciclo lunar y momento de inicio. Alimenta la cabecera ambiental.

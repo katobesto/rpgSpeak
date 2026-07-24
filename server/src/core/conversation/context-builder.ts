@@ -1,10 +1,10 @@
-import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem, PartyState, DeathLoopState, NarrativeThread, SceneDirectorState, CharacterSceneState, RpgStats } from '@rpgspeak/shared';
+import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem, PartyState, DeathLoopState, NarrativeThread, SceneDirectorState, CharacterSceneState, RpgStats, ConversationNote } from '@rpgspeak/shared';
 import { MemoryRepository } from '../memory/memory.repository.js';
 import { DICE_ROLL_INSTRUCTION } from './dice.js';
 import { ContextRepository, type ContextItemWithEmbedding } from '../../modules/context/context.repository.js';
 import { ProviderRepository } from '../../modules/providers/provider.repository.js';
 import { createProvider } from '../llm/provider.factory.js';
-import { OOC_CONVENTION_BLOCK } from './ooc.js';
+import { OOC_CONVENTION_BLOCK, OOC_REMINDER_BLOCK, hasOocNote } from './ooc.js';
 
 const memRepo  = new MemoryRepository();
 const ctxRepo  = new ContextRepository();
@@ -88,6 +88,11 @@ export interface BuildContextOptions {
   openThreads?: NarrativeThread[];
   /** Índice del mensaje actual — para calcular la antigüedad de cada hilo. */
   currentMessageIndex?: number;
+  /** Notas fijas de coherencia que el JUGADOR gestiona (a diferencia de hilos y
+   *  memoria, que genera la IA). Se inyectan siempre, en su orden, justo antes
+   *  del mensaje del jugador — cerca del punto de generación para que no
+   *  pierdan peso frente al resto del contexto. */
+  notes?: ConversationNote[];
 }
 
 // ── Aviso de aventura para modo personaje individual (sin narrador) ─────────
@@ -915,6 +920,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     sceneState = null,
     openThreads = [],
     currentMessageIndex = messages.length,
+    notes = [],
   } = opts;
 
   const systemParts: string[] = [];
@@ -1653,6 +1659,31 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       history.push({ role: 'system', content: varietyBlock });
       footerCount++;
     }
+  }
+
+  // 9d-quinquies. Notas de coherencia del jugador — lista fija que el usuario
+  // gestiona desde la UI (a diferencia de hilos/memoria, que genera la IA
+  // sola). Se inyectan SIEMPRE, en el orden que el jugador definió, muy cerca
+  // de la generación para que no pierdan peso frente al resto del contexto.
+  if (needsSplit && notes.length > 0) {
+    const notesBlock =
+      `## NOTAS DE COHERENCIA — hechos fijos que debes respetar\n` +
+      `El jugador ha anotado esto para anclar la historia. Trátalo como canon establecido, no como sugerencia:\n\n` +
+      notes.map((n) => `- ${n.content}`).join('\n');
+    history.push({ role: 'system', content: notesBlock });
+    footerCount++;
+  }
+
+  // 9d-sexies. Recordatorio OOC — solo cuando el ÚLTIMO mensaje del jugador
+  // contiene una nota entre paréntesis. La convención completa vive en el
+  // prefijo estático (OOC_CONVENTION_BLOCK, más arriba), pero en conversaciones
+  // largas esa instrucción del inicio se diluye frente a todo lo que se ha
+  // añadido desde entonces — igual que ya pasaba con characterCoherencePrompt.
+  // Un recordatorio corto y condicional, pegado al propio mensaje que lo
+  // necesita, sin repetir el bloque entero.
+  if (needsSplit && lastMessage && hasOocNote(lastMessage.content)) {
+    history.push({ role: 'system', content: OOC_REMINDER_BLOCK });
+    footerCount++;
   }
 
   // 9e. Cabecera ambiental — ÚLTIMO bloque antes del mensaje del jugador.

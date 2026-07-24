@@ -263,6 +263,16 @@ export const narrativeThreads = sqliteTable('narrative_threads', {
   updatedAt:      text('updated_at').notNull(),
 });
 
+// ─── Conversation Notes — notas fijas de coherencia gestionadas por el jugador ─
+export const conversationNotes = sqliteTable('conversation_notes', {
+  id:             text('id').primaryKey(),
+  conversationId: text('conversation_id').notNull().references(() => conversations.id, { onDelete: 'cascade' }),
+  content:        text('content').notNull(),
+  position:       integer('position').notNull().default(0),
+  createdAt:      text('created_at').notNull(),
+  updatedAt:      text('updated_at').notNull(),
+});
+
 // ─── Type exports for Drizzle inference ───────────────────────────────────────
 
 // ─── Conversation Summaries (historial acumulativo) ──────────────────────────
@@ -283,6 +293,7 @@ export type DbConversationSummary = typeof conversationSummaries.$inferSelect;
 
 export type DbContextItem = typeof contextItems.$inferSelect;
 export type DbNarrativeThread = typeof narrativeThreads.$inferSelect;
+export type DbConversationNote = typeof conversationNotes.$inferSelect;
 export type DbCharacter = typeof characters.$inferSelect;
 export type DbStory = typeof stories.$inferSelect;
 export type DbConversation = typeof conversations.$inferSelect;

@@ -28,6 +28,7 @@ import { contextRoutes }  from './modules/context/context.routes.js';
 import { backupRoutes }       from './modules/backup/backup.routes.js';
 import { summariesRoutes }    from './modules/summaries/summaries.routes.js';
 import { threadRoutes }       from './modules/threads/thread.routes.js';
+import { noteRoutes }         from './modules/notes/note.routes.js';
 
 export async function buildApp(): Promise<FastifyInstance> {
   const app = Fastify({
@@ -94,6 +95,7 @@ export async function buildApp(): Promise<FastifyInstance> {
           await prot.register(backupRoutes,       { prefix: '/backup' });
           await prot.register(summariesRoutes,    { prefix: '/summaries' });
           await prot.register(threadRoutes,       { prefix: '/threads' });
+          await prot.register(noteRoutes,         { prefix: '/notes' });
         },
         { prefix: '' }
       );

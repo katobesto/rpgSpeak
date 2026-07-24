@@ -828,6 +828,25 @@ export interface NarrativeThread {
   updatedAt: string;
 }
 
+// ─── Notas de coherencia (gestionadas por el jugador) ────────────────────────
+
+/**
+ * Nota fija que el jugador añade para anclar hechos que la IA debe respetar
+ * (a diferencia de los hilos o la memoria, que la IA genera sola). Se inyectan
+ * SIEMPRE, en orden, justo antes del mensaje del jugador — cerca del punto de
+ * generación para que no pierdan peso frente al resto del contexto.
+ */
+export interface ConversationNote {
+  id: string;
+  conversationId: string;
+  content: string;
+  /** Orden de visualización e inyección (0 = primera). El usuario lo controla
+   *  reordenando la lista. */
+  position: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ─── Director de escena ───────────────────────────────────────────────────────
 //
 // El estado que hace que un personaje sea una persona y no una ficha: qué quiere

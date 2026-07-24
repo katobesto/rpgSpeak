@@ -47,3 +47,17 @@ export const OOC_CONVENTION_BLOCK =
   `personaje se entere de ese amor; como mucho, deja que la escena respire esa tensión desde fuera.\n` +
   `- Lo que el jugador quiere que su personaje diga o haga de verdad lo escribe SIN paréntesis. Solo el texto ` +
   `entre paréntesis es OOC.`;
+
+/**
+ * Recordatorio corto, inyectado SOLO cuando el último mensaje del jugador
+ * lleva una nota OOC — la convención completa vive en el prefijo estático
+ * (OOC_CONVENTION_BLOCK) y en conversaciones largas se diluye frente a todo lo
+ * añadido después. Se repite aquí, pegado al mensaje que la necesita, para que
+ * no pierda autoridad frente al resto del contexto.
+ */
+export const OOC_REMINDER_BLOCK =
+  `## RECORDATORIO — el mensaje del jugador lleva una nota OOC entre paréntesis\n` +
+  `Ese texto entre paréntesis es SOLO para ti, el director. Ningún personaje lo oye, lo ve, ni reacciona a él ` +
+  `de ninguna forma — ni lo menciona, ni pregunta por ello, ni actúa como si el jugador lo hubiera dicho en voz ` +
+  `alta. Ignóralo en la ficción exactamente como si nunca se hubiera escrito; úsalo solo tú, en silencio, para ` +
+  `orientar el tono o el rumbo de la escena.`;

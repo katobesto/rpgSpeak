@@ -6,6 +6,7 @@ import { GroupPanel } from './GroupPanel.tsx';
 import { SummaryModal } from './SummaryModal.tsx';
 import { ContextModal } from './ContextModal.tsx';
 import { ThreadsModal } from './ThreadsModal.tsx';
+import { NotesModal } from './NotesModal.tsx';
 import { StatsModal } from './StatsModal.tsx';
 import { ChatSearchModal } from './ChatSearchModal.tsx';
 import { ImageGalleryModal } from './ImageGalleryModal.tsx';
@@ -49,6 +50,7 @@ import {
   Download,
   Upload,
   GitBranch,
+  StickyNote,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar.tsx';
 import type { Character, Story, Conversation, User, ConversationBackground, PartyState, PlayerSheet, DeathLoopState } from '@rpgspeak/shared';
@@ -74,6 +76,7 @@ export function ChatWindow() {
   const [statsModalOpen, setStatsModalOpen] = useState(false);
   const [contextModalOpen, setContextModalOpen] = useState(false);
   const [threadsModalOpen, setThreadsModalOpen] = useState(false);
+  const [notesModalOpen, setNotesModalOpen] = useState(false);
   const [galleryOpen, setGalleryOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [anchorModalOpen, setAnchorModalOpen] = useState(false);
@@ -134,8 +137,8 @@ export function ChatWindow() {
 
   // Close topmost open modal/panel on mobile swipe-back
   const anyModalOpen = groupPanelOpen || summaryModalOpen || statsModalOpen ||
-    contextModalOpen || threadsModalOpen || galleryOpen || anchorModalOpen || locationsModalOpen || searchOpen ||
-    battleOpen || exportDialogOpen || playerSheetModalOpen;
+    contextModalOpen || threadsModalOpen || notesModalOpen || galleryOpen || anchorModalOpen ||
+    locationsModalOpen || searchOpen || battleOpen || exportDialogOpen || playerSheetModalOpen;
   const closeTopModal = useCallback(() => {
     if (exportDialogOpen)     { setExportDialogOpen(false);     return; }
     if (battleOpen)           { setBattleOpen(false);           return; }
@@ -149,8 +152,9 @@ export function ChatWindow() {
     if (statsModalOpen)       { setStatsModalOpen(false);       return; }
     if (contextModalOpen)     { setContextModalOpen(false);     return; }
     if (threadsModalOpen)     { setThreadsModalOpen(false);     return; }
+    if (notesModalOpen)       { setNotesModalOpen(false);       return; }
   }, [battleOpen, searchOpen, galleryOpen, anchorModalOpen, locationsModalOpen, playerSheetModalOpen,
-      groupPanelOpen, summaryModalOpen, statsModalOpen, contextModalOpen, threadsModalOpen,
+      groupPanelOpen, summaryModalOpen, statsModalOpen, contextModalOpen, threadsModalOpen, notesModalOpen,
       exportDialogOpen]);
   useBackHandler(anyModalOpen, closeTopModal);
   const messageListRef = useRef<MessageListHandle>(null);
@@ -527,6 +531,13 @@ export function ChatWindow() {
                   <span className="text-xs text-text-primary">Hilos narrativos</span>
                 </button>
                 <button
+                  onClick={() => { setNotesModalOpen(true); setMoreMenuOpen(false); }}
+                  className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-white/5 text-left"
+                >
+                  <StickyNote size={13} className="text-text-muted" />
+                  <span className="text-xs text-text-primary">Notas de coherencia</span>
+                </button>
+                <button
                   onClick={() => { setStatsModalOpen(true); setMoreMenuOpen(false); }}
                   className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-white/5 text-left"
                 >
@@ -669,6 +680,12 @@ export function ChatWindow() {
         onClose={() => setThreadsModalOpen(false)}
         conversationId={convId!}
         messageCount={activeConversation.messageCount}
+      />
+
+      <NotesModal
+        open={notesModalOpen}
+        onClose={() => setNotesModalOpen(false)}
+        conversationId={convId!}
       />
 
       {anchorModalOpen && (
