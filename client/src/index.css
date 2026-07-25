@@ -363,6 +363,14 @@ body {
   .narrator-content .speaker-tag[data-avatar]:hover {
     filter: brightness(1.1);
   }
+
+  /* La barra de ancho completo (arriba) ya ocupa toda la línea por sí sola —
+     el <br> que Step 5b inserta justo después (MessageItem.tsx) es redundante
+     aquí y solo añade una línea en blanco extra antes del gesto/diálogo. En
+     móvil SÍ hace falta: ahí .speaker-tag es inline-flex, no ancho completo. */
+  .narrator-content p.speaker-line > .speaker-tag + br {
+    display: none;
+  }
 }
 
 .narrator-content .speaker-tag strong {
