@@ -256,12 +256,14 @@ body {
   color: rgba(255, 255, 255, 0.72);
 }
 
-/* Speaker line: **Name:** "dialogue" */
+/* Speaker line: **Name:** / gesto / —diálogo, cada uno en su propia línea
+   (Step 5b en MessageItem.tsx inserta los <br> y el guion). display:block
+   para que el <br> haga salto de línea de forma fiable — dentro de un
+   flex-container el salto de línea no está garantizado igual entre
+   navegadores. El .speaker-tag interior sigue siendo inline-flex, así que
+   avatar+nombre se alinean igual como unidad en su propia línea. */
 .narrator-content p.speaker-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
+  display: block;
   margin: 12px 0 3px;
   padding: 4px 0;
 }
@@ -370,9 +372,12 @@ body {
   letter-spacing: 0.01em;
 }
 
-/* Rest of the dialogue text on the same line */
-.narrator-content p.speaker-line > .speaker-tag + *,
-.narrator-content p.speaker-line > .speaker-tag ~ * {
+/* Rest of the dialogue text on the same line — pero NUNCA el <em> del gesto:
+   antes ":not(em)" faltaba y el "~ *" universal pisaba el color gris que
+   .narrator-content em ya le daba al gesto, dejándolo idéntico al diálogo
+   y con la cursiva como único diferenciador (demasiado sutil). */
+.narrator-content p.speaker-line > .speaker-tag + *:not(em),
+.narrator-content p.speaker-line > .speaker-tag ~ *:not(em) {
   color: var(--text-primary);
 }
 

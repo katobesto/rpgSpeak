@@ -219,7 +219,7 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
     // Handles both LLM variants:
     //   **Name:**  → marked → <strong>Name:</strong>   (colon inside bold — normal)
     //   **Name**:  → marked → <strong>Name</strong>:   (colon outside bold — LLM variant)
-    return clean.replace(
+    clean = clean.replace(
       /<p(?:\s[^>]*)?>[ \t]*<strong>([^<:]+?)(?::<\/strong>|<\/strong>:)/gi,
       (match, rawName) => {
         const name = rawName.trim();
@@ -236,6 +236,27 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
         return `<p class="speaker-line"><span class="speaker-tag"${tagStyle}${tagData}>${avatarEl}<strong>${char?.name ?? name}:</strong></span>`;
       }
     );
+
+    // Step 5b — separar el nombre del diálogo con salto de línea, y anteponer
+    // el guion literario (—) a lo que dice el personaje. Un gesto en cursiva
+    // "pegado" al nombre y al diálogo en la misma línea los relaciona
+    // visualmente aunque tengan distinto color (Step 4/CSS); el salto de
+    // línea y el guion son la misma convención tipográfica que usa cualquier
+    // novela para separar la acotación de lo hablado, y no dependen de que el
+    // modelo los formatee así — se aplican siempre, de forma determinista.
+    clean = clean.replace(
+      /(<p class="speaker-line"><span class="speaker-tag"[\s\S]*?<\/strong><\/span>)(\s*<em>[^<]*<\/em>\s*)?([\s\S]*?)<\/p>/g,
+      (_match, tagPart: string, gesturePart: string | undefined, dialoguePart: string | undefined) => {
+        let html = tagPart;
+        const gesture = gesturePart?.trim();
+        if (gesture) html += `<br>${gesture}`;
+        const dialogue = dialoguePart?.trim();
+        if (dialogue) html += `<br>—${dialogue}`;
+        return `${html}</p>`;
+      },
+    );
+
+    return clean;
   }, [message.content, isNarrator, speakerCandidates]);
 
   const updateMutation = useMutation({
