@@ -615,9 +615,14 @@ export function buildVarietyBlock(
 // acumulando asuntos nuevos.
 const THREADS_MAX_INJECTED = 6;
 
-function buildThreadsBlock(threads: NarrativeThread[], currentIndex: number): string | null {
-  if (threads.length === 0) return null;
-
+function buildThreadsBlock(threads: NarrativeThread[], currentIndex: number): string {
+  // ANTES: con threads.length === 0 esta función devolvía null y el bloque
+  // entero (incluido el REGISTRO DE HILOS de abajo, que es la única
+  // instrucción de CÓMO abrir uno) desaparecía del prompt. Resultado: el
+  // modelo nunca veía la etiqueta [HILO_ABIERTO:...] hasta que ya existiera
+  // un hilo — imposible de arrancar. Ahora el bloque (y sus instrucciones)
+  // se inyecta SIEMPRE; solo cambia si lista hilos reales o explica que
+  // todavía no hay ninguno.
   const shown = threads.slice(0, THREADS_MAX_INJECTED);
   const lines = shown.map((t) => {
     const age = Math.max(0, currentIndex - t.openedAtIndex);
@@ -633,17 +638,21 @@ function buildThreadsBlock(threads: NarrativeThread[], currentIndex: number): st
     ? `\n\n(Hay ${overflow} hilo(s) abierto(s) más, de menor importancia, que no se listan aquí.)`
     : '';
 
+  const listSection = threads.length > 0
+    ? `Asuntos que la partida ha planteado y siguen pendientes. Son deuda narrativa: el mundo no los ha olvidado.\n\n` +
+      lines.join('\n') +
+      overflowNote
+    : `Todavía no hay ningún hilo abierto en esta historia. Es buena señal poder abrir el primero en cuanto la escena lo pida de forma natural — no hace falta forzarlo.`;
+
   return (
     `## HILOS ABIERTOS — LO QUE ESTA HISTORIA DEJÓ SIN RESOLVER\n` +
-    `Asuntos que la partida ha planteado y siguen pendientes. Son deuda narrativa: el mundo no los ha olvidado.\n\n` +
-    lines.join('\n') +
-    overflowNote +
+    listSection +
     `\n\nCÓMO USARLOS:\n` +
     `- NO hay que tocarlos todos en cada respuesta — eso los convertiría en una lista de tareas y aplanaría la escena. Basta con que ninguno se evapore.\n` +
     `- Cuando la escena lo permita de forma natural, deja que uno respire: alguien lo menciona, aparece una consecuencia, el asunto vuelve por su propio peso.\n` +
     `- Los marcados como SIN RESOLVER llevan demasiado tiempo parados: retómalos con prioridad en cuanto la escena dé pie.\n` +
     `- Un hilo NO se resuelve porque sí ni porque convenga cerrarlo: se resuelve cuando la historia lo gana.\n\n` +
-    `REGISTRO DE HILOS (marcadores técnicos, el sistema los borra antes de mostrar tu respuesta):\n` +
+    `REGISTRO DE HILOS — OBLIGATORIO CUANDO APLIQUE (marcadores técnicos, el sistema los borra antes de mostrar tu respuesta):\n` +
     `- Si tu respuesta PLANTEA algo nuevo que queda pendiente (una promesa, una amenaza, una pregunta sin responder, alguien que desaparece, un misterio):\n` +
     `[HILO_ABIERTO:título corto|qué queda pendiente, en una frase|importancia 1-10]\n` +
     `- Si tu respuesta RESUELVE de verdad uno de los de arriba:\n` +
@@ -962,13 +971,6 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // personajes y modos → dentro del prefijo cacheable).
   if (deathModeActive) {
     systemParts.push(DEATH_MODE_BLOCK);
-  }
-
-  // Tiradas de dados — solo en modo aventura. Estático (no depende del turno),
-  // compartido entre narrador y personaje: quien narre una acción arriesgada
-  // puede pedir una tirada real en vez de decidir el desenlace por su cuenta.
-  if (adventureMode) {
-    systemParts.push(DICE_ROLL_INSTRUCTION);
   }
 
   if (narratorMode) {
@@ -1572,6 +1574,18 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // ningún Character de ficha (un guardia, un tendero…), donde 9d no se inyectaría.
   if (needsSplit && livingWorldPrompt?.trim()) {
     history.push({ role: 'system', content: livingWorldPrompt.trim() });
+    footerCount++;
+  }
+
+  // 9c-ter. Tiradas de dados — solo en modo aventura. Iba en el prefijo
+  // estático (systemParts, al principio del prompt) y el modelo nunca la
+  // seguía: 0 tiradas emitidas en toda la base de datos, en ninguna
+  // conversación de aventura. Mismo diagnóstico que ya resolvió el reloj del
+  // mundo y la ubicación — una instrucción de "etiqueta técnica" enterrada al
+  // principio de un prompt largo se diluye; cerca de la generación pesa mucho
+  // más. Compartida entre narrador y personaje, como antes.
+  if (needsSplit && adventureMode) {
+    history.push({ role: 'system', content: DICE_ROLL_INSTRUCTION });
     footerCount++;
   }
 

@@ -123,10 +123,11 @@ El mundo tiene momentum propio: los PNJs toman iniciativas, las situaciones se d
 - PROHIBIDO dejar la historia estancada en conversaciones circulares o exploración sin destino
 
 RESOLUCIÓN DE ACCIONES FÍSICAS — CRÍTICO, SIN EXCEPCIÓN:
-Cuando un personaje (el jugador o un PNJ) inicia una acción física concreta y de desenlace incierto —un robo de balón, un placaje, un golpe, un intento de agarrar o esquivar, un salto, cualquier gesto cuyo resultado se decide en el instante— NARRA ese desenlace en la MISMA respuesta en la que la acción empieza: éxito, fallo, o algo intermedio (un resultado parcial, un coste, una consecuencia inesperada).
-- PROHIBIDO congelar la acción a mitad de gesto ("se lanza para intentar interceptarte, pero..." y ahí se corta) dejando que el jugador tenga que preguntar qué pasó para poder continuar — eso no es tensión narrativa, es una respuesta incompleta.
-- Esto es independiente de si el personaje tiene éxito o no: puede fallar, puede que el jugador lo esquive, puede ser un resultado muy ajustado — lo único que no está permitido es dejarlo sin resolver.
-- Si el modo aventura está activo y el desenlace depende de una tirada real, usa [TIRADA:...] en vez de decidirlo tú; si no, decide el resultado desde la lógica de la escena (cansancio, habilidad, ventaja de posición) y narra la consecuencia con la misma convicción que el resto de la escena.
+Cuando un personaje (el jugador o un PNJ) inicia una acción física concreta y de desenlace incierto —un robo de balón, un placaje, un golpe, un intento de agarrar o esquivar, un salto, colarse sin ser visto, cualquier gesto cuyo resultado se decide en el instante— esa acción SIEMPRE llega a su desenlace en la MISMA respuesta en la que empieza. PROHIBIDO congelarla a mitad de gesto ("se lanza para intentar interceptarte, pero..." y ahí se corta) dejando que el jugador tenga que preguntar qué pasó para poder continuar — eso no es tensión narrativa, es una respuesta incompleta.
+
+"Llegar a su desenlace" tiene DOS formas válidas, en este orden de prioridad:
+1. CON TIRADA (prioritaria si el modo aventura está activo y el resultado tiene peso real — no un gesto cómico o trivial): pide la tirada real con [TIRADA:...] (ver la sección de tiradas más abajo) EN VEZ de decidir tú el resultado. Esto SÍ cuenta como "resolver la acción" — no es dejarla a medias, es delegar el desenlace en el sistema, que te lo devolverá para narrar la consecuencia en tu siguiente respuesta. No narres si acierta o falla: para justo en el momento de tensión.
+2. SIN TIRADA (si no hay modo aventura, o la acción es menor/cómica y no amerita azar real): decide tú el resultado desde la lógica de la escena (cansancio, habilidad, ventaja de posición) y narra la consecuencia —éxito, fallo, o algo intermedio— con la misma convicción que el resto de la escena.
 
 CLARIDAD Y GUÍA — EVITA PARALIZAR AL JUGADOR:
 El misterio y la intriga son la sal de la historia, no su obstáculo. Un jugador que no sabe qué hacer ni qué preguntar no está intrigado: está perdido, y perder el interés es el fallo más caro de todos.
