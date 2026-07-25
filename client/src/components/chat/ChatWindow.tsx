@@ -36,6 +36,7 @@ import {
   Clock,
   MessagesSquare,
   ChevronRight,
+  ChevronsRight,
   Images,
   SlidersHorizontal,
   UserCircle,
@@ -635,12 +636,7 @@ export function ChatWindow() {
           activeCharacterId={activeCharacterId}
           onCharacterChange={handleCharacterChange}
           onGameCommand={() => setBattleOpen(true)}
-          rightSlot={
-            <ContinueStoryButton
-              activeCharacterId={activeCharacterId}
-              narratorMode={activeConversation.characters.length === 0}
-            />
-          }
+          rightSlot={<ContinueButtons />}
         />
       )}
 
@@ -1401,43 +1397,71 @@ function ConvSummaryPopup({
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// ─── Continue Story Button ────────────────────────────────────────────────────
+// ─── Continue Buttons ──────────────────────────────────────────────────────────
+//
+// Dos niveles de empuje, deliberadamente distintos:
+//   · "Continúa" — un empujón ligero. Envía literalmente esa palabra, respetando
+//     el modo activo (personaje o narrador): sirve para cuando el jugador no
+//     tiene nada que añadir y solo quiere que la escena siga su curso natural
+//     (un personaje termine de hablar, una acción en marcha se resuelva).
+//   · "Continúa la historia" — un empujón fuerte y explícito. Siempre fuerza
+//     modo narrador con una instrucción específica: resolver cualquier acción
+//     pendiente y hacer avanzar la trama de forma sustancial, no solo sostener
+//     la atmósfera. Para cuando el jugador quiere forzar que "pase algo".
 
-function ContinueStoryButton({
-  activeCharacterId,
-  narratorMode,
-}: {
-  activeCharacterId: string | null;
-  narratorMode: boolean;
-}) {
+function ContinueButtons() {
   const { sendMessage, isStreaming } = useChatStore();
-  const [sending, setSending] = React.useState(false);
+  const [sendingWhich, setSendingWhich] = React.useState<'continue' | 'advance' | null>(null);
 
-  async function handleClick() {
-    if (isStreaming || sending) return;
-    setSending(true);
+  async function handleContinue() {
+    if (isStreaming || sendingWhich) return;
+    setSendingWhich('continue');
+    try {
+      await sendMessage({ message: 'Continúa' });
+    } finally {
+      setSendingWhich(null);
+    }
+  }
+
+  async function handleAdvance() {
+    if (isStreaming || sendingWhich) return;
+    setSendingWhich('advance');
     try {
       await sendMessage({
-        message:          'Narrador, avanza la historia. Describe qué ocurre a continuación sin esperar mi intervención.',
+        message:
+          'Narrador, fuerza un avance real de la historia. Si hay alguna acción en curso, resuélvela ahora — no la dejes a medias. ' +
+          'Después, haz que la trama avance de forma sustancial: una consecuencia, un giro, una decisión de un PNJ, algo que cambie la escena. ' +
+          'No te limites a sostener la atmósfera: este turno es explícitamente para empujar la historia hacia adelante.',
         forceNarratorMode: true,   // always narrator, regardless of the selector
       });
     } finally {
-      setSending(false);
+      setSendingWhich(null);
     }
   }
 
   if (isStreaming) return null;
 
   return (
-    <button
-      onClick={handleClick}
-      disabled={sending}
-      className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border border-accent/50 text-accent hover:bg-accent/12 active:scale-95 disabled:opacity-50 transition-all"
-      title="Continúa la historia"
-    >
-      <ChevronRight size={12} />
-      Continúa la historia
-    </button>
+    <div className="flex items-center gap-1.5 flex-wrap justify-end">
+      <button
+        onClick={handleContinue}
+        disabled={sendingWhich !== null}
+        className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border border-border text-text-secondary hover:text-text-primary hover:bg-white/8 active:scale-95 disabled:opacity-50 transition-all"
+        title="Continúa"
+      >
+        <ChevronRight size={12} />
+        Continúa
+      </button>
+      <button
+        onClick={handleAdvance}
+        disabled={sendingWhich !== null}
+        className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border border-accent/50 text-accent hover:bg-accent/12 active:scale-95 disabled:opacity-50 transition-all"
+        title="Continúa la historia"
+      >
+        <ChevronsRight size={12} />
+        Continúa la historia
+      </button>
+    </div>
   );
 }
 

@@ -82,8 +82,11 @@ export function MessageInput({ characters, activeCharacterId, onCharacterChange,
 
   return (
     <div className="flex-shrink-0 border-t border-border px-4 py-3">
-      {/* Selector row: character/narrator on the left, optional slot on the right */}
-      <div className="flex items-center justify-between mb-2">
+      {/* Selector row: character/narrator on the left, optional slot on the right.
+          flex-wrap: el rightSlot puede llevar más de un botón (ver ContinueButtons)
+          y en móvil no siempre cabe junto al selector — que baje de línea en vez
+          de desbordar o achicar el selector hasta ilegible. */}
+      <div className="flex items-center justify-between flex-wrap gap-y-1.5 mb-2">
       <div className="relative" ref={menuRef}>
         <button
           onClick={() => setShowCharMenu((v) => !v)}
