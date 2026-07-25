@@ -289,11 +289,10 @@ body {
 .narrator-content .speaker-tag img,
 .narrator-content .speaker-avatar {
   display: inline-block;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
+  width: 58px;
+  height: 38px;
+  border-radius: 20%;
   object-fit: cover;
-  border: 2px solid rgba(124, 58, 237, 0.45);
   flex-shrink: 0;
   box-shadow: 0 0 0 1px rgba(255,255,255,0.06);
   background-size: cover;
@@ -331,28 +330,23 @@ body {
     display: flex;
     align-items: center;
     width: 100%;
-    height: 44px;
+    height: 38px;
+    background-color:#3f3f46;
     border-radius: 8px;
     overflow: hidden;
     position: relative;
-    background-color: var(--surface-2);
-    /* La imagen se acota a 66px de ANCHO (no "cover" a lo ancho de toda la barra):
-       con la barra tan ancha y solo 44px de alto, "cover" escalaba en función del
-       ancho y dejaba un zoom extremo (apenas se veía el pelo). Al fijar el ancho
-       de render a 66px con alto automático, se conserva el encuadre de la cara. */
-    background-image:
-      linear-gradient(to right, transparent 0px, transparent 56px, var(--surface-2) 66px),
-      var(--avatar-url, none);
     background-position: 0 0, left center;
     background-size: 100% 100%, 66px auto;
     background-repeat: no-repeat, no-repeat;
-    padding-left: 78px;
   }
+
+
+  
 
   /* El círculo interior queda superseded por el fondo de la propia barra */
   .narrator-content .speaker-tag .speaker-avatar,
   .narrator-content .speaker-tag .speaker-initials {
-    display: none;
+    display: block
   }
 
   .narrator-content .speaker-tag strong {
