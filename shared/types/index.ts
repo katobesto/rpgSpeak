@@ -222,6 +222,19 @@ export interface WorldState {
    * empieza el registro. Una cabecera falsa es peor que ninguna.
    */
   established: boolean;
+  /**
+   * Ancla de fecha real (año/mes/día/día de semana), solo para historias SIN
+   * calendario propio (`Story.calendar === null`, el caso "ambientada en el
+   * mundo real, aquí y ahora"). Se fija UNA sola vez, en el momento en que la
+   * escena se ancla, con la fecha real de ESE momento — nunca una fecha fija
+   * de fábrica, y nunca recalculada turno a turno (eso desincronizaría el
+   * reloj de la partida del paso del tiempo narrado). El modelo no interviene
+   * en esto: nunca se le pregunta la fecha, solo la hora del día.
+   * Las historias con calendario propio (fantasía, o un año histórico
+   * concreto) no usan esto — su calendario define su propia fecha de inicio
+   * y nunca se pisa.
+   */
+  calendarAnchor?: { year: number; month: number; day: number; weekdayIndex: number } | null;
   updatedAt: string;
 }
 

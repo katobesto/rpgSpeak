@@ -139,7 +139,7 @@ export function formatHeader(clock: WorldClock, location: string | null | undefi
 /** Estado inicial: SIN anclar. No se imprime cabecera hasta que el modelo declare
  *  la escena con [ESCENA:...] — ver el campo `established` de WorldState. */
 export function initialWorldState(): WorldState {
-  return { minutesElapsed: 0, weather: 'Cielo despejado', established: false, updatedAt: new Date().toISOString() };
+  return { minutesElapsed: 0, weather: 'Cielo despejado', established: false, calendarAnchor: null, updatedAt: new Date().toISOString() };
 }
 
 /** Normaliza un worldState leído de la BD. Los guardados antes de existir
@@ -151,7 +151,63 @@ export function normalizeWorldState(raw: WorldState | undefined | null): WorldSt
     minutesElapsed: Math.max(0, Math.floor(raw.minutesElapsed ?? 0)),
     weather:        raw.weather || 'Cielo despejado',
     established:    raw.established === true,
+    calendarAnchor: raw.calendarAnchor ?? null,
     updatedAt:      raw.updatedAt ?? new Date().toISOString(),
+  };
+}
+
+// ── Ancla de fecha real para historias sin calendario propio ────────────────
+//
+// GREGORIAN_CALENDAR trae un año/mes/día de FÁBRICA (1 de marzo de 2024) que
+// no tiene por qué coincidir con la fecha real en la que arranca cada partida
+// nueva. Para una historia "contemporánea" (Story.calendar === null, la
+// forma de decir "ambientada en el mundo real, aquí y ahora") el año/mes/día
+// deben anclarse a la fecha real del servidor en el momento en que la escena
+// se establece — nunca antes (no hay nada que anclar) y nunca recalculado en
+// turnos posteriores (el reloj de la partida dejaría de avanzar de forma
+// coherente con el paso del tiempo narrado, que es independiente del tiempo
+// real que tarda el jugador en escribir el siguiente mensaje).
+//
+// El modelo NO interviene en esto: la etiqueta [ESCENA:...] solo declara la
+// HORA del día (HH:MM), nunca el año — ese dato no está bajo su control ni se
+// le pregunta jamás, así que no hay riesgo de que arrastre una fecha de su
+// propio corte de entrenamiento.
+//
+// Las historias con calendario propio (Story.calendar no nulo — fantasía, o
+// un año histórico concreto) NUNCA pasan por aquí: su calendario ya define su
+// propia fecha de inicio y se respeta siempre tal cual.
+
+/** Fecha real de HOY, en el formato que espera `calendarAnchor`. */
+export function todayCalendarAnchor(): NonNullable<WorldState['calendarAnchor']> {
+  const now = new Date();
+  return {
+    year:  now.getFullYear(),
+    month: now.getMonth(),       // 0-indexed, igual que StoryCalendar.months
+    day:   now.getDate(),
+    weekdayIndex: (now.getDay() + 6) % 7,  // JS: 0=domingo → aquí 0=lunes, como StoryCalendar.weekdays
+  };
+}
+
+/**
+ * Calendario EFECTIVO para una conversación concreta.
+ * - Historia con calendario propio → se devuelve tal cual, sin tocar.
+ * - Historia sin calendario propio y ya anclada (`anchor` presente) → el
+ *   gregoriano real, pero con el año/mes/día/día-de-semana de esa ancla.
+ * - Historia sin calendario propio y aún sin anclar → el gregoriano de
+ *   fábrica (irrelevante en la práctica: sin anclar no se imprime cabecera).
+ */
+export function resolveEffectiveCalendar(
+  storyCalendar: StoryCalendar | null,
+  anchor: WorldState['calendarAnchor'] | undefined,
+): StoryCalendar {
+  if (storyCalendar) return storyCalendar;
+  if (!anchor) return GREGORIAN_CALENDAR;
+  return {
+    ...GREGORIAN_CALENDAR,
+    startYear:        anchor.year,
+    startMonth:       anchor.month,
+    startDay:         anchor.day,
+    startWeekdayIndex: anchor.weekdayIndex,
   };
 }
 

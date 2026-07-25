@@ -3,6 +3,7 @@ import { matchCharacterName } from '@rpgspeak/shared';
 import {
   computeClock, formatHeader, normalizeWorldState, parseTimeAdvance, parseSceneTag,
   applySceneTime, currentMinuteOfDay, DEFAULT_ADVANCE_MINUTES,
+  resolveEffectiveCalendar, todayCalendarAnchor,
 } from '../world/calendar.js';
 import { buildContext, filterWitnessedMessages } from './context-builder.js';
 import { trimContext } from './context-trimmer.js';
@@ -797,10 +798,16 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     const worldState = normalizeWorldState(
       (conversation.metadata as { worldState?: WorldState } | null)?.worldState,
     );
+    // Calendario EFECTIVO de esta conversación: si ninguna historia vinculada
+    // define uno propio (caso "contemporánea", ambientada en el mundo real),
+    // se usa el gregoriano anclado a la fecha real en que la escena se
+    // estableció — ver resolveEffectiveCalendar. Las historias con calendario
+    // propio (fantasía, o un año histórico concreto) lo ignoran por completo.
+    const effectiveCalendar = resolveEffectiveCalendar(worldCalendar, worldState.calendarAnchor);
     // Sin anclar → sin cabecera: se le pide al modelo que declare la escena en
     // vez de imponerle una hora y un lugar que pueden contradecir lo narrado.
     const worldHeader = worldState.established
-      ? formatHeader(computeClock(worldState, worldCalendar), conversation.currentLocation)
+      ? formatHeader(computeClock(worldState, effectiveCalendar), conversation.currentLocation)
       : null;
 
     // Detección de acción física/sexual del jugador. Se calcula ANTES de construir
@@ -1306,15 +1313,24 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       const sceneRaw = sceneMatches.at(-1)?.[1];
       const scene = sceneRaw ? parseSceneTag(sceneRaw) : null;
 
+      // Ancla de fecha real (solo historias SIN calendario propio): se fija en
+      // el instante exacto en que la escena se establece por primera vez —
+      // nunca antes (nada que anclar) ni recalculada en turnos posteriores
+      // (calendarAnchor ya viene de worldState, se conserva tal cual).
+      const isEstablishingNow = !worldState.established && scene?.minuteOfDay != null;
+      const calendarAnchor = worldState.calendarAnchor
+        ?? (isEstablishingNow && !worldCalendar ? todayCalendarAnchor() : null);
+      const effectiveCalendarForTurn = resolveEffectiveCalendar(worldCalendar, calendarAnchor);
+
       let minutesElapsed: number;
       if (scene?.minuteOfDay != null) {
-        minutesElapsed = applySceneTime(worldState, worldCalendar, scene.minuteOfDay);
+        minutesElapsed = applySceneTime(worldState, effectiveCalendarForTurn, scene.minuteOfDay);
         console.log(`[world] Escena ${worldState.established ? 'corregida' : 'anclada'} → ${sceneRaw}`);
       } else {
         // Última ocurrencia = la más autoritativa (igual criterio que [UBICACION:]).
         const rawAdvance = timeMatches.at(-1)?.[1];
         const parsed = rawAdvance
-          ? parseTimeAdvance(rawAdvance, currentMinuteOfDay(worldState, worldCalendar))
+          ? parseTimeAdvance(rawAdvance, currentMinuteOfDay(worldState, effectiveCalendarForTurn))
           : null;
         if (rawAdvance && parsed === null) {
           console.warn(`[world] [TIEMPO:${rawAdvance}] no reconocido — aplicando avance por defecto`);
@@ -1345,6 +1361,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
         weather: weatherMatches.at(-1)?.[1]?.trim() || worldState.weather,
         // Queda anclada en cuanto el modelo declara una hora válida.
         established: worldState.established || scene?.minuteOfDay != null,
+        calendarAnchor,
         updatedAt: new Date().toISOString(),
       };
       // Merge sobre metadata FRESCO para no pisar partyState/deathLoop/resúmenes.
@@ -1363,7 +1380,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       //     la escena y conserva la hora de inicio; el avance se verá en el turno siguiente.
       if (scene?.minuteOfDay != null && nextWorldState.established) {
         headerForDisplay = formatHeader(
-          computeClock(nextWorldState, worldCalendar),
+          computeClock(nextWorldState, effectiveCalendarForTurn),
           locationUpdate ?? conversation.currentLocation,
         );
       }
@@ -2206,13 +2223,17 @@ export async function bootstrapWorldStateAsync(
     const freshState = normalizeWorldState((fresh.metadata as { worldState?: WorldState } | null)?.worldState);
     if (freshState.established) return; // otra ejecución se adelantó
 
+    // Ancla de fecha real (solo historias sin calendario propio) — se fija
+    // AHORA, en el instante del anclaje, nunca antes ni recalculada después.
+    const calendarAnchor = calendar ? null : todayCalendarAnchor();
     convRepo.update(conversationId, {
       metadata: {
         ...fresh.metadata,
         worldState: {
-          minutesElapsed: applySceneTime(freshState, calendar, scene.minuteOfDay),
+          minutesElapsed: applySceneTime(freshState, resolveEffectiveCalendar(calendar, calendarAnchor), scene.minuteOfDay),
           weather: freshState.weather,
           established: true,
+          calendarAnchor,
           updatedAt: new Date().toISOString(),
         } satisfies WorldState,
       },
@@ -2337,7 +2358,7 @@ export async function refineWorldStateAsync(
     // (DEFAULT_ADVANCE_MINUTES, aplicado de forma síncrona para poder mostrar
     // la cabecera de ese turno) por el real que determinó esta llamada.
     if (timeRaw) {
-      const advance = parseTimeAdvance(timeRaw, currentMinuteOfDay(state, calendar));
+      const advance = parseTimeAdvance(timeRaw, currentMinuteOfDay(state, resolveEffectiveCalendar(calendar, state.calendarAnchor)));
       if (advance == null) {
         console.warn(`[world-clock] Tiempo no interpretable: "${timeRaw}" — se mantiene el avance provisional`);
       } else {
