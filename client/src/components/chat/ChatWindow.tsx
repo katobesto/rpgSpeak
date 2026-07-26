@@ -13,6 +13,7 @@ import { ImageGalleryModal } from './ImageGalleryModal.tsx';
 import { BackgroundGeneratorModal } from './BackgroundGeneratorModal.tsx';
 import { BattleModal } from './BattleModal.tsx';
 import { PlayerSheetModal } from './PlayerSheetModal.tsx';
+import { DiceRollModal } from './DiceRollModal.tsx';
 import { useChatStore, STORY_KICKOFF_MSG } from '../../stores/chat.store.ts';
 import { useAuthStore } from '../../stores/auth.store.ts';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -52,9 +53,10 @@ import {
   Upload,
   GitBranch,
   StickyNote,
+  Dices,
 } from 'lucide-react';
 import { Avatar } from '../ui/Avatar.tsx';
-import type { Character, Story, Conversation, User, ConversationBackground, PartyState, PlayerSheet, DeathLoopState } from '@rpgspeak/shared';
+import type { Character, Story, Conversation, User, ConversationBackground, PartyState, PlayerSheet, DeathLoopState, DiceDifficulty } from '@rpgspeak/shared';
 
 export function ChatWindow() {
   const {
@@ -731,6 +733,10 @@ export function ChatWindow() {
         <PlayerSheetModal
           conversationId={convId!}
           sheet={(activeConversation.metadata?.playerSheet as PlayerSheet | undefined) ?? null}
+          diceDifficulty={activeConversation.metadata?.diceDifficulty as DiceDifficulty | undefined}
+          adventureMode={activeConversation.stories.some(
+            (link) => allStories.find((s) => s.id === link.storyId)?.adventureMode,
+          )}
           onClose={() => setPlayerSheetModalOpen(false)}
         />
       )}
@@ -741,6 +747,8 @@ export function ChatWindow() {
           onClose={() => setBackgroundModalOpen(false)}
         />
       )}
+
+      <DiceRollModal />
 
       {battleOpen && (
         <BattleModal
@@ -1410,7 +1418,7 @@ function ConvSummaryPopup({
 //     la atmósfera. Para cuando el jugador quiere forzar que "pase algo".
 
 function ContinueButtons() {
-  const { sendMessage, isStreaming } = useChatStore();
+  const { sendMessage, isStreaming, previewDiceRoll } = useChatStore();
   const [sendingWhich, setSendingWhich] = React.useState<'continue' | 'advance' | null>(null);
 
   async function handleContinue() {
@@ -1443,6 +1451,13 @@ function ContinueButtons() {
 
   return (
     <div className="flex items-center gap-1.5 flex-wrap justify-end">
+      <button
+        onClick={previewDiceRoll}
+        className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border border-border text-text-secondary hover:text-text-primary hover:bg-white/8 active:scale-95 transition-all"
+        title="Tirada de prueba — solo para revisar el modal, no afecta a la historia"
+      >
+        <Dices size={12} />
+      </button>
       <button
         onClick={handleContinue}
         disabled={sendingWhich !== null}

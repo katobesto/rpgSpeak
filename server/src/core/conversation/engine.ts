@@ -1,5 +1,5 @@
-import type { GenerateRequest, Character, Story, Message, Conversation, MemoryEntry, PartyState, DeathLoopState, WorldState, StoryCalendar, SceneDirectorState, CharacterSceneState, NpcSceneState, RpgStats } from '@rpgspeak/shared';
-import { matchCharacterName } from '@rpgspeak/shared';
+import type { GenerateRequest, Character, Story, Message, Conversation, MemoryEntry, PartyState, DeathLoopState, WorldState, StoryCalendar, SceneDirectorState, CharacterSceneState, NpcSceneState, RpgStats, DiceDifficulty } from '@rpgspeak/shared';
+import { matchCharacterName, effectiveDiceDifficulty } from '@rpgspeak/shared';
 import {
   computeClock, formatHeader, normalizeWorldState, parseTimeAdvance, parseSceneTag,
   applySceneTime, currentMinuteOfDay, DEFAULT_ADVANCE_MINUTES,
@@ -710,6 +710,14 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
 
     const isAdventureMode = linkedStories.some((s) => s.adventureMode);
 
+    // Nivel de tiradas de ESTA conversación. La preferencia guardada manda
+    // sobre adventureMode; sin preferencia se conserva el comportamiento
+    // histórico (tiradas puntuales solo en aventura).
+    const diceDifficulty = effectiveDiceDifficulty(
+      (conversation.metadata as { diceDifficulty?: DiceDifficulty } | null)?.diceDifficulty,
+      isAdventureMode,
+    );
+
     // Modo "Regreso después de la muerte": activo si alguna historia vinculada
     // lo tiene habilitado. El estado del bucle vive en conversation.metadata.
     const deathModeActive = linkedStories.some((s) => s.deathMode);
@@ -845,6 +853,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       groupCharacters: contextGroupChars,
       narratorMode,
       adventureMode: isAdventureMode,
+      diceDifficulty,
       userDisplayName: opts.userDisplayName,
       characterAffinities,
       affinitySystemPrompt: settings.affinitySystemPrompt,

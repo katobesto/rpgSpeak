@@ -105,17 +105,56 @@ export function rollDice(
  *  (ver la corrección de [MEMORIA:...] en la misma sesión). */
 export const DICE_ROLL_RE = /\[TIRADA:\s*([^|\]]*)\|([^|\]]+)\|(\d{1,2})\|([^\]]*)\]/gi;
 
-/** Instrucción para el prompt principal — dónde y cómo pedir una tirada. */
-export const DICE_ROLL_INSTRUCTION =
-  `## TIRADAS DE DADOS — el servidor decide, tú narras\n\n` +
-  `Cuando el desenlace de una acción sea genuinamente incierto (un reto físico o mental arriesgado, un intento de` +
-  ` engañar, esquivar o forzar algo, un golpe en combate), pide una tirada real en vez de decidir tú si sale bien.` +
-  ` Al final de tu respuesta, en línea propia:\n` +
-  `[TIRADA:Quién|Atributo|CD|qué se está intentando, en pocas palabras]\n` +
-  `Ejemplo: [TIRADA:Javier|Destreza|15|colarse junto a los guardias sin ser visto]\n\n` +
-  `- Quién: el nombre exacto de quien tira (del jugador o de un personaje del reparto). Puedes dejarlo vacío si es el jugador.\n` +
-  `- Atributo: el nombre tal como aparece en su ficha (Fuerza, Destreza, Magia...). Si no tiene ficha o no tiene ese atributo, el modificador será 0 — igualmente válido.\n` +
-  `- CD: la dificultad (1-20). Orientativo: 10 trivial con riesgo · 13 moderado · 16 difícil · 19 muy difícil.\n\n` +
-  `NO decidas tú el resultado ni lo narres todavía: termina tu respuesta justo en el momento de tensión, antes de saber cómo sale. ` +
-  `El sistema tirará el dado y TE devolverá el resultado para que continúes narrando el desenlace en tu siguiente respuesta — nunca inventes ni repitas una tirada porque no te guste el número.\n` +
-  `Es un marcador técnico: se borra antes de mostrarse. La mayoría de acciones NO necesitan tirada — solo cuando el resultado esté de verdad en juego.`;
+/**
+ * Política de "cuándo tirar", por nivel de dificultad de la conversación (ver
+ * DiceDifficulty en shared). Es la ÚNICA parte que cambia entre niveles: el
+ * formato de la etiqueta y la regla de autoridad (el servidor tira, el modelo
+ * narra) son idénticos siempre.
+ *
+ * El nivel 1 reproduce literalmente la instrucción que había antes de existir
+ * el selector, para que las conversaciones ya en curso no cambien de
+ * comportamiento al introducirse esta función.
+ */
+const TRIGGER_POLICY: Record<1 | 2 | 3, string> = {
+  1:
+    `Cuando el desenlace de una acción sea genuinamente incierto (un reto físico o mental arriesgado, un intento de` +
+    ` engañar, esquivar o forzar algo, un golpe en combate), pide una tirada real en vez de decidir tú si sale bien.`,
+  2:
+    `Pide una tirada SIEMPRE que el jugador intente algo con oposición real o posibilidad auténtica de fallar:` +
+    ` un esfuerzo físico exigente, puntería, sigilo, acrobacia, persuadir o intimidar a alguien que no está de acuerdo,` +
+    ` cualquier golpe o maniobra en combate, forzar un mecanismo, resistir un efecto. No supongas que sale bien porque` +
+    ` el personaje sea competente: la competencia es el modificador, no el resultado.`,
+  3:
+    `Pide una tirada para CASI CUALQUIER acción deliberada del jugador que no sea pura conversación o desplazamiento` +
+    ` trivial. Si el jugador intenta hacer algo — lanzar, saltar, golpear, trepar, apuntar, convencer, registrar,` +
+    ` recordar, aguantar — la resuelve el dado, no tú. Ante la duda, TIRA. Solo se resuelven sin dado las acciones` +
+    ` sin ningún margen de fallo (abrir una puerta que ya está abierta, mirar alrededor, hablar sin intención de persuadir).`,
+};
+
+/** Instrucción para el prompt principal — dónde y cómo pedir una tirada.
+ *  Devuelve null en el nivel 0: ahí el bloque no se inyecta en absoluto y el
+ *  modelo ni siquiera sabe que existen los dados. */
+export function diceRollInstruction(level: number): string | null {
+  if (level <= 0) return null;
+  const policy = TRIGGER_POLICY[(Math.min(3, Math.round(level)) as 1 | 2 | 3)];
+  const closing =
+    level >= 3
+      ? `Ante la duda, pide la tirada: es preferible tirar de más que resolver a dedo algo que podía fallar.`
+      : level === 2
+        ? `Las acciones sin riesgo real NO necesitan tirada — pero no te saltes ninguna en la que sí se pueda fallar.`
+        : `Es un marcador técnico: se borra antes de mostrarse. La mayoría de acciones NO necesitan tirada — solo cuando el resultado esté de verdad en juego.`;
+
+  return (
+    `## TIRADAS DE DADOS — el servidor decide, tú narras\n\n` +
+    `${policy}` +
+    ` Al final de tu respuesta, en línea propia:\n` +
+    `[TIRADA:Quién|Atributo|CD|qué se está intentando, en pocas palabras]\n` +
+    `Ejemplo: [TIRADA:Javier|Destreza|15|colarse junto a los guardias sin ser visto]\n\n` +
+    `- Quién: el nombre exacto de quien tira (del jugador o de un personaje del reparto). Puedes dejarlo vacío si es el jugador.\n` +
+    `- Atributo: el nombre tal como aparece en su ficha (Fuerza, Destreza, Magia...). Si no tiene ficha o no tiene ese atributo, el modificador será 0 — igualmente válido.\n` +
+    `- CD: la dificultad (1-20). Orientativo: 10 trivial con riesgo · 13 moderado · 16 difícil · 19 muy difícil.\n\n` +
+    `NO decidas tú el resultado ni lo narres todavía: termina tu respuesta justo en el momento de tensión, antes de saber cómo sale. ` +
+    `El sistema tirará el dado y TE devolverá el resultado para que continúes narrando el desenlace en tu siguiente respuesta — nunca inventes ni repitas una tirada porque no te guste el número.\n` +
+    `${closing}`
+  );
+}

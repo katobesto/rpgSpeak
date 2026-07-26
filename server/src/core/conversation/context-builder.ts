@@ -1,6 +1,6 @@
 import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem, PartyState, DeathLoopState, NarrativeThread, SceneDirectorState, CharacterSceneState, RpgStats, ConversationNote } from '@rpgspeak/shared';
 import { MemoryRepository } from '../memory/memory.repository.js';
-import { DICE_ROLL_INSTRUCTION } from './dice.js';
+import { diceRollInstruction } from './dice.js';
 import { ContextRepository, type ContextItemWithEmbedding } from '../../modules/context/context.repository.js';
 import { ProviderRepository } from '../../modules/providers/provider.repository.js';
 import { createProvider } from '../llm/provider.factory.js';
@@ -33,6 +33,9 @@ export interface BuildContextOptions {
   groupCharacters?: Character[];  // Otros personajes del grupo (para modo narrador y modo personaje)
   narratorMode?: boolean;         // true = prompt de narrador omnisciente
   adventureMode?: boolean;        // true = full GM/RPG behavior
+  /** Nivel de tiradas de esta conversación (0-3), ya resuelto por el engine.
+   *  Manda sobre adventureMode: es la preferencia explícita del usuario. */
+  diceDifficulty?: number;
   userDisplayName?: string;       // Nombre del usuario para inyectar en el contexto
   characterAffinities?: Array<{ characterId: string; name: string; affinity: number }>;
   affinitySystemPrompt?: string;
@@ -900,6 +903,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     groupCharacters = [],
     narratorMode = false,
     adventureMode = false,
+    diceDifficulty = 0,
     userDisplayName,
     characterAffinities,
     affinitySystemPrompt,
@@ -1577,15 +1581,31 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     footerCount++;
   }
 
-  // 9c-ter. Tiradas de dados — solo en modo aventura. Iba en el prefijo
+  // 9c-ter. Tiradas de dados, con la agresividad que pida el nivel de esta
+  // conversación (`diceDifficulty`, resuelto en el engine). Iba en el prefijo
   // estático (systemParts, al principio del prompt) y el modelo nunca la
   // seguía: 0 tiradas emitidas en toda la base de datos, en ninguna
   // conversación de aventura. Mismo diagnóstico que ya resolvió el reloj del
   // mundo y la ubicación — una instrucción de "etiqueta técnica" enterrada al
   // principio de un prompt largo se diluye; cerca de la generación pesa mucho
   // más. Compartida entre narrador y personaje, como antes.
-  if (needsSplit && adventureMode) {
-    history.push({ role: 'system', content: DICE_ROLL_INSTRUCTION });
+  //
+  // Antes esto se cerraba con `adventureMode`; ahora manda el nivel elegido,
+  // que por defecto reproduce ese mismo comportamiento (ver
+  // effectiveDiceDifficulty). Así un chat sin historia de aventura puede tener
+  // tiradas si el usuario las pide, que era justo el caso que fallaba.
+  //
+  // POSICIÓN SEGÚN NIVEL. Medido en un prompt real: aquí el bloque queda a unos
+  // 12.000 caracteres del punto de generación, detrás de coherencia (7,4k) y del
+  // dossier de escena, y el modelo lo ignoraba — mientras SÍ obedecía las
+  // etiquetas del último bloque ([TAQUE:...], cabecera de escena). Es el mismo
+  // efecto de dilución que ya sacó a esta instrucción del prefijo estático.
+  // Por eso, a partir del nivel 2 se reinyecta abajo del todo (9d-octies), casi
+  // pegada a la generación. El nivel 1 se queda aquí para no cambiar el
+  // comportamiento de las conversaciones que ya venían funcionando así.
+  const diceInstruction = needsSplit ? diceRollInstruction(diceDifficulty) : null;
+  if (diceInstruction && diceDifficulty <= 1) {
+    history.push({ role: 'system', content: diceInstruction });
     footerCount++;
   }
 
@@ -1697,6 +1717,16 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // necesita, sin repetir el bloque entero.
   if (needsSplit && lastMessage && hasOocNote(lastMessage.content)) {
     history.push({ role: 'system', content: OOC_REMINDER_BLOCK });
+    footerCount++;
+  }
+
+  // 9d-octies. Tiradas de dados en los niveles exigentes (2-3). Va aquí, y no
+  // arriba con el resto de reglas de comportamiento, porque a esa distancia el
+  // modelo la ignoraba: pedir tirada para "casi cualquier acción" solo se
+  // sostiene si la instrucción es de lo último que lee. Mismo criterio que la
+  // cabecera ambiental de 9e, que sí se obedece siempre.
+  if (diceInstruction && diceDifficulty >= 2) {
+    history.push({ role: 'system', content: diceInstruction });
     footerCount++;
   }
 

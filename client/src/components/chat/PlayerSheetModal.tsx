@@ -1,15 +1,21 @@
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, Trash2, Sword } from 'lucide-react';
+import { Plus, Trash2, Sword, Dices } from 'lucide-react';
 import { Modal } from '../ui/Modal.tsx';
 import { Button } from '../ui/Button.tsx';
 import { Input, Textarea } from '../ui/Input.tsx';
 import { conversationsApi } from '../../api/conversations.ts';
-import type { PlayerSheet } from '@rpgspeak/shared';
+import { DICE_DIFFICULTY_LEVELS, effectiveDiceDifficulty } from '@rpgspeak/shared';
+import type { PlayerSheet, DiceDifficulty } from '@rpgspeak/shared';
 
 interface PlayerSheetModalProps {
   conversationId: string;
   sheet: PlayerSheet | null;
+  /** Nivel guardado en `conversation.metadata.diceDifficulty` (undefined = sin elegir). */
+  diceDifficulty: DiceDifficulty | undefined;
+  /** Si alguna historia vinculada es de aventura — solo para saber qué nivel
+   *  mostrar cuando el usuario aún no ha elegido ninguno. */
+  adventureMode: boolean;
   onClose: () => void;
 }
 
@@ -22,21 +28,29 @@ interface PlayerSheetModalProps {
  * Sin esta ficha, el modelo no tiene ninguna base real contra la que
  * contrastar lo que el jugador dice tener o poder hacer.
  */
-export function PlayerSheetModal({ conversationId, sheet, onClose }: PlayerSheetModalProps) {
+export function PlayerSheetModal({ conversationId, sheet, diceDifficulty, adventureMode, onClose }: PlayerSheetModalProps) {
   const qc = useQueryClient();
   const [form, setForm] = useState<PlayerSheet>(sheet ?? {});
+  const [difficulty, setDifficulty] = useState<DiceDifficulty>(
+    effectiveDiceDifficulty(diceDifficulty, adventureMode),
+  );
   const [newStatKey, setNewStatKey] = useState('');
   const [newStatVal, setNewStatVal] = useState('');
   const [newAbility, setNewAbility] = useState('');
   const [newInventoryItem, setNewInventoryItem] = useState('');
 
   const mutation = useMutation({
-    mutationFn: () => conversationsApi.updatePlayerSheet(conversationId, form),
+    mutationFn: async () => {
+      await conversationsApi.updatePlayerSheet(conversationId, form);
+      return conversationsApi.updateDiceDifficulty(conversationId, difficulty);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['conversation', conversationId] });
       onClose();
     },
   });
+
+  const activeLevel = DICE_DIFFICULTY_LEVELS[difficulty];
 
   function setField<K extends keyof PlayerSheet>(key: K, value: PlayerSheet[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -242,6 +256,40 @@ export function PlayerSheetModal({ conversationId, sheet, onClose }: PlayerSheet
           placeholder="Trasfondo, condiciones activas, maldiciones..."
           rows={3}
         />
+
+        {/* Ajuste de la partida, no de la ficha — de ahí el separador. */}
+        <div className="pt-4 mt-2 border-t border-border space-y-3">
+          <div className="flex items-center gap-2">
+            <Dices size={14} className="text-accent" />
+            <span className="text-xs font-semibold text-text-secondary uppercase tracking-wider">
+              Dificultad de esta conversación
+            </span>
+          </div>
+          <p className="text-xs text-text-muted">
+            Cuanto más alta, más probable es que el narrador exija una tirada de dados en lugar de decidir él si tu
+            acción sale bien. Solo afecta a esta conversación.
+          </p>
+
+          <input
+            type="range"
+            min={0}
+            max={DICE_DIFFICULTY_LEVELS.length - 1}
+            step={1}
+            value={difficulty}
+            onChange={(e) => setDifficulty(Number(e.target.value) as DiceDifficulty)}
+            className="w-full accent-accent cursor-pointer"
+            aria-label="Dificultad de esta conversación"
+          />
+          <div className="flex justify-between text-[10px] text-text-muted -mt-1">
+            <span>Solo narrativa</span>
+            <span>Acciones por tirada</span>
+          </div>
+
+          <div className="rounded-lg px-3 py-2 bg-surface-2 border border-border">
+            <div className="text-xs font-medium text-accent">{activeLevel.label}</div>
+            <div className="text-xs text-text-muted mt-0.5">{activeLevel.hint}</div>
+          </div>
+        </div>
       </div>
     </Modal>
   );

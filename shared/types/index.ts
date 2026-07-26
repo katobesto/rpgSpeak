@@ -71,6 +71,44 @@ export interface RpgStats {
 export type PlayerSheet = RpgStats;
 
 /**
+ * Cuántas de las acciones del jugador deben resolverse con un d20 real, POR
+ * CONVERSACIÓN (vive en `conversation.metadata.diceDifficulty`).
+ *
+ * Existe porque "cuándo hace falta tirar" no es una constante del sistema sino
+ * una preferencia de mesa: la misma instrucción que a una campaña de intriga le
+ * sobra, a una de acción se le queda corta. Dejarlo al criterio del modelo daba
+ * el peor de los resultados — narraba el éxito sin tirar (un triple de
+ * baloncesto que sencillamente entra), que es justo lo que el sistema de dados
+ * venía a evitar.
+ *
+ * El nivel elegido MANDA sobre `story.adventureMode`: si el usuario lo sube en
+ * este chat, hay tiradas aunque la historia no esté marcada como aventura.
+ */
+export type DiceDifficulty = 0 | 1 | 2 | 3;
+
+/** Etiquetas de los niveles, para que UI y prompt no se desincronicen. */
+export const DICE_DIFFICULTY_LEVELS: ReadonlyArray<{
+  level: DiceDifficulty;
+  label: string;
+  hint: string;
+}> = [
+  { level: 0, label: 'Solo narrativa',   hint: 'Nunca se piden tiradas. El narrador decide todos los desenlaces.' },
+  { level: 1, label: 'Momentos clave',   hint: 'Solo cuando algo importante está de verdad en juego.' },
+  { level: 2, label: 'Acciones de riesgo', hint: 'Cualquier intento con oposición real o posibilidad de fallar.' },
+  { level: 3, label: 'Casi toda acción', hint: 'Casi cualquier cosa que intentes pasa por el dado.' },
+];
+
+/** Nivel efectivo: sin preferencia guardada se conserva el comportamiento
+ *  histórico (tiradas puntuales solo en modo aventura). */
+export function effectiveDiceDifficulty(
+  saved: DiceDifficulty | null | undefined,
+  adventureMode: boolean,
+): DiceDifficulty {
+  if (saved === undefined || saved === null) return adventureMode ? 1 : 0;
+  return saved;
+}
+
+/**
  * Resultado de una tirada [TIRADA:...] resuelta por el servidor. Persistido en
  * `message.metadata.diceRoll` para que el cliente pinte el dado, y devuelto en
  * el evento `done` para que el store dispare la narración del desenlace.

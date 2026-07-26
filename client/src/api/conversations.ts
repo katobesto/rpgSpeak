@@ -1,5 +1,5 @@
 import { api } from './client.ts';
-import type { Conversation, Message, CreateConversationDto, UpdateConversationDto, CreateMessageDto, PartyState, PlayerSheet } from '@rpgspeak/shared';
+import type { Conversation, Message, CreateConversationDto, UpdateConversationDto, CreateMessageDto, PartyState, PlayerSheet, DiceDifficulty } from '@rpgspeak/shared';
 
 // Extended update type that includes group management fields the server accepts
 type UpdateConversationExtended = UpdateConversationDto & {
@@ -38,6 +38,9 @@ export const conversationsApi = {
   /** Ficha RPG del jugador para esta conversación (clase, nivel, habilidades...). */
   updatePlayerSheet: (convId: string, sheet: PlayerSheet) =>
     api.patch<Conversation>(`/conversations/${convId}/player-sheet`, sheet),
+  /** Nivel de tiradas de dados de esta conversación (0-3). */
+  updateDiceDifficulty: (convId: string, diceDifficulty: DiceDifficulty) =>
+    api.patch<Conversation>(`/conversations/${convId}/dice-difficulty`, { diceDifficulty }),
   /** Regreso después de la muerte: rebobina la historia al ancla del bucle. */
   deathRewind: (id: string) =>
     api.post<{ conversation: Conversation; deleted: number }>(`/conversations/${id}/death-rewind`, {}),

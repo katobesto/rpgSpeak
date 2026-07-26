@@ -135,6 +135,22 @@ export const conversationRoutes: FastifyPluginAsync = async (app) => {
     return reply.send({ success: true, data: updated });
   });
 
+  // PATCH /api/conversations/:id/dice-difficulty — cuántas acciones del jugador
+  // se resuelven con un d20 en ESTA conversación (0-3). Vive en metadata, junto
+  // a playerSheet: es una preferencia de mesa por partida, no del usuario.
+  app.patch<{ Params: { id: string } }>('/:id/dice-difficulty', async (req, reply) => {
+    const result = z.object({ diceDifficulty: z.number().int().min(0).max(3) }).safeParse(req.body);
+    if (!result.success) throw new ValidationError(result.error.issues[0].message);
+    const conv = convRepo.findById(req.params.id);
+    if (!conv) throw new NotFoundError('Conversation', req.params.id);
+
+    const meta = (conv.metadata ?? {}) as Record<string, unknown>;
+    const updated = convRepo.update(req.params.id, {
+      metadata: { ...meta, diceDifficulty: result.data.diceDifficulty },
+    });
+    return reply.send({ success: true, data: updated });
+  });
+
   // PATCH /api/conversations/:id/characters/:charId/affinity
   app.patch<{ Params: { id: string; charId: string } }>(
     '/:id/characters/:charId/affinity',

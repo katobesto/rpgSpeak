@@ -306,7 +306,7 @@ body {
   background: var(--accent);
   color: white;
   font-size: 11px;
-  display: inline-flex;
+  display: inline-flex !important;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;

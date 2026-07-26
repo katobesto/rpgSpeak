@@ -15,6 +15,23 @@ interface StreamingState {
   streamingMessageId: string | null;
 }
 
+/** Una tirada [TIRADA:...] ya resuelta por el servidor pero aún no revelada al
+ *  jugador — esperando a que el modal de dados juegue su animación. Hasta que
+ *  no se resuelve (DiceRollModal → resolveDiceRoll), el mensaje que la pidió no
+ *  lleva diceRoll en su metadata (el badge no se muestra) y la narración no
+ *  continúa. */
+interface PendingDiceRoll {
+  messageId: string;
+  diceRoll: DiceRollResult;
+  characterId: string | null | undefined;
+  narrator: boolean;
+  /** Tirada de prueba disparada a mano (botón junto a "Continúa"), sin
+   *  mensaje real detrás — al resolverse no toca la conversación ni envía
+   *  nada a la IA, solo cierra el modal. Sirve para revisar la animación con
+   *  calma sin gastar una tirada real. */
+  preview?: boolean;
+}
+
 interface ChatState extends StreamingState {
   activeConversationId: string | null;
   activeConversation: Conversation | null;
@@ -66,6 +83,17 @@ interface ChatState extends StreamingState {
   /** Rebobinar: elimina del servidor y del store todos los mensajes posteriores
    *  a `messageId` (el propio mensaje ancla se conserva). */
   rewind: (messageId: string) => Promise<void>;
+
+  /** Tirada pendiente de revelar — ver PendingDiceRoll. Null cuando no hay
+   *  ningún dado esperando a que el jugador pulse "Tirar" en el modal. */
+  pendingDiceRoll: PendingDiceRoll | null;
+  /** Llamado por DiceRollModal cuando termina su animación: revela el
+   *  resultado en el mensaje (badge) y envía la nota OOC que hace que la IA
+   *  continúe narrando el desenlace. */
+  resolveDiceRoll: () => void;
+  /** Abre el modal con una tirada de prueba (sin efecto en la conversación) —
+   *  botón junto a "Continúa", para revisar la animación a demanda. */
+  previewDiceRoll: () => void;
 
   stopStreaming: (() => void) | null;
   abort: () => void;
@@ -127,6 +155,51 @@ export const useChatStore = create<ChatState>((set, get) => ({
   narratorMode: false,
   pendingAutoStart: null,
   lastAttemptedMessage: null,
+  pendingDiceRoll: null,
+
+  resolveDiceRoll: () => {
+    const pending = get().pendingDiceRoll;
+    if (!pending) return;
+    // Tirada de prueba: no hay mensaje real detrás, así que no toca la
+    // conversación ni le pide nada a la IA — solo cierra el modal.
+    if (pending.preview) {
+      set({ pendingDiceRoll: null });
+      return;
+    }
+    set((s) => ({
+      pendingDiceRoll: null,
+      messages: s.messages.map((m) =>
+        m.id === pending.messageId
+          ? { ...m, metadata: { ...m.metadata, diceRoll: pending.diceRoll } }
+          : m
+      ),
+    }));
+    void get().sendMessage({
+      message: formatDiceOutcome(pending.diceRoll),
+      characterId: pending.characterId ?? undefined,
+      forceNarratorMode: pending.narrator,
+    });
+  },
+
+  previewDiceRoll: () => {
+    // Datos de muestra realistas — solo para ver la animación con calma, sin
+    // gastar una tirada real ni depender de que la IA la pida.
+    const modifier = 2;
+    const cd = 15;
+    const natural = 1 + Math.floor(Math.random() * 20);
+    const total = natural + modifier;
+    const critical = natural === 20 ? 'success' : natural === 1 ? 'failure' : null;
+    const success = critical !== null ? critical === 'success' : total >= cd;
+    set({
+      pendingDiceRoll: {
+        messageId: '__preview__',
+        diceRoll: { who: 'Javier', attribute: 'Destreza', cd, description: 'Prueba de la tirada de dados', natural, modifier, total, success, critical },
+        characterId: undefined,
+        narrator: true,
+        preview: true,
+      },
+    });
+  },
 
   setPendingAutoStart: (conversationId) => set({ pendingAutoStart: conversationId }),
 
@@ -194,7 +267,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // forceNarratorMode allows individual calls (e.g. "Continúa la historia") to
     // always use narrator mode regardless of what the selector currently shows.
     const narratorMode = forceNarratorMode ?? storeNarratorMode;
-    if (!activeConversationId || get().isStreaming) return;
+    // El guard de pendingDiceRoll es cinturón-y-tirantes: el modal ya bloquea
+    // toda la pantalla mientras espera a que el jugador pulse "Tirar", así que
+    // en la práctica ningún botón debería poder disparar sendMessage antes de
+    // eso. resolveDiceRoll limpia pendingDiceRoll ANTES de llamar aquí, así
+    // que su propio envío nunca queda bloqueado por este check.
+    if (!activeConversationId || get().isStreaming || get().pendingDiceRoll) return;
 
     const mergedOverrides = {
       ...(selectedProviderId ? { providerId: selectedProviderId } : {}),
@@ -331,14 +409,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (locationUpdate !== undefined) get().updateCurrentLocation(locationUpdate);
           if (deathLoop !== undefined) get().setDeathLoop(deathLoop);
           // La tirada pausa la narración a propósito (ver DICE_ROLL_INSTRUCTION);
-          // el servidor ya tiene el número, así que disparamos el desenlace solo
-          // — el jugador no necesita escribir nada para que la escena continúe.
+          // el servidor ya tiene el número, pero no se revela ni se envía el
+          // desenlace todavía — eso lo dispara DiceRollModal (resolveDiceRoll)
+          // cuando el jugador pulsa "Tirar" y termina la animación.
           if (diceRoll) {
-            void get().sendMessage({
-              message: formatDiceOutcome(diceRoll),
-              characterId: characterId ?? undefined,
-              forceNarratorMode: Boolean(narrator),
-            });
+            set({ pendingDiceRoll: { messageId, diceRoll, characterId, narrator: Boolean(narrator) } });
           }
         },
         // Ráfaga de llamadas al LLM en segundo plano (director de escena,
@@ -544,11 +619,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (locationUpdate !== undefined) get().updateCurrentLocation(locationUpdate);
           if (deathLoop !== undefined) get().setDeathLoop(deathLoop);
           if (diceRoll) {
-            void get().sendMessage({
-              message: formatDiceOutcome(diceRoll),
-              characterId: doneCharId ?? undefined,
-              forceNarratorMode: Boolean(narrator),
-            });
+            set({ pendingDiceRoll: { messageId, diceRoll, characterId: doneCharId, narrator: Boolean(narrator) } });
           }
         },
         onEnrichStep: (step) => {
