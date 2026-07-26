@@ -1735,32 +1735,40 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     footerCount++;
   }
 
-  // 9d-octies. Tiradas de dados cerca de la generación — dos casos:
-  // (a) el árbitro dedicado ya resolvió una tirada este turno (ver
-  //     resolveDiceTriggerAsync en el engine): el hecho consumado, en
-  //     CUALQUIER nivel, porque es la instrucción más importante de este turno
-  //     y no debe perder peso frente al resto del prompt.
-  // (b) niveles exigentes (2-3) sin árbitro/sin tirada resuelta: la
-  //     instrucción de disparo. A esa distancia del inicio el modelo la
-  //     ignoraba; pedir tirada para "casi cualquier acción" solo se sostiene
-  //     si es de lo último que lee — mismo criterio que la cabecera ambiental
-  //     de 9e, que sí se obedece siempre.
-  const lateDiceBlock = needsSplit
-    ? (preResolvedDiceRoll ? buildResolvedDiceBlock(preResolvedDiceRoll) : (diceDifficulty >= 2 ? diceInstruction : null))
-    : null;
+  // 9d-octies. Tiradas de dados cerca de la generación, niveles exigentes
+  // (2-3) SIN tirada resuelta por el árbitro: la instrucción de disparo (pide
+  // tirada si hace falta). A esa distancia del inicio el modelo la ignoraba;
+  // pedir tirada para "casi cualquier acción" solo se sostiene si es de lo
+  // último que lee — mismo criterio que la cabecera ambiental de 9e.
+  //
+  // La tirada YA resuelta (preResolvedDiceRoll) NO va aquí — va en 9f, DESPUÉS
+  // de la cabecera. Verificado en vivo: puesta aquí, la cabecera (que sí exige
+  // ser la última) le robaba la posición de máxima autoridad, y el modelo
+  // llegó a ignorar un FALLO ya resuelto y narrar un éxito completo.
+  const lateDiceBlock = needsSplit && !preResolvedDiceRoll && diceDifficulty >= 2 ? diceInstruction : null;
   if (lateDiceBlock) {
     history.push({ role: 'system', content: lateDiceBlock });
     footerCount++;
   }
 
-  // 9e. Cabecera ambiental — ÚLTIMO bloque antes del mensaje del jugador.
-  // Debe ser lo primero que el modelo escriba, así que va en la posición de
-  // máxima obediencia (el mismo criterio que el auto-reporte de afinidad). Es
-  // dinámica por definición — cambia cada turno con el reloj — pero eso no
-  // cuesta caché: el footer entero va tras el historial creciente y nunca forma
-  // parte del prefijo cacheable.
+  // 9e. Cabecera ambiental — debe ser lo primero que el modelo escriba, así
+  // que va en la posición de máxima obediencia (el mismo criterio que el
+  // auto-reporte de afinidad). Es dinámica por definición — cambia cada turno
+  // con el reloj — pero eso no cuesta caché: el footer entero va tras el
+  // historial creciente y nunca forma parte del prefijo cacheable.
   if (needsSplit && worldTrackingEnabled && worldHeader?.trim()) {
     history.push({ role: 'system', content: buildWorldHeaderBlock(worldHeader.trim()) });
+    footerCount++;
+  }
+
+  // 9f. Tirada YA resuelta por el árbitro — el HECHO más importante de este
+  // turno, y el ÚNICO bloque que va DESPUÉS de la cabecera: es lo último que
+  // el modelo lee antes de generar. La cabecera solo controla la primera
+  // línea (un dato mecánico, de copiar); esto controla el desenlace de la
+  // acción del jugador, que es lo que de verdad hay que blindar de la
+  // dilución del resto del prompt.
+  if (needsSplit && preResolvedDiceRoll) {
+    history.push({ role: 'system', content: buildResolvedDiceBlock(preResolvedDiceRoll) });
     footerCount++;
   }
 
