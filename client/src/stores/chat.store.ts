@@ -30,6 +30,17 @@ interface PendingDiceRoll {
    *  nada a la IA, solo cierra el modal. Sirve para revisar la animación con
    *  calma sin gastar una tirada real. */
   preview?: boolean;
+  /** true = la resolvió el árbitro dedicado ANTES de generar (ver
+   *  onDicePending): el narrador ya incluyó el desenlace completo en esta
+   *  misma respuesta, así que al cerrar el modal solo hay que REVELARLA, no
+   *  pedirle a la IA que continúe (no hay nada que continuar). false/undefined
+   *  = vía legado: el propio modelo pidió la tirada a media narración y SÍ
+   *  hace falta la llamada de seguimiento para narrar el desenlace. */
+  preResolved?: boolean;
+  /** Aplica el contenido/metadata que quedaron retenidos mientras el modal
+   *  estaba abierto (solo en el caso preResolved) — ver onDicePending en
+   *  sendMessage/regenerate. Se llama una vez, al resolver el modal. */
+  reveal?: () => void;
 }
 
 interface ChatState extends StreamingState {
@@ -166,14 +177,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
       set({ pendingDiceRoll: null });
       return;
     }
-    set((s) => ({
-      pendingDiceRoll: null,
-      messages: s.messages.map((m) =>
-        m.id === pending.messageId
-          ? { ...m, metadata: { ...m.metadata, diceRoll: pending.diceRoll } }
-          : m
-      ),
-    }));
+    if (pending.reveal) {
+      // Caso preResolved: el contenido y la metadata (incluida diceRoll, que
+      // dispara el badge) se retuvieron desde onDone precisamente para que no
+      // se vieran detrás del modal — se aplican ahora, al cerrarlo.
+      pending.reveal();
+    } else {
+      // Vía legado: el mensaje ya es visible desde que terminó de generarse
+      // (el modelo se detuvo ANTES del desenlace, nada que ocultar); aquí solo
+      // se le añade el badge de la tirada.
+      set((s) => ({
+        messages: s.messages.map((m) =>
+          m.id === pending.messageId
+            ? { ...m, metadata: { ...m.metadata, diceRoll: pending.diceRoll } }
+            : m
+        ),
+      }));
+    }
+    set({ pendingDiceRoll: null });
+    // Con el árbitro dedicado (preResolved), el narrador YA incluyó el
+    // desenlace completo en esta misma respuesta — no hay nada que continuar.
+    // Solo la vía legado (el modelo pide la tirada él mismo y detiene la
+    // narración a media acción) necesita esta llamada de seguimiento.
+    if (pending.preResolved) return;
     void get().sendMessage({
       message: formatDiceOutcome(pending.diceRoll),
       characterId: pending.characterId ?? undefined,
@@ -322,6 +348,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // atarse. Esta variable la actualiza onDone y la leen los closures de abajo.
     let resolvedMessageId = placeholderId;
 
+    // true entre onDicePending y resolveDiceRoll: el árbitro dedicado ya
+    // resolvió una tirada para este turno, ANTES de que llegue ni un solo
+    // token. Mientras esté activo, ni onToken ni onDone deben tocar el
+    // contenido/metadata visibles del mensaje — si no, el jugador vería el
+    // desenlace (incluida la etiqueta de éxito/fallo) aparecer por detrás del
+    // modal, o incluso antes de que el modal llegue a abrirse. Ver el mismo
+    // patrón en regenerate, más abajo.
+    let diceGateActive = false;
+
     const abort = await streamGenerate(
       {
         conversationId: activeConversationId,
@@ -332,6 +367,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
         overrides: Object.keys(mergedOverrides).length > 0 ? mergedOverrides : undefined,
       },
       {
+        onDicePending: (diceRoll) => {
+          diceGateActive = true;
+          set({
+            pendingDiceRoll: {
+              messageId: placeholderId,
+              diceRoll,
+              characterId: narratorMode ? null : (characterId ?? null),
+              narrator: narratorMode,
+              preResolved: true,
+            },
+          });
+        },
         onThinkToken: (token) => {
           set((s) => ({
             messages: s.messages.map((m) =>
@@ -351,6 +398,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
         onToken: (token) => {
           set((s) => {
             const newContent = s.streamingContent + token;
+            // Con el árbitro activo, el contenido se acumula pero NO se
+            // refleja en el mensaje: el modal es lo único que debe verse
+            // hasta que el jugador lo resuelva.
+            if (diceGateActive) return { streamingContent: newContent };
             return {
               streamingContent: newContent,
               messages: s.messages.map((m) =>
@@ -367,7 +418,11 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
         onDone: ({ messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent, deathLoop, diceRoll }) => {
           resolvedMessageId = messageId;
-          set((s) => ({
+
+          // Aplica el mensaje final (contenido + metadata) al store. Con el
+          // árbitro activo, esto NO se llama aquí — se guarda para que
+          // resolveDiceRoll lo dispare al cerrar el modal (ver pending.reveal).
+          const applyMessage = () => set((s) => ({
             isStreaming: false,
             streamingContent: '',
             streamingMessageId: null,
@@ -405,15 +460,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 : m
             ),
           }));
+
           if (affinityUpdates?.length) get().updateCharacterAffinities(affinityUpdates);
           if (locationUpdate !== undefined) get().updateCurrentLocation(locationUpdate);
           if (deathLoop !== undefined) get().setDeathLoop(deathLoop);
-          // La tirada pausa la narración a propósito (ver DICE_ROLL_INSTRUCTION);
-          // el servidor ya tiene el número, pero no se revela ni se envía el
-          // desenlace todavía — eso lo dispara DiceRollModal (resolveDiceRoll)
-          // cuando el jugador pulsa "Tirar" y termina la animación.
+
+          if (diceGateActive) {
+            // La generación ya terminó de verdad (apaga el indicador de
+            // streaming), pero el contenido se queda retenido — el mensaje
+            // sigue vacío/oculto hasta que resolveDiceRoll llame a `reveal`.
+            // OJO: no se toca `messageId` aquí — DiceRollModal reinicia su
+            // animación a "idle" cada vez que cambia (useEffect con esa
+            // dependencia), así que si el jugador ya tiró mientras esto
+            // llegaba, cambiar el id le borraría el resultado ya mostrado.
+            // El id real ya viaja dentro del propio closure `applyMessage`.
+            set({ isStreaming: false, streamingContent: '', streamingMessageId: null, stopStreaming: null });
+            set((s) => ({
+              pendingDiceRoll: s.pendingDiceRoll
+                ? { ...s.pendingDiceRoll, reveal: applyMessage }
+                : s.pendingDiceRoll,
+            }));
+            return;
+          }
+
+          applyMessage();
+          // Vía legado (sin árbitro dedicado): el propio modelo pidió la
+          // tirada a media narración. El mensaje ya es visible (se detuvo
+          // ANTES del desenlace, nada que ocultar); el modal solo añade el
+          // badge y dispara la llamada de seguimiento al resolverse.
           if (diceRoll) {
-            set({ pendingDiceRoll: { messageId, diceRoll, characterId, narrator: Boolean(narrator) } });
+            set({ pendingDiceRoll: { messageId, diceRoll, characterId, narrator: Boolean(narrator), preResolved: false } });
           }
         },
         // Ráfaga de llamadas al LLM en segundo plano (director de escena,
@@ -440,12 +516,15 @@ export const useChatStore = create<ChatState>((set, get) => ({
           }));
         },
         onError: (err) => {
-          // Show error as assistant bubble — no silent failure
+          // Show error as assistant bubble — no silent failure. Si el error
+          // llega con el árbitro activo, el modal se queda sin `reveal` al
+          // que llamar — hay que cerrarlo aquí, si no queda huérfano.
           set((s) => ({
             isStreaming: false,
             streamingContent: '',
             streamingMessageId: null,
             stopStreaming: null,
+            pendingDiceRoll: diceGateActive ? null : s.pendingDiceRoll,
             messages: [
               ...s.messages.filter((m) => m.id !== placeholderId && m.id !== tempId),
               makeErrorMessage(activeConversationId!, `⚠️ ${err.message}`),
@@ -553,6 +632,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
     // llegan después de onDone y necesitan el id YA resuelto del mensaje.
     let resolvedMessageId = placeholderId;
 
+    // Ver el comentario extenso en sendMessage — mismo patrón: mientras esté
+    // activo, ni onToken ni onDone deben revelar contenido/metadata.
+    let diceGateActive = false;
+
     const abort = await streamGenerate(
       {
         conversationId: activeConversationId,
@@ -563,6 +646,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
         overrides: Object.keys(mergedOverrides).length > 0 ? mergedOverrides : undefined,
       },
       {
+        onDicePending: (diceRoll) => {
+          diceGateActive = true;
+          set({
+            pendingDiceRoll: {
+              messageId: placeholderId,
+              diceRoll,
+              characterId: narratorMode ? null : (charId ?? null),
+              narrator: narratorMode,
+              preResolved: true,
+            },
+          });
+        },
         onThinkToken: (token) => {
           set((s) => ({
             messages: s.messages.map((m) =>
@@ -575,6 +670,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
         onToken: (token) => {
           set((s) => {
             const newContent = s.streamingContent + token;
+            if (diceGateActive) return { streamingContent: newContent };
             return {
               streamingContent: newContent,
               messages: s.messages.map((m) =>
@@ -587,7 +683,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
         onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId: doneCharId, content, locationUpdate, thinkContent, deathLoop, diceRoll }) => {
           resolvedMessageId = messageId;
-          set((s) => ({
+
+          const applyMessage = () => set((s) => ({
             isStreaming: false,
             streamingContent: '',
             streamingMessageId: null,
@@ -615,11 +712,25 @@ export const useChatStore = create<ChatState>((set, get) => ({
                 : m
             ),
           }));
+
           if (affinityUpdates?.length) get().updateCharacterAffinities(affinityUpdates);
           if (locationUpdate !== undefined) get().updateCurrentLocation(locationUpdate);
           if (deathLoop !== undefined) get().setDeathLoop(deathLoop);
+
+          if (diceGateActive) {
+            // No se toca `messageId` — ver el comentario en sendMessage.
+            set({ isStreaming: false, streamingContent: '', streamingMessageId: null, stopStreaming: null });
+            set((s) => ({
+              pendingDiceRoll: s.pendingDiceRoll
+                ? { ...s.pendingDiceRoll, reveal: applyMessage }
+                : s.pendingDiceRoll,
+            }));
+            return;
+          }
+
+          applyMessage();
           if (diceRoll) {
-            set({ pendingDiceRoll: { messageId, diceRoll, characterId: doneCharId, narrator: Boolean(narrator) } });
+            set({ pendingDiceRoll: { messageId, diceRoll, characterId: doneCharId, narrator: Boolean(narrator), preResolved: false } });
           }
         },
         onEnrichStep: (step) => {
@@ -647,6 +758,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
             streamingContent: '',
             streamingMessageId: null,
             stopStreaming: null,
+            pendingDiceRoll: diceGateActive ? null : s.pendingDiceRoll,
             messages: [
               ...s.messages.filter((m) => m.id !== placeholderId && m.id !== tempId),
               makeErrorMessage(activeConversationId!, `⚠️ ${err.message}`),

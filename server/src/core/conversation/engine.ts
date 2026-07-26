@@ -73,6 +73,14 @@ export interface StreamOptions extends GenerateOptions {
   onToken: (token: string) => void;
   /** Called for each token inside a &lt;think&gt;...&lt;/think&gt; block (reasoning models). */
   onThinkToken?: (token: string) => void;
+  /** Se llama UNA vez, ANTES de generar, cuando el árbitro dedicado (ver
+   *  resolveDiceTriggerAsync) ya resolvió una tirada para este turno. El
+   *  cliente debe mostrar el modal de tirada YA, y ocultar/retener el texto
+   *  narrativo que va a llegar por onToken hasta que el jugador lo resuelva
+   *  — si no, el jugador ve el desenlace en el propio streaming antes de que
+   *  el modal siquiera aparezca (el modal llegaría "tarde": el resultado ya
+   *  se habría visto construirse por detrás). */
+  onDicePending?: (diceRoll: DiceRollResult) => void;
   onDone: (response: { messageId: string; userMessageId: string; tokens: number; tokenBreakdown: { prompt: number; completion: number; cached: number }; promptMessages: import('@rpgspeak/shared').ChatMessage[]; affinityUpdates: AffinityUpdate[]; fastLlmDebug?: { prompt: string; response: string }; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null; thinkContent?: string; deathLoop?: DeathLoopState | null; diceRoll?: DiceRollResult }) => void;
   onError: (error: Error) => void;
   /** Se llama justo ANTES de ejecutar cada paso del enriquecimiento de fondo
@@ -791,6 +799,10 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
         const modifier = resolveRollModifier(playerSheet, trigger.attribute);
         preResolvedDiceRoll = rollDice(resolvedWho, trigger.attribute, trigger.cd, userMessageForAnalysis.slice(0, 120), modifier);
         console.log(`[dice] (árbitro) ${preResolvedDiceRoll.who} · ${preResolvedDiceRoll.attribute} (CD ${preResolvedDiceRoll.cd}): ${preResolvedDiceRoll.natural}+${preResolvedDiceRoll.modifier}=${preResolvedDiceRoll.total} → ${preResolvedDiceRoll.critical ?? (preResolvedDiceRoll.success ? 'éxito' : 'fallo')}`);
+        // Aviso ANTES de generar — ver el comentario de onDicePending en
+        // StreamOptions: el cliente debe abrir el modal YA, no cuando el
+        // streaming ya haya mostrado el desenlace completo.
+        opts.onDicePending?.(preResolvedDiceRoll);
       }
     }
     // ──────────────────────────────────────────────────────────────────────────

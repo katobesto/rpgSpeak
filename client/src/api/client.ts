@@ -89,6 +89,12 @@ export interface EnrichStep {
 export interface StreamCallbacks {
   onToken: (token: string) => void;
   onThinkToken?: (token: string) => void;
+  /** Llega ANTES de que empiecen a fluir tokens, cuando el árbitro dedicado de
+   *  tiradas (servidor) ya resolvió el dado para este turno. El store debe
+   *  abrir el modal YA y retener el texto que va a llegar por onToken —
+   *  si no, el jugador ve el desenlace en el streaming antes de que el modal
+   *  siquiera aparezca. */
+  onDicePending?: (diceRoll: import('@rpgspeak/shared').DiceRollResult) => void;
   onDone: (result: { messageId: string; userMessageId: string; tokens: number; tokenBreakdown?: TokenBreakdown; promptMessages?: unknown[]; affinityUpdates?: AffinityUpdate[]; fastLlmDebug?: string; narrator?: boolean; characterId?: string | null; content?: string; locationUpdate?: string | null; thinkContent?: string; deathLoop?: import('@rpgspeak/shared').DeathLoopState | null; diceRoll?: import('@rpgspeak/shared').DiceRollResult }) => void;
   /** El mensaje ya es visible e interactivo (onDone ya se llamó); esto informa
    *  de las llamadas de fondo al LLM que siguen en curso (director de escena,
@@ -143,7 +149,7 @@ export async function streamGenerate(
           if (!line.startsWith('data: ')) continue;
           try {
             const event = JSON.parse(line.slice(6)) as {
-              type: 'token' | 'think' | 'done' | 'enrich_step' | 'enrich_done' | 'error';
+              type: 'token' | 'think' | 'done' | 'enrich_step' | 'enrich_done' | 'dice_pending' | 'error';
               token?: string;
               messageId?: string;
               userMessageId?: string;
@@ -176,6 +182,8 @@ export async function streamGenerate(
               callbacks.onEnrichStep?.({ index: event.index!, total: event.total!, label: event.label ?? '' });
             } else if (event.type === 'enrich_done') {
               callbacks.onEnrichDone?.(event.bgTokens ? { bgTokens: event.bgTokens } : undefined);
+            } else if (event.type === 'dice_pending' && event.diceRoll) {
+              callbacks.onDicePending?.(event.diceRoll);
             } else if (event.type === 'error') {
               callbacks.onError(new Error(event.error ?? 'Unknown stream error'));
             }

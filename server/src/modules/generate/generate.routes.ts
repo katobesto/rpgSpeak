@@ -267,6 +267,7 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       signal: abortController.signal,
       onToken: (token) => send({ type: 'token', token }),
       onThinkToken: (token) => send({ type: 'think', token }),
+      onDicePending: (diceRoll) => send({ type: 'dice_pending', diceRoll }),
       onDone: ({ messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent, deathLoop, diceRoll }) => {
         send({ type: 'done', messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent, deathLoop, diceRoll });
         // OJO: la conexión NO se cierra aquí. El mensaje ya es visible e
