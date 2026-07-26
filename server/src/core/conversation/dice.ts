@@ -223,6 +223,17 @@ export function diceRollInstruction(level: number): string | null {
  * palabra "FALLO" sola no bastaba para que el personaje NO consiguiera su
  * objetivo. Ahora se explicita sin ambigüedad: el objetivo declarado NO se
  * logra en este intento.
+ *
+ * Cláusula específica de combate: el fix de arriba basta para acciones de
+ * riesgo personal (trepar, forzar una cerradura, malabares — se verificó en
+ * vivo), pero en ataques contra un enemigo el modelo seguía narrando el golpe
+ * como un impacto claro ("la llamarada lo envuelve, lanzándolo contra un
+ * tronco"; un aliado "remata" aprovechando la abertura) pese al mismo texto de
+ * FALLO. La instrucción genérica no le daba una plantilla concreta de qué
+ * aspecto tiene un ataque fallido, y el sesgo narrativo por defecto de
+ * cualquier LLM (el protagonista conecta el golpe) gana esa ambigüedad. Se
+ * añade una plantilla explícita solo para este caso: el enemigo esquiva,
+ * bloquea o resiste — no cae, no se tambalea, no queda "abierto".
  */
 export function buildResolvedDiceBlock(roll: DiceRollResult): string {
   const isCritSuccess = roll.critical === 'success';
@@ -230,10 +241,12 @@ export function buildResolvedDiceBlock(roll: DiceRollResult): string {
   const outcomeLabel = isCritSuccess ? 'ÉXITO CRÍTICO (20 natural)'
     : isCritFailure ? 'FALLO CRÍTICO (1 natural)'
     : roll.success ? 'ÉXITO' : 'FALLO';
+  const combatClause =
+    ` Si la acción era un ataque, un hechizo ofensivo o cualquier intento de golpear/dañar a alguien: el objetivo lo esquiva, lo bloquea, resiste o el golpe no llega a hacer daño real. El objetivo NO cae, NO se tambalea de forma significativa y NO queda "abierto" para que un aliado rematen — sigue con toda su capacidad de combate intacta. El fallo es de quien ataca, no una ventaja disfrazada de fallo.`;
   const consequence = (isCritFailure || (!roll.success && !isCritSuccess))
     ? (isCritFailure
-        ? ` FALLO CRÍTICO: el intento no solo fracasa, sale mal de la peor manera posible — con una complicación seria añadida (te haces daño de verdad, te descubren, rompes o pierdes algo, empeoras tu situación), no un simple traspié cosmético.`
-        : ` FALLO: ${roll.who} NO consigue su objetivo en este intento — no llega, no lo logra, no funciona. Puede quedar a medio camino, ser interrumpido, o sufrir una complicación real; lo único que NO es válido es narrar el objetivo como logrado con un pequeño coste decorativo (un rasguño, un despeine). El fallo debe notarse en la situación, no solo en el estilo.`)
+        ? ` FALLO CRÍTICO: el intento no solo fracasa, sale mal de la peor manera posible — con una complicación seria añadida (te haces daño de verdad, te descubren, rompes o pierdes algo, empeoras tu situación, o si era un ataque quizás alcanzas a quien no debías o quedas expuesto tú), no un simple traspié cosmético.`
+        : ` FALLO: ${roll.who} NO consigue su objetivo en este intento — no llega, no lo logra, no funciona. Puede quedar a medio camino, ser interrumpido, o sufrir una complicación real; lo único que NO es válido es narrar el objetivo como logrado con un pequeño coste decorativo (un rasguño, un despeine).${combatClause} El fallo debe notarse en la situación, no solo en el estilo.`)
     : (isCritSuccess
         ? ` ÉXITO CRÍTICO: no solo lo consigue, sale todo lo bien que podría salir — con algún extra o ventaja inesperada.`
         : ` ÉXITO: ${roll.who} consigue su objetivo, con la dificultad y el esfuerzo propios de la escena, pero lo consigue.`);
