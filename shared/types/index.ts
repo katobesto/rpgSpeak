@@ -455,6 +455,12 @@ export interface MessageMetadata {
   enrichStep?: { index: number; total: number; label: string };
   /** Tirada [TIRADA:...] resuelta por el servidor para ESTE mensaje, si pidió una. */
   diceRoll?: DiceRollResult;
+  /** true = el árbitro dedicado ya resolvió una tirada para este mensaje y el
+   *  modal sigue abierto (ver onDicePending) — MessageItem lo oculta mientras
+   *  esto sea true, aunque el contenido ya se haya generado y aplicado con
+   *  normalidad por detrás. resolveDiceRoll lo pone en false al cerrar el
+   *  modal (nunca se retiene el dato, solo la visibilidad). */
+  diceGateVisual?: boolean;
   /** Tokens consumidos por las llamadas de fondo de ESTE turno (delta). */
   bgTokens?: BackgroundTokenUsage;
   [key: string]: unknown;

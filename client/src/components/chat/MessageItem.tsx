@@ -32,6 +32,19 @@ interface MessageItemProps {
 }
 
 export function MessageItem({ message, characterName, characterAvatar, groupCharacters, isStreaming, highlighted }: MessageItemProps) {
+  // El árbitro dedicado de tiradas (ver dice.ts/engine.ts en el servidor) ya
+  // resolvió el resultado ANTES de narrar, así que el contenido se genera y
+  // persiste con total normalidad por streaming — nada se retiene en el
+  // store. Lo único condicionado al modal es esto: mientras
+  // `diceGateVisual` siga activo, el mensaje se trata visualmente como si
+  // aún estuviera escribiéndose (mismo indicador de "generando", oculta
+  // badges/acciones), aunque por debajo ya esté completo. resolveDiceRoll lo
+  // apaga al cerrar el modal — es solo una cuestión de estilo, no de datos:
+  // si el jugador cierra el modal antes de que la generación termine de
+  // verdad, aquí simplemente se ve completarse en vivo, como cualquier otro
+  // mensaje, en vez de quedarse atascado a medias.
+  const diceGated = Boolean(message.metadata?.diceGateVisual);
+  const visuallyStreaming = isStreaming || diceGated;
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
@@ -464,24 +477,30 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
             </div>
           ) : (
             <>
-              {/* ThinkBlock — shown when think content is arriving or was saved */}
-              {!isUser && message.metadata?.thinkContent && (
+              {/* ThinkBlock — shown when think content is arriving or was saved.
+                  Oculto mientras diceGated: el razonamiento del modelo puede
+                  verbalizar el desenlace antes de que el jugador lo vea en el
+                  modal. */}
+              {!isUser && !diceGated && message.metadata?.thinkContent && (
                 <ThinkBlock
                   content={message.metadata.thinkContent as string}
                   isThinking={Boolean(message.metadata?.isThinking)}
                 />
               )}
-              {/* Loading state: show Brain indicator while waiting for first token (think or content) */}
-              {isStreaming && !isUser && !message.metadata?.thinkContent && !message.content ? (
+              {/* Loading state: show Brain indicator while waiting for first
+                  token (think or content) — o mientras diceGated, aunque el
+                  contenido ya esté completo por detrás: es solo estilo, el
+                  dato real no se retiene en ningún sitio. */}
+              {(diceGated || (isStreaming && !message.content)) && !isUser && !message.metadata?.thinkContent ? (
                 <GeneratingIndicator />
-              ) : message.content ? (
+              ) : !diceGated && message.content ? (
                 <div
                   className={`prose${isNarrator ? ' narrator-content' : ''}`}
                   onClick={isNarrator ? handleNarratorContentClick : undefined}
                   dangerouslySetInnerHTML={{ __html: html || message.content }}
                 />
               ) : null}
-              {isStreaming && message.content && (
+              {isStreaming && !diceGated && message.content && (
                 <span className="inline-block w-0.5 h-4 bg-current opacity-70 animate-pulse ml-0.5 align-middle" />
               )}
             </>
@@ -490,12 +509,12 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
           {/* Enriquecimiento de fondo (director de escena, resúmenes…): el
               mensaje ya está terminado y es interactivo, esto es solo un aviso
               transitorio de que el servidor sigue trabajando detrás. */}
-          {!isStreaming && !isUser && message.metadata?.enrichStep && (
+          {!visuallyStreaming && !isUser && message.metadata?.enrichStep && (
             <EnrichIndicator step={message.metadata.enrichStep} />
           )}
 
           {/* ── TTS player inline ────────────────────────────────────────── */}
-          {!isUser && !isStreaming && !editing && (
+          {!isUser && !visuallyStreaming && !editing && (
             <TtsPlayerBar
               messageId={message.id}
               text={message.content}
@@ -508,12 +527,12 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
         </div>
 
         {/* Tirada de dados resuelta por el servidor */}
-        {!isUser && !isStreaming && message.metadata?.diceRoll ? (
+        {!isUser && !visuallyStreaming && message.metadata?.diceRoll ? (
           <DiceRollBadge diceRoll={message.metadata.diceRoll as import('@rpgspeak/shared').DiceRollResult} />
         ) : null}
 
         {/* Affinity change indicator */}
-        {!isUser && !isStreaming && (message.metadata?.affinityUpdates as import('@rpgspeak/shared').AffinityUpdate[] | undefined)?.length ? (
+        {!isUser && !visuallyStreaming && (message.metadata?.affinityUpdates as import('@rpgspeak/shared').AffinityUpdate[] | undefined)?.length ? (
           <AffinityChangeBar
             updates={message.metadata!.affinityUpdates as import('@rpgspeak/shared').AffinityUpdate[]}
             characters={groupCharacters ?? []}
@@ -521,12 +540,12 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
         ) : null}
 
         {/* Fast LLM debug panel — solo admin */}
-        {isAdmin && !isUser && !isStreaming && message.metadata?.fastLlmDebug != null && (
+        {isAdmin && !isUser && !visuallyStreaming && message.metadata?.fastLlmDebug != null && (
           <FastLlmDebugPanel debug={message.metadata.fastLlmDebug as FastLlmDebug} messageId={message.id} />
         )}
 
         {/* Actions */}
-        {!isStreaming && (
+        {!visuallyStreaming && (
           <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <ActionButton icon={copied ? Check : Copy} onClick={copyContent} title="Copy" />
             <ActionButton icon={Edit2} onClick={() => { setEditContent(message.content); setEditing(true); }} title="Edit" />
