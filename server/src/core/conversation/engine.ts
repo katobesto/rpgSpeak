@@ -23,7 +23,7 @@ import { EventStatusRepository } from '../../modules/stories/event-status.reposi
 import { ThreadRepository } from '../../modules/threads/thread.repository.js';
 import { NoteRepository } from '../../modules/notes/note.repository.js';
 import { stripOocNotes } from './ooc.js';
-import { DICE_ROLL_RE, resolveRollSheet, resolveRollModifier, rollDice, type DiceRollResult } from './dice.js';
+import { DICE_ROLL_RE, resolveRollSheet, resolveRollModifier, rollDice, resolveDiceTriggerAsync, type DiceRollResult } from './dice.js';
 import { fixDanglingActionPunctuation } from './narrative-format.js';
 import { recordBgUsage, readBgUsage, diffBgUsage } from './bg-usage.js';
 
@@ -767,6 +767,34 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     }
     // ──────────────────────────────────────────────────────────────────────────
 
+    // Ficha del jugador — se reutiliza para el árbitro de tiradas de abajo y
+    // más adelante para resolver el modificador real de las tiradas
+    // ([TIRADA:...]).
+    const playerSheet = (conversation.metadata as { playerSheet?: RpgStats } | null)?.playerSheet ?? null;
+
+    // ── Árbitro de tiradas: pre-chequeo dedicado ANTES de narrar ────────────────
+    // Decidir "¿hace falta tirada?" en medio de la respuesta narrativa principal
+    // no es fiable con todos los modelos (verificado: DeepSeek V4 nunca la
+    // disparaba pese a acciones de riesgo evidente, con Gemma sí, mismo prompt).
+    // Mismo diagnóstico y solución que ya usa el reloj del mundo para
+    // [TIEMPO:...]/[UBICACION:...]: una llamada aparte, de único cometido, que
+    // no compite con nada. A diferencia del reloj, esto se decide ANTES de
+    // narrar — una vez resuelto el desenlace en prosa no hay forma limpia de
+    // deshacerlo. Ver resolveDiceTriggerAsync (dice.ts) para el detalle.
+    let preResolvedDiceRoll: DiceRollResult | undefined;
+    if (diceDifficulty > 0) {
+      const trigger = await resolveDiceTriggerAsync(
+        llm, modelId, diceDifficulty, userMessageForAnalysis, playerSheet, conversationId,
+      );
+      if (trigger) {
+        const resolvedWho = opts.userDisplayName?.trim() || 'el jugador';
+        const modifier = resolveRollModifier(playerSheet, trigger.attribute);
+        preResolvedDiceRoll = rollDice(resolvedWho, trigger.attribute, trigger.cd, userMessageForAnalysis.slice(0, 120), modifier);
+        console.log(`[dice] (árbitro) ${preResolvedDiceRoll.who} · ${preResolvedDiceRoll.attribute} (CD ${preResolvedDiceRoll.cd}): ${preResolvedDiceRoll.natural}+${preResolvedDiceRoll.modifier}=${preResolvedDiceRoll.total} → ${preResolvedDiceRoll.critical ?? (preResolvedDiceRoll.success ? 'éxito' : 'fallo')}`);
+      }
+    }
+    // ──────────────────────────────────────────────────────────────────────────
+
     // Build history excluding the just-saved user msg
     const history = msgRepo.findByConversation(conversationId, branchId);
     const historyForContext = history.filter((m) => m.id !== userMsg.id) as Message[];
@@ -791,10 +819,6 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     // Eventos de historia ya ocurridos en esta conversación (los pendientes con
     // trigger se inyectan como "trama pendiente" en el footer del contexto)
     const occurredEventIds = eventStatusRepo.findOccurredIds(conversationId);
-
-    // Ficha del jugador — se reutiliza más abajo para resolver el modificador
-    // real de las tiradas de dados ([TIRADA:...]).
-    const playerSheet = (conversation.metadata as { playerSheet?: RpgStats } | null)?.playerSheet ?? null;
 
     // ── Estado del mundo (cabecera ambiental) ─────────────────────────────────
     // El calendario lo aporta la PRIMERA historia vinculada que defina uno; sin
@@ -854,6 +878,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       narratorMode,
       adventureMode: isAdventureMode,
       diceDifficulty,
+      preResolvedDiceRoll,
       userDisplayName: opts.userDisplayName,
       characterAffinities,
       affinitySystemPrompt: settings.affinitySystemPrompt,
@@ -1485,20 +1510,42 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     }
 
     // ── Tirada de dados: [TIRADA:Quién|Atributo|CD|descripción] ────────────────
-    // La ÚLTIMA ocurrencia manda (mismo criterio que UBICACION/EVENTO_OCURRIDO):
-    // si el modelo la repite por error de formato, solo la más reciente cuenta.
-    // El servidor tira el d20 — el modelo nunca decide el resultado.
-    let diceRoll: DiceRollResult | undefined;
+    // Si el árbitro dedicado ya resolvió una tirada ANTES de generar (ver
+    // preResolvedDiceRoll, más arriba), esa es la que vale — no se vuelve a
+    // parsear ni a tirar; solo se limpia de la respuesta cualquier etiqueta
+    // [TIRADA:...] residual que el modelo haya emitido pese a la instrucción
+    // de que ya está resuelta (higiene, no una segunda tirada).
+    //
+    // Sin árbitro (nivel 0, o el árbitro respondió NO), queda la vía legado:
+    // el propio modelo pide la tirada con la etiqueta, como red de seguridad
+    // secundaria — cubre acciones de PNJs (fuera del alcance del árbitro, que
+    // solo evalúa acciones del jugador) y lo que el árbitro no capture. La
+    // ÚLTIMA ocurrencia manda (mismo criterio que UBICACION/EVENTO_OCURRIDO) y
+    // el servidor tira el d20 — el modelo nunca decide el resultado.
+    //
+    // Fallback a <think>: mismo motivo que ya justificó el de [AFINIDAD] más
+    // arriba — un modelo razonador puede "decidir" pedir la tirada dentro de su
+    // razonamiento y no repetir la etiqueta en la respuesta visible. Sin este
+    // fallback, con thinking activado la tirada se perdería en silencio aunque
+    // el modelo sí la haya pedido.
+    let diceRoll: DiceRollResult | undefined = preResolvedDiceRoll;
     if (!aborted && cleanContent) {
-      const diceMatches = [...cleanContent.matchAll(DICE_ROLL_RE)];
-      if (diceMatches.length > 0) {
-        const m = diceMatches[diceMatches.length - 1];
-        const [, whoRaw, attributeRaw, cdRaw, descriptionRaw] = m;
-        const cd = Math.min(20, Math.max(1, parseInt(cdRaw, 10) || 10));
-        const { sheet, resolvedWho } = resolveRollSheet(whoRaw, playerSheet, opts.userDisplayName, allCharsInConv);
-        const modifier = resolveRollModifier(sheet, attributeRaw.trim());
-        diceRoll = rollDice(resolvedWho, attributeRaw.trim(), cd, descriptionRaw.trim(), modifier);
-        console.log(`[dice] ${diceRoll.who} · ${diceRoll.attribute} (CD ${diceRoll.cd}): ${diceRoll.natural}+${diceRoll.modifier}=${diceRoll.total} → ${diceRoll.critical ?? (diceRoll.success ? 'éxito' : 'fallo')}`);
+      if (!diceRoll) {
+        let diceMatches = [...cleanContent.matchAll(DICE_ROLL_RE)];
+        let diceSource: 'visible' | 'think' = 'visible';
+        if (diceMatches.length === 0 && thinkAccumulated) {
+          const thinkMatches = [...thinkAccumulated.matchAll(DICE_ROLL_RE)];
+          if (thinkMatches.length > 0) { diceMatches = thinkMatches; diceSource = 'think'; }
+        }
+        if (diceMatches.length > 0) {
+          const m = diceMatches[diceMatches.length - 1];
+          const [, whoRaw, attributeRaw, cdRaw, descriptionRaw] = m;
+          const cd = Math.min(20, Math.max(1, parseInt(cdRaw, 10) || 10));
+          const { sheet, resolvedWho } = resolveRollSheet(whoRaw, playerSheet, opts.userDisplayName, allCharsInConv);
+          const modifier = resolveRollModifier(sheet, attributeRaw.trim());
+          diceRoll = rollDice(resolvedWho, attributeRaw.trim(), cd, descriptionRaw.trim(), modifier);
+          console.log(`[dice] ${diceRoll.who} · ${diceRoll.attribute} (CD ${diceRoll.cd}): ${diceRoll.natural}+${diceRoll.modifier}=${diceRoll.total} → ${diceRoll.critical ?? (diceRoll.success ? 'éxito' : 'fallo')}${diceSource === 'think' ? ' [desde <think>]' : ''}`);
+        }
       }
       cleanContent = cleanContent.replace(DICE_ROLL_RE, '').trimEnd();
     }

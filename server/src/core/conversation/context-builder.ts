@@ -1,6 +1,6 @@
-import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem, PartyState, DeathLoopState, NarrativeThread, SceneDirectorState, CharacterSceneState, RpgStats, ConversationNote } from '@rpgspeak/shared';
+import type { ChatMessage, Character, Story, Message, MemoryEntry, ContextItem, PartyState, DeathLoopState, NarrativeThread, SceneDirectorState, CharacterSceneState, RpgStats, ConversationNote, DiceRollResult } from '@rpgspeak/shared';
 import { MemoryRepository } from '../memory/memory.repository.js';
-import { diceRollInstruction } from './dice.js';
+import { diceRollInstruction, buildResolvedDiceBlock } from './dice.js';
 import { ContextRepository, type ContextItemWithEmbedding } from '../../modules/context/context.repository.js';
 import { ProviderRepository } from '../../modules/providers/provider.repository.js';
 import { createProvider } from '../llm/provider.factory.js';
@@ -36,6 +36,12 @@ export interface BuildContextOptions {
   /** Nivel de tiradas de esta conversación (0-3), ya resuelto por el engine.
    *  Manda sobre adventureMode: es la preferencia explícita del usuario. */
   diceDifficulty?: number;
+  /** Tirada YA resuelta por el árbitro dedicado (resolveDiceTriggerAsync) antes
+   *  de esta generación — ver dice.ts. Cuando llega, sustituye a la
+   *  instrucción de "pide una tirada si hace falta" por el HECHO ya consumado:
+   *  el narrador ya no tiene que decidir ni pedir nada, solo narrar este
+   *  resultado. */
+  preResolvedDiceRoll?: DiceRollResult;
   userDisplayName?: string;       // Nombre del usuario para inyectar en el contexto
   characterAffinities?: Array<{ characterId: string; name: string; affinity: number }>;
   affinitySystemPrompt?: string;
@@ -904,6 +910,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     narratorMode = false,
     adventureMode = false,
     diceDifficulty = 0,
+    preResolvedDiceRoll,
     userDisplayName,
     characterAffinities,
     affinitySystemPrompt,
@@ -1603,7 +1610,15 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // Por eso, a partir del nivel 2 se reinyecta abajo del todo (9d-octies), casi
   // pegada a la generación. El nivel 1 se queda aquí para no cambiar el
   // comportamiento de las conversaciones que ya venían funcionando así.
-  const diceInstruction = needsSplit ? diceRollInstruction(diceDifficulty) : null;
+  // Si el árbitro dedicado (resolveDiceTriggerAsync, en el engine) ya resolvió
+  // una tirada ANTES de esta generación, el narrador no tiene que decidir ni
+  // pedir nada — se le entrega el resultado como hecho consumado, y ese bloque
+  // va SIEMPRE cerca de la generación (9d-octies, más abajo), sea cual sea el
+  // nivel: es lo más importante que no debe contradecir este turno. Aquí solo
+  // se inyecta la instrucción de disparo (pedir tirada si hace falta) cuando
+  // NO hay ya una resuelta — y solo en nivel 1, que mantiene su posición y
+  // comportamiento históricos.
+  const diceInstruction = needsSplit && !preResolvedDiceRoll ? diceRollInstruction(diceDifficulty) : null;
   if (diceInstruction && diceDifficulty <= 1) {
     history.push({ role: 'system', content: diceInstruction });
     footerCount++;
@@ -1720,13 +1735,21 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     footerCount++;
   }
 
-  // 9d-octies. Tiradas de dados en los niveles exigentes (2-3). Va aquí, y no
-  // arriba con el resto de reglas de comportamiento, porque a esa distancia el
-  // modelo la ignoraba: pedir tirada para "casi cualquier acción" solo se
-  // sostiene si la instrucción es de lo último que lee. Mismo criterio que la
-  // cabecera ambiental de 9e, que sí se obedece siempre.
-  if (diceInstruction && diceDifficulty >= 2) {
-    history.push({ role: 'system', content: diceInstruction });
+  // 9d-octies. Tiradas de dados cerca de la generación — dos casos:
+  // (a) el árbitro dedicado ya resolvió una tirada este turno (ver
+  //     resolveDiceTriggerAsync en el engine): el hecho consumado, en
+  //     CUALQUIER nivel, porque es la instrucción más importante de este turno
+  //     y no debe perder peso frente al resto del prompt.
+  // (b) niveles exigentes (2-3) sin árbitro/sin tirada resuelta: la
+  //     instrucción de disparo. A esa distancia del inicio el modelo la
+  //     ignoraba; pedir tirada para "casi cualquier acción" solo se sostiene
+  //     si es de lo último que lee — mismo criterio que la cabecera ambiental
+  //     de 9e, que sí se obedece siempre.
+  const lateDiceBlock = needsSplit
+    ? (preResolvedDiceRoll ? buildResolvedDiceBlock(preResolvedDiceRoll) : (diceDifficulty >= 2 ? diceInstruction : null))
+    : null;
+  if (lateDiceBlock) {
+    history.push({ role: 'system', content: lateDiceBlock });
     footerCount++;
   }
 

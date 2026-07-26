@@ -17,6 +17,8 @@
 
 import type { Character, RpgStats, DiceRollResult } from '@rpgspeak/shared';
 import { matchCharacterName } from '@rpgspeak/shared';
+import type { LLMProvider } from '../llm/provider.interface.js';
+import { recordBgUsage } from './bg-usage.js';
 
 export type { DiceRollResult };
 
@@ -131,21 +133,40 @@ const TRIGGER_POLICY: Record<1 | 2 | 3, string> = {
     ` sin ningún margen de fallo (abrir una puerta que ya está abierta, mirar alrededor, hablar sin intención de persuadir).`,
 };
 
-/** Instrucción para el prompt principal — dónde y cómo pedir una tirada.
- *  Devuelve null en el nivel 0: ahí el bloque no se inyecta en absoluto y el
- *  modelo ni siquiera sabe que existen los dados. */
+/**
+ * Instrucción para el prompt principal — dónde y cómo pedir una tirada.
+ * Devuelve null en el nivel 0: ahí el bloque no se inyecta en absoluto y el
+ * modelo ni siquiera sabe que existen los dados.
+ *
+ * Reescrita tras observar que modelos razonadores (DeepSeek V4) simplemente no
+ * la disparaban pese a acciones de riesgo evidente (saltar una valla, un golpe
+ * en pleno combate) mientras otros (Gemma) sí — con el bloque en la posición
+ * correcta y sin contradicción con el resto del prompt (ver el fix de
+ * settings.service.ts en la misma sesión: la vieja regla de "RESOLUCIÓN DE
+ * ACCIONES FÍSICAS" condicionaba la tirada a "modo aventura", un concepto ya
+ * retirado). La causa que queda tras ese fix: la propia regla de "toda acción
+ * SIEMPRE llega a su desenlace en la MISMA respuesta" empuja al modelo a
+ * narrar un final satisfactorio ahí mismo, y detenerse en el momento de
+ * tensión se siente como una respuesta incompleta — justo lo que esa regla
+ * prohíbe. Aplicado el mismo arreglo que ya funcionó con [AFINIDAD] en estos
+ * modelos: declarar la tirada EXENTA de esa presión de cierre (parar ahí SÍ
+ * cuenta como resolver la acción, no es dejarla a medias) e invertir el sesgo
+ * por defecto en los niveles altos (default = tirar; omitir es la excepción,
+ * no al revés).
+ */
 export function diceRollInstruction(level: number): string | null {
   if (level <= 0) return null;
   const policy = TRIGGER_POLICY[(Math.min(3, Math.round(level)) as 1 | 2 | 3)];
   const closing =
     level >= 3
-      ? `Ante la duda, pide la tirada: es preferible tirar de más que resolver a dedo algo que podía fallar.`
+      ? `Ante la duda, pide la tirada: es preferible tirar de más que resolver a dedo algo que podía fallar. Omitirla es el error por defecto en este nivel, no al revés.`
       : level === 2
         ? `Las acciones sin riesgo real NO necesitan tirada — pero no te saltes ninguna en la que sí se pueda fallar.`
         : `Es un marcador técnico: se borra antes de mostrarse. La mayoría de acciones NO necesitan tirada — solo cuando el resultado esté de verdad en juego.`;
 
   return (
-    `## TIRADAS DE DADOS — el servidor decide, tú narras\n\n` +
+    `## TIRADAS DE DADOS — MARCADOR TÉCNICO OBLIGATORIO — el servidor decide, tú narras\n\n` +
+    `IMPORTANTE: pedir una tirada NO es dejar la respuesta a medias ni romper el ritmo narrativo — es la ÚNICA forma legítima de que el desenlace de una acción arriesgada tenga peso real, en vez de que tú lo decidas por conveniencia. La regla de "toda acción llega a su desenlace en la misma respuesta" queda CUMPLIDA en el momento en que pides la tirada: delegar el resultado en el sistema ES resolver la acción, no es una respuesta incompleta.\n\n` +
     `${policy}` +
     ` Al final de tu respuesta, en línea propia:\n` +
     `[TIRADA:Quién|Atributo|CD|qué se está intentando, en pocas palabras]\n` +
@@ -157,4 +178,136 @@ export function diceRollInstruction(level: number): string | null {
     `El sistema tirará el dado y TE devolverá el resultado para que continúes narrando el desenlace en tu siguiente respuesta — nunca inventes ni repitas una tirada porque no te guste el número.\n` +
     `${closing}`
   );
+}
+
+/**
+ * Árbitro dedicado de "¿hace falta tirada?" — una llamada aparte, de único
+ * cometido, ANTES de generar la respuesta narrativa. Mismo diagnóstico y misma
+ * solución que ya usa el reloj del mundo para [TIEMPO:...]/[UBICACIÓN:...]
+ * (ver refineWorldStateAsync): pedirle al LLM narrador que decida esto en
+ * medio de una respuesta ya cargada con ~90 instrucciones no es fiable —
+ * verificado en vivo con DeepSeek V4 (nunca disparaba la tirada pese a
+ * acciones de riesgo evidente, mientras Gemma sí, con el mismo texto y la
+ * misma posición en el prompt). Una llamada corta, con una única pregunta y
+ * una respuesta de una línea, no compite con nada.
+ *
+ * A diferencia del reloj del mundo, que corrige DESPUÉS (un dato descriptivo
+ * se puede arreglar sin que se note), la tirada se decide ANTES de narrar:
+ * una vez el modelo ya escribió "saltas y aterrizas bien", no hay forma
+ * limpia de deshacerlo.
+ *
+ * Deliberadamente solo cubre acciones DEL JUGADOR — el caso mayoritario y el
+ * único que justifica una llamada dedicada. La tirada sobre la acción de un
+ * PNJ sigue dependiendo de que el propio narrador la pida con [TIRADA:...] en
+ * su respuesta (esa instrucción se mantiene siempre como red de seguridad
+ * secundaria: cubre lo que este árbitro no cubre por diseño, y lo que se le
+ * escape).
+ *
+ * Entrada deliberadamente mínima (solo el texto de la acción, sin historial)
+ * y salida de una sola línea con formato fijo — el coste añadido por turno es
+ * el de un intercambio muy corto, no el de una llamada de generación. Falla
+ * en silencio hacia "no hace falta tirada" ante cualquier error, timeout o
+ * respuesta que no siga el formato exacto: nunca bloquea ni alarga el turno
+ * principal más de lo que tarda esta consulta breve.
+ */
+/**
+ * Bloque para cuando la tirada YA se resolvió (árbitro dedicado, ver más
+ * abajo) antes de generar la respuesta narrativa: al narrador no se le pide
+ * que decida ni que pida nada — se le entrega el resultado como un hecho
+ * consumado, igual que la cabecera del mundo. Sustituye a diceRollInstruction
+ * para este turno concreto (no tiene sentido pedir una tirada que ya ocurrió).
+ *
+ * La instrucción de FALLO es deliberadamente explícita sobre qué implica: en
+ * pruebas reales el modelo aceptaba el fallo pero lo narraba como un éxito con
+ * un roce cosmético ("aterrizas sano y salvo, con las manos arañadas") — la
+ * palabra "FALLO" sola no bastaba para que el personaje NO consiguiera su
+ * objetivo. Ahora se explicita sin ambigüedad: el objetivo declarado NO se
+ * logra en este intento.
+ */
+export function buildResolvedDiceBlock(roll: DiceRollResult): string {
+  const isCritSuccess = roll.critical === 'success';
+  const isCritFailure = roll.critical === 'failure';
+  const outcomeLabel = isCritSuccess ? 'ÉXITO CRÍTICO (20 natural)'
+    : isCritFailure ? 'FALLO CRÍTICO (1 natural)'
+    : roll.success ? 'ÉXITO' : 'FALLO';
+  const consequence = (isCritFailure || (!roll.success && !isCritSuccess))
+    ? (isCritFailure
+        ? ` FALLO CRÍTICO: el intento no solo fracasa, sale mal de la peor manera posible — con una complicación seria añadida (te haces daño de verdad, te descubren, rompes o pierdes algo, empeoras tu situación), no un simple traspié cosmético.`
+        : ` FALLO: ${roll.who} NO consigue su objetivo en este intento — no llega, no lo logra, no funciona. Puede quedar a medio camino, ser interrumpido, o sufrir una complicación real; lo único que NO es válido es narrar el objetivo como logrado con un pequeño coste decorativo (un rasguño, un despeine). El fallo debe notarse en la situación, no solo en el estilo.`)
+    : (isCritSuccess
+        ? ` ÉXITO CRÍTICO: no solo lo consigue, sale todo lo bien que podría salir — con algún extra o ventaja inesperada.`
+        : ` ÉXITO: ${roll.who} consigue su objetivo, con la dificultad y el esfuerzo propios de la escena, pero lo consigue.`);
+  return (
+    `## TIRADA YA RESUELTA — HECHO CONSUMADO, NO LO VUELVAS A DECIDIR\n` +
+    `El sistema ya ha tirado el dado por el intento de ${roll.who} (${roll.attribute}, CD ${roll.cd}): ` +
+    `${roll.natural} natural + ${roll.modifier} de modificador = ${roll.total} → ${outcomeLabel}.\n` +
+    `${consequence}\n` +
+    `Narra el desenlace coherente con este resultado — no lo suavices ni lo contradigas, no repitas los números en la narración, ` +
+    `y no emitas [TIRADA:...] para esta misma acción: ya está resuelta.`
+  );
+}
+
+export async function resolveDiceTriggerAsync(
+  llm: LLMProvider,
+  modelId: string,
+  level: number,
+  playerActionText: string,
+  playerSheet: RpgStats | null | undefined,
+  conversationId?: string,
+): Promise<{ attribute: string; cd: number } | null> {
+  if (level <= 0 || !playerActionText.trim()) return null;
+
+  const policy = TRIGGER_POLICY[(Math.min(3, Math.round(level)) as 1 | 2 | 3)];
+  const statNames = playerSheet?.stats ? Object.keys(playerSheet.stats) : [];
+  const statsHint = statNames.length
+    ? `Atributos de la ficha del jugador (usa uno de estos si encaja; si ninguno encaja, elige el más cercano en español): ${statNames.join(', ')}.\n`
+    : '';
+
+  const system =
+    `Eres el árbitro técnico de un sistema de rol. Tu ÚNICA tarea es decidir si la acción del jugador necesita una tirada de d20, según esta política de la partida:\n` +
+    `${policy}\n\n` +
+    statsHint +
+    `Si hace falta tirada, elige también una CD (Clase de Dificultad) de 1 a 20 — 10 trivial con riesgo, 13 moderado, 16 difícil, 19 muy difícil.\n` +
+    `No expliques tu razonamiento. Responde ÚNICAMENTE con una de estas dos líneas, EXACTAMENTE con este formato y nada más:\n` +
+    `NO\n` +
+    `SI|Atributo|CD`;
+
+  try {
+    const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 8_000));
+    const result = await Promise.race([
+      llm.generate({
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: `Acción del jugador: "${playerActionText.trim().slice(0, 400)}"` },
+        ],
+        model: modelId,
+        temperature: 0,
+        maxTokens: 20,
+        stream: false,
+      }),
+      timeout,
+    ]);
+    if (!result) {
+      console.log('[dice-referee] Timeout consultando al árbitro — sin tirada este turno');
+      return null;
+    }
+
+    if (conversationId) recordBgUsage(conversationId, 'arbitro-dados', result.tokens);
+
+    const line = result.content.trim().split('\n')[0].trim();
+    if (/^NO\b/i.test(line)) return null;
+
+    const m = /^S[IÍ]\s*\|\s*([^|]+?)\s*\|\s*(\d{1,2})\s*$/i.exec(line);
+    if (!m) {
+      if (!/^NO\b/i.test(line)) console.warn(`[dice-referee] Respuesta no reconocida, se ignora: "${line}"`);
+      return null;
+    }
+
+    const cd = Math.min(20, Math.max(1, parseInt(m[2], 10) || 10));
+    console.log(`[dice-referee] Tirada activada: ${m[1].trim()} (CD ${cd})`);
+    return { attribute: m[1].trim(), cd };
+  } catch (err) {
+    console.error('[dice-referee] Error al consultar el árbitro:', err);
+    return null;
+  }
 }
