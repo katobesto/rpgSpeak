@@ -409,6 +409,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
         onDone: ({ messageId, userMessageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId, content, locationUpdate, thinkContent, deathLoop, diceRoll }) => {
           resolvedMessageId = messageId;
+          // ¿Este mensaje ya pasó por el árbitro dedicado (onDicePending)?
+          // La clave existe (true O false) en cuanto se marcó, sea cual sea
+          // su estado actual — a diferencia de comprobar `pendingDiceRoll`
+          // (que ya puede estar en null si el jugador resolvió el modal
+          // ANTES de que la generación terminase). Sin esto, resolver pronto
+          // hacía que este onDone, al llegar después, disparara un SEGUNDO
+          // modal por la vía legado — con su propio envío de seguimiento,
+          // duplicando la respuesta.
+          const alreadyGated = get().messages.some(
+            (m) => m.id === placeholderId && m.metadata?.diceGateVisual !== undefined
+          );
           set((s) => ({
             isStreaming: false,
             streamingContent: '',
@@ -457,7 +468,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           // tirada a media narración. El mensaje ya es visible (se detuvo
           // ANTES del desenlace, nada que ocultar); el modal solo añade el
           // badge y dispara la llamada de seguimiento al resolverse.
-          if (diceRoll && !get().pendingDiceRoll) {
+          if (diceRoll && !alreadyGated) {
             set({ pendingDiceRoll: { messageId, diceRoll, characterId, narrator: Boolean(narrator), preResolved: false } });
           }
         },
@@ -653,6 +664,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         },
         onDone: ({ messageId, tokens, tokenBreakdown, promptMessages, affinityUpdates, fastLlmDebug, narrator, characterId: doneCharId, content, locationUpdate, thinkContent, deathLoop, diceRoll }) => {
           resolvedMessageId = messageId;
+          // Ver el comentario extenso en sendMessage: comprobar la marca del
+          // propio mensaje, no `pendingDiceRoll` (que ya puede ser null si el
+          // jugador resolvió el modal antes de que esto llegara).
+          const alreadyGated = get().messages.some(
+            (m) => m.id === placeholderId && m.metadata?.diceGateVisual !== undefined
+          );
           set((s) => ({
             isStreaming: false,
             streamingContent: '',
@@ -685,7 +702,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
           if (affinityUpdates?.length) get().updateCharacterAffinities(affinityUpdates);
           if (locationUpdate !== undefined) get().updateCurrentLocation(locationUpdate);
           if (deathLoop !== undefined) get().setDeathLoop(deathLoop);
-          if (diceRoll && !get().pendingDiceRoll) {
+          if (diceRoll && !alreadyGated) {
             set({ pendingDiceRoll: { messageId, diceRoll, characterId: doneCharId, narrator: Boolean(narrator), preResolved: false } });
           }
         },
