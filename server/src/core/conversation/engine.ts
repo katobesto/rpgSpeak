@@ -872,10 +872,33 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     const sceneState =
       ((conversation.metadata as { sceneState?: SceneDirectorState } | null)?.sceneState) ?? null;
 
+    // El botón "Continúa" (empujón ligero, ChatWindow.tsx) envía literalmente
+    // esa palabra sin ninguna instrucción — el modelo queda libre de
+    // interpretarla como "salta a la siguiente escena relevante", y en la
+    // práctica a veces elige saltar horas o un día entero sin ningún hecho
+    // narrativo que lo justifique (verificado: "quedamos en la biblioteca" →
+    // "Continúa" → la escena salta directamente al día siguiente). El botón
+    // hermano, "Continúa la historia", SÍ pide explícitamente avanzar/resolver
+    // — ahí un salto es la función, no un bug. Aquí se ancla el significado
+    // de la versión ligera: seguir el momento actual, no saltar de escena. Solo
+    // afecta a esta generación (el mensaje guardado sigue siendo "Continúa" limpio).
+    const isBareContinue = userMessage.trim() === 'Continúa';
+    const contextMessages = [...historyForContext, { ...userMsg, role: 'user' as const }];
+    if (isBareContinue) {
+      const last = contextMessages[contextMessages.length - 1];
+      contextMessages[contextMessages.length - 1] = {
+        ...last,
+        content:
+          `Continúa (sigue la escena EXACTAMENTE desde donde se ha quedado — mismo momento, mismo lugar. ` +
+          `No saltes de tiempo ni de escena, no la des por resuelta ni la cierres, a menos que ya estuviera ` +
+          `terminada de verdad. Si algo estaba en marcha —una acción, una frase a medias, una decisión pendiente—, sigue justo ahí.)`,
+      };
+    }
+
     const { messages: rawContext, footerCount } = await buildContext({
       character: character ?? groupCharacters[0],
       stories: linkedStories,
-      messages: [...historyForContext, { ...userMsg, role: 'user' as const }],
+      messages: contextMessages,
       conversationId,
       globalSystemPrompt: settings.globalSystemPrompt,
       maxMessages,
