@@ -59,6 +59,10 @@ body {
 .prose {
   @apply text-sm leading-relaxed;
   color: var(--text-primary);
+  /* Red de seguridad: durante el streaming, el markdown a medio llegar
+     (una URL sin cerrar, un token sin espacios) no debe poder ensanchar
+     la burbuja — que rompa por donde haga falta en vez de desbordar. */
+  overflow-wrap: anywhere;
 }
 .prose p { @apply mb-3 last:mb-0; }
 .prose code {

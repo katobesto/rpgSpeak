@@ -436,7 +436,7 @@ export function MessageItem({ message, characterName, characterAvatar, groupChar
         </div>
 
         <div
-          className={`relative rounded-2xl px-4 py-2.5 text-sm ${
+          className={`relative rounded-2xl px-4 py-2.5 text-sm min-w-0 ${
             isUser
               ? 'bubble-user text-white'
               : isError
