@@ -331,6 +331,8 @@ IMPORTANTISIMO: NO PUEDES INDICAR SI ES PRONTO PARA COMENZAR UNA RELACION, PORQU
   fastLlmEnabled: false,
   fastLlmProviderId: null,
   fastLlmModelId: null,
+  fastLlmPreAnalysisEnabled: true,
+  fastLlmPostAnalysisEnabled: true,
   fastLlmDebugMode: false,
   fastLlmAnalysisPrompt: `Eres un analizador de juego de rol. Decides si algo merece ser recordado de forma permanente. Eres BRUTALMENTE selectivo: el 90% de los turnos deben producir NINGUNO.
 
@@ -483,6 +485,13 @@ Reglas estrictas:
   contextAutoExtractInterval:   8,
   contextAutoExtractProviderId: null,
   contextAutoExtractModelId:    null,
+  // Llamadas auxiliares. Se conservan activadas para no cambiar instalaciones
+  // existentes; pueden apagarse para preservar la KV cache del modelo principal.
+  llmNsfwGuardEnabled:          true,
+  diceRefereeEnabled:           true,
+  worldStateAutoUpdateEnabled:  true,
+  sceneDirectorEnabled:         true,
+  autoSummariesEnabled:         true,
   // Generación de eventos de historia
   storyEventGenerationPrompt: `Eres un diseñador narrativo de juegos de rol. A partir del contexto de la historia que se te proporciona, genera exactamente {{NUM_EVENTOS}} eventos narrativos relevantes y concretos para esta historia.
 

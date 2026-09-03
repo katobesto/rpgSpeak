@@ -693,6 +693,10 @@ export interface AppSettings {
   fastLlmEnabled: boolean;
   fastLlmProviderId: string | null;
   fastLlmModelId: string | null;
+  /** Consulta breve antes de narrar para detectar directivas de comportamiento. */
+  fastLlmPreAnalysisEnabled: boolean;
+  /** Análisis posterior de afinidad y memorias. */
+  fastLlmPostAnalysisEnabled: boolean;
   fastLlmDebugMode: boolean;
   fastLlmAnalysisPrompt: string;
   // Inyección de memoria en el contexto del LLM principal
@@ -714,6 +718,16 @@ export interface AppSettings {
   contextAutoExtractInterval:   number;        // cada N mensajes nuevos (default 8)
   contextAutoExtractProviderId: string | null; // null = usar fast LLM o default
   contextAutoExtractModelId:    string | null;
+  /** Conserva la detección por regex y omite la consulta LLM adicional de moderación. */
+  llmNsfwGuardEnabled: boolean;
+  /** Consulta LLM previa que decide si una acción exige una tirada. */
+  diceRefereeEnabled: boolean;
+  /** Consultas posteriores para anclar o corregir hora y ubicación. */
+  worldStateAutoUpdateEnabled: boolean;
+  /** Consulta posterior para mantener el estado de la escena y los PNJ. */
+  sceneDirectorEnabled: boolean;
+  /** Consultas posteriores que generan resúmenes de bloques y personales. */
+  autoSummariesEnabled: boolean;
   // Generación de eventos de historia
   storyEventGenerationPrompt: string;
   // Generación de ubicaciones de historia

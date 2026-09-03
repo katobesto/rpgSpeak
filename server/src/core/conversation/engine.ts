@@ -576,6 +576,7 @@ async function checkNsfwContent(
   fastProviderId: string | null,
   fastModelId: string | null,
   conversationId?: string,
+  useLlmFallback = true,
 ): Promise<boolean> {
   // ── Layer 1: regex ──────────────────────────────────────────────────────────
   const NSFW_REGEX = new RegExp(
@@ -597,6 +598,7 @@ async function checkNsfwContent(
     console.log('[nsfw-guard] Regex layer blocked message');
     return true;
   }
+  if (!useLlmFallback) return false;
 
   // ── Layer 2: fast LLM classifier ───────────────────────────────────────────
   if (!fastProviderId || !fastModelId) return false;
@@ -756,6 +758,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
         useFastLlm ? (settings.fastLlmProviderId ?? null) : null,
         useFastLlm ? (settings.fastLlmModelId ?? null)   : null,
         conversationId,
+        settings.llmNsfwGuardEnabled,
       );
       if (isNsfw) {
         const blockedText = settings.nsfwBlockedMessage ||
@@ -790,7 +793,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     // narrar — una vez resuelto el desenlace en prosa no hay forma limpia de
     // deshacerlo. Ver resolveDiceTriggerAsync (dice.ts) para el detalle.
     let preResolvedDiceRoll: DiceRollResult | undefined;
-    if (diceDifficulty > 0) {
+    if (diceDifficulty > 0 && settings.diceRefereeEnabled) {
       const trigger = await resolveDiceTriggerAsync(
         llm, modelId, diceDifficulty, userMessageForAnalysis, playerSheet, conversationId,
       );
@@ -921,7 +924,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       narratorPrompt: settings.narratorPrompt,
       characterCoherencePrompt: settings.characterCoherencePrompt,
       livingWorldPrompt: settings.livingWorldPrompt,
-      fastLlmEnabled: useFastLlm,
+      fastLlmEnabled: useFastLlm && settings.fastLlmPostAnalysisEnabled,
       memoryInjectionPrompt: settings.memoryInjectionPrompt,
       contextIndexInjectionEnabled:  settings.contextIndexInjectionEnabled,
       contextIndexInjectionMaxItems: settings.contextIndexInjectionMaxItems,
@@ -976,7 +979,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
 
     let turnDirective = buildTurnDirective(playerAction, userMessageForAnalysis, characterAffinities);
 
-    if (!turnDirective && hasNonConsentingChars && useFastLlm) {
+    if (!turnDirective && hasNonConsentingChars && useFastLlm && settings.fastLlmPreAnalysisEnabled) {
       // Fetch recent offense/trauma memories for context
       const allCharsIds = allCharsInConv.map((c) => c.id);
       const recentMemories = allCharsIds.flatMap((id) =>
@@ -1181,7 +1184,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     let fastLlmDebug: { prompt: string; response: string } | undefined;
     let cleanContent: string;
 
-    if (useFastLlm && !aborted) {
+    if (useFastLlm && settings.fastLlmPostAnalysisEnabled && !aborted) {
       console.log(`[fast-llm] Analyzing exchange for conversation ${conversationId} (provider: ${settings.fastLlmProviderId}, model: ${settings.fastLlmModelId})`);
       // Strip any [AFINIDAD:...] tags the main LLM may have emitted — fast LLM handles affinity separately
       cleanContent = accumulated.replace(/\[AFINIDAD:[^\]]+\]/gi, '').trimEnd();
@@ -1633,8 +1636,8 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       const updatedConvForCount = convRepo.findById(conversationId);
       const currentTotalMessages = updatedConvForCount?.messageCount ?? 0;
       const personalSummaryChar = !narratorMode && contextGroupChars.length > 0 ? character : null;
-      const personalSummaryDue = Boolean(personalSummaryChar) && currentTotalMessages % SUMMARY_EVERY_N === 0;
-      const blockSummaryDue = hasPendingSummaryWork(conversationId, branchId);
+      const personalSummaryDue = settings.autoSummariesEnabled && Boolean(personalSummaryChar) && currentTotalMessages % SUMMARY_EVERY_N === 0;
+      const blockSummaryDue = settings.autoSummariesEnabled && hasPendingSummaryWork(conversationId, branchId);
 
       const enrichSteps: Array<{ label: string; run: () => Promise<void> }> = [];
 
@@ -1643,16 +1646,16 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       // diferencia del tiempo, casi nunca cambia entre turnos, así que
       // preguntarla en CADA turno arriesgaría introducir deriva; atada a la
       // cadencia ya establecida del director es la frecuencia correcta).
-      const sceneDirectorDue = isSceneDirectorDue(sceneState, currentMessageIndex + 1);
+      const sceneDirectorDue = settings.sceneDirectorEnabled && isSceneDirectorDue(sceneState, currentMessageIndex + 1);
       // Ubicación sin confirmar este turno (ni [UBICACION:] ni [ESCENA:...|lugar]).
       const fixLocation = sceneDirectorDue && locationUpdate == null;
 
-      if (!worldState.established) {
+      if (settings.worldStateAutoUpdateEnabled && !worldState.established) {
         enrichSteps.push({
           label: 'Anclando la escena en el tiempo y el lugar…',
           run: () => bootstrapWorldStateAsync(conversationId, provider, modelId, worldCalendar),
         });
-      } else if (usedDefaultTimeAdvance || fixLocation) {
+      } else if (settings.worldStateAutoUpdateEnabled && (usedDefaultTimeAdvance || fixLocation)) {
         // El modelo no emitió [TIEMPO:...] y/o [UBICACION:] de forma fiable
         // este turno: una llamada dedicada, de único cometido, determina el
         // dato real — mismo patrón que el anclaje inicial, que tampoco
@@ -1671,14 +1674,14 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       }
       if (sceneDirectorDue) {
         enrichSteps.push({
-          label: useFastLlm
+          label: useFastLlm && settings.fastLlmPostAnalysisEnabled
             ? 'Actualizando lo que piensa y siente cada personaje…'
             : 'Actualizando lo que piensa y siente cada personaje, y su memoria…',
           // Sin LLM rápido, esta es la ÚNICA vía de creación de memorias
           // (analyzeExchangeAsync, más abajo, nunca se ejecuta). Con LLM rápido
           // activo se deja en false para no duplicar — ese analizador ya cubre
           // memoria con su propia cadencia por turno.
-          run: () => updateSceneStateAsync(conversationId, provider, modelId, !useFastLlm),
+          run: () => updateSceneStateAsync(conversationId, provider, modelId, !(useFastLlm && settings.fastLlmPostAnalysisEnabled)),
         });
       }
       if (blockSummaryDue || personalSummaryDue) {

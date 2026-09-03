@@ -20,7 +20,7 @@ import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
 
 type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats' | 'backup';
 
-const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'characterCoherencePrompt', 'livingWorldPrompt', 'sceneImagePrompt', 'charImagePrompt', 'backgroundImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'summaryBlockSize', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort', 'generationTemperature', 'generationTopP', 'generationFrequencyPenalty', 'generationPresencePenalty'];
+const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'characterCoherencePrompt', 'livingWorldPrompt', 'sceneImagePrompt', 'charImagePrompt', 'backgroundImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmPreAnalysisEnabled', 'fastLlmPostAnalysisEnabled', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'llmNsfwGuardEnabled', 'diceRefereeEnabled', 'worldStateAutoUpdateEnabled', 'sceneDirectorEnabled', 'autoSummariesEnabled', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'summaryBlockSize', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort', 'generationTemperature', 'generationTopP', 'generationFrequencyPenalty', 'generationPresencePenalty'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret', 'bzComfyUrl', 'bzComfyApiToken', 'bzComfyWorkflow'];
 
@@ -733,8 +733,67 @@ export function SettingsPanel() {
                     />
                   </Section>
 
+                  <Section title="Peticiones auxiliares y caché">
+                    <div className="rounded-xl border border-amber-500/20 bg-amber-500/[0.045] px-3 py-2.5 mb-3 text-xs leading-relaxed text-text-muted">
+                      <strong className="text-amber-400">Modo conservador de caché.</strong>{' '}
+                      Cada consulta auxiliar usa el mismo servidor LLM. Si comparte modelo con la narración principal,
+                      algunos motores pueden desalojar su contexto KV largo. Desactiva sólo las automatizaciones que no
+                      necesites: el cambio se aplica al siguiente turno y no borra datos ya creados.
+                    </div>
+                    <div className="space-y-1">
+                      <ToggleRow
+                        label="Análisis rápido antes de narrar"
+                        description="Consulta el LLM de apoyo para detectar manipulación, tensiones o directivas de comportamiento antes del turno principal. Al apagarlo se mantienen las reglas por regex."
+                        checked={draft.fastLlmPreAnalysisEnabled ?? true}
+                        onChange={(v) => update('fastLlmPreAnalysisEnabled', v)}
+                      />
+                      <ToggleRow
+                        label="Análisis rápido tras la respuesta"
+                        description="Consulta el LLM de apoyo después de cada respuesta para actualizar afinidades y crear memorias. Al apagarlo, el LLM principal vuelve a emitir las etiquetas de afinidad."
+                        checked={draft.fastLlmPostAnalysisEnabled ?? true}
+                        onChange={(v) => update('fastLlmPostAnalysisEnabled', v)}
+                      />
+                      <ToggleRow
+                        label="Árbitro LLM de tiradas"
+                        description="Consulta breve previa para decidir si una acción requiere d20. Al apagarlo siguen funcionando las tiradas que el narrador solicite con su etiqueta."
+                        checked={draft.diceRefereeEnabled ?? true}
+                        onChange={(v) => update('diceRefereeEnabled', v)}
+                      />
+                      <ToggleRow
+                        label="Moderación LLM adicional"
+                        description="Con NSFW desactivado, consulta un clasificador para casos ambiguos. Al apagarlo se conserva el bloqueo inmediato por expresiones explícitas."
+                        checked={draft.llmNsfwGuardEnabled ?? true}
+                        onChange={(v) => update('llmNsfwGuardEnabled', v)}
+                      />
+                      <ToggleRow
+                        label="Actualización automática de tiempo y ubicación"
+                        description="Llamadas posteriores que anclan o corrigen el reloj y la ubicación de la escena cuando la respuesta principal no los define."
+                        checked={draft.worldStateAutoUpdateEnabled ?? true}
+                        onChange={(v) => update('worldStateAutoUpdateEnabled', v)}
+                      />
+                      <ToggleRow
+                        label="Director de escena"
+                        description="Llamada posterior que actualiza el estado de escena, PNJ y coherencia narrativa según su cadencia configurada."
+                        checked={draft.sceneDirectorEnabled ?? true}
+                        onChange={(v) => update('sceneDirectorEnabled', v)}
+                      />
+                      <ToggleRow
+                        label="Resúmenes automáticos"
+                        description="Llamadas posteriores para crear resúmenes por bloques y resúmenes personales. Los resúmenes existentes permanecen disponibles."
+                        checked={draft.autoSummariesEnabled ?? true}
+                        onChange={(v) => update('autoSummariesEnabled', v)}
+                      />
+                      <ToggleRow
+                        label="Extracción automática del índice"
+                        description="Llamada de fondo cada cierto número de mensajes para extraer eventos, lugares y hechos. El modelo y la cadencia se ajustan en la pestaña Embeddings."
+                        checked={draft.contextAutoExtractEnabled ?? true}
+                        onChange={(v) => update('contextAutoExtractEnabled', v)}
+                      />
+                    </div>
+                  </Section>
+
                   {/* Affinity prompt — solo visible cuando el LLM Rápido está desactivado */}
-                  {!(draft.fastLlmEnabled) && (
+                  {!(draft.fastLlmEnabled && draft.fastLlmPostAnalysisEnabled) && (
                     <Section title="Prompt de Afinidad (LLM Principal)">
                       <p className="text-xs text-text-muted mb-2 leading-relaxed">
                         <span className="text-accent/70 font-mono text-[10px] mr-1">[SYSTEM]</span>
