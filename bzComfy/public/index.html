@@ -195,6 +195,20 @@
         </div>
       </div>
 
+      <!-- Sampler steps control — only shown for workflows with samplerStepsControl -->
+      <div id="sampler-steps-field" class="field hidden">
+        <label id="sampler-steps-label">Pasos del sampler</label>
+        <div class="upscaler-grid">
+          <div class="upscaler-control">
+            <span class="resolution-sublabel">
+              Pasos
+              <span id="sampler-steps-value" class="upscaler-num">8</span>
+            </span>
+            <input id="sampler-steps" type="range" min="1" max="50" step="1" value="8" />
+          </div>
+        </div>
+      </div>
+
       <div id="prompt-field" class="field grow">
         <label for="prompt">Prompt</label>
         <textarea id="prompt" rows="10"

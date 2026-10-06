@@ -1,6 +1,6 @@
 {
   "comfyUrl": "http://127.0.0.1:8188",
-  "comfyDir": "C:\\ai\\StabilityMatrix-win-x64\\Data\\Packages\\ComfyUI",
+  "comfyDir": "/Users/javiermac/Documents/ComfyUI",
   "comfyStartCmd": "python main.py --preview-method latent2rgb",
   "apiToken": "trikipake"
 }

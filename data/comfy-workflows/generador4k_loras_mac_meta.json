@@ -1,0 +1,19 @@
+{
+  "label": "Generador 4k con loras (mac)",
+  "modelControl": {
+    "label": "Modelo base",
+    "nodeId": "245",
+    "input": "unet_name",
+    "objectInfoClass": "UNETLoader",
+    "objectInfoInput": "unet_name",
+    "default": "z_image_turbo_bf16.safetensors"
+  },
+  "samplerStepsControl": {
+    "label": "Pasos del sampler",
+    "nodeId": "3",
+    "input": "steps",
+    "min": 1,
+    "max": 50,
+    "default": 8
+  }
+}

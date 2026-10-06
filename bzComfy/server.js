@@ -344,6 +344,22 @@ async function loadModelOptions(control) {
   return options
 }
 
+function detectSamplerStepsControl(workflow, meta) {
+  const control = meta?.samplerStepsControl
+  if (!control?.nodeId || !control?.input) return null
+  const node = workflow[control.nodeId]
+  if (!node) return null
+  const defaultSteps = node.inputs?.[control.input] ?? control.default ?? null
+  return {
+    label: control.label || 'Pasos del sampler',
+    nodeId: control.nodeId,
+    input: control.input,
+    min: control.min ?? 1,
+    max: control.max ?? 50,
+    defaultSteps,
+  }
+}
+
 function buildNodeMap(workflow) {
   return Object.fromEntries(
     Object.entries(workflow).map(([id, node]) => [
@@ -543,6 +559,7 @@ app.get('/api/workflows', async (_req, res) => {
           const powerLora = detectPowerLoraNode(workflowData)
           const upscalerControls = detectUpscalerControls(workflowData)
           const modelControl = detectModelControl(workflowData, meta)
+          const samplerStepsControl = detectSamplerStepsControl(workflowData, meta)
           let modelOptions = []
           if (modelControl) {
             try {
@@ -574,6 +591,13 @@ app.get('/api/workflows', async (_req, res) => {
             } : null,
             hasUpscalerControls: !!upscalerControls,
             upscalerControls,
+            hasSamplerStepsControl: !!samplerStepsControl,
+            samplerStepsControl: samplerStepsControl ? {
+              label: samplerStepsControl.label,
+              min: samplerStepsControl.min,
+              max: samplerStepsControl.max,
+              defaultSteps: samplerStepsControl.defaultSteps,
+            } : null,
           }
         })
     )
@@ -638,7 +662,7 @@ app.post('/api/upload', upload.single('image'), async (req, res) => {
 
 // Start a generation
 app.post('/api/generate', async (req, res) => {
-  const { workflow: workflowName, prompt, negativePrompt = '', referenceImageName, loraName, loraStrength, powerLoraUpdates, seed, megapixel, aspectRatio, baseModel, upscalerResolution, grainIntensity, finalGrainIntensity } = req.body
+  const { workflow: workflowName, prompt, negativePrompt = '', referenceImageName, loraName, loraStrength, powerLoraUpdates, seed, megapixel, aspectRatio, baseModel, upscalerResolution, grainIntensity, finalGrainIntensity, samplerSteps } = req.body
   if (!workflowName) {
     return res.status(400).json({ error: 'workflow is required' })
   }
@@ -722,6 +746,15 @@ app.post('/api/generate', async (req, res) => {
           if (aspectRatio) node.inputs.aspect_ratio = aspectRatio
           break
         }
+      }
+    }
+
+    // Inject sampler steps override if the workflow has a samplerStepsControl
+    if (samplerSteps != null) {
+      const stepsCtrl = detectSamplerStepsControl(workflow, meta)
+      if (stepsCtrl) {
+        const steps = Math.min(Math.max(Number(samplerSteps), stepsCtrl.min), stepsCtrl.max)
+        workflow[stepsCtrl.nodeId].inputs[stepsCtrl.input] = steps
       }
     }
 
@@ -842,10 +875,13 @@ app.post('/api/generate', async (req, res) => {
           break
         case 'executing':
           if (msg.data.node === null) {
+            console.log(`[bzComfy] Prompt ${prompt_id}: execution complete → done`)
             push('done', {})
             ws.close()
           } else {
-            push('executing', { node: msg.data.node, title: session.nodeMap[msg.data.node] || msg.data.node })
+            const title = session.nodeMap[msg.data.node] || msg.data.node
+            console.log(`[bzComfy] Prompt ${prompt_id}: executing node ${msg.data.node} (${title})`)
+            push('executing', { node: msg.data.node, title })
           }
           break
         case 'executed':
@@ -854,17 +890,32 @@ app.post('/api/generate', async (req, res) => {
             // Mark as final if any output filename starts with "final" (SaveImage filename_prefix).
             // This is detected synchronously from the WS stream — no async history fetch needed.
             const isFinal = imgs.some(img => img.filename?.toLowerCase().startsWith('final'))
+            console.log(`[bzComfy] Prompt ${prompt_id}: node ${msg.data.node} → ${imgs.length} image(s), final=${isFinal}`)
             push('images', { images: imgs, final: isFinal || undefined })
           }
           break
         case 'execution_error':
+          console.error(`[bzComfy] Prompt ${prompt_id}: execution_error — ${msg.data.exception_message || 'unknown'} (node: ${msg.data.node})`)
           push('error', { message: msg.data.exception_message || 'Execution error' })
           ws.close()
           break
       }
     })
 
-    ws.on('error', err => push('error', { message: err.message }))
+    ws.on('error', err => {
+      console.error(`[bzComfy] Prompt ${prompt_id}: WS error — ${err.message}`)
+      push('error', { message: err.message })
+    })
+
+    // Detect unexpected disconnection during execution (e.g. ComfyUI crash / OOM)
+    ws.on('close', () => {
+      console.log(`[bzComfy] Prompt ${prompt_id}: WS closed unexpectedly`)
+      // Only push error if we haven't already received 'done' or an error
+      const lastEvent = session.events[session.events.length - 1]
+      if (lastEvent?.type !== 'done' && lastEvent?.type !== 'error') {
+        push('error', { message: 'ComfyUI se desconectó durante la ejecución (posible error de memoria o crash del nodo). Revisa los logs de ComfyUI para más detalles.' })
+      }
+    })
 
     res.json({ promptId: prompt_id, seed: usedSeed })
   } catch (err) {

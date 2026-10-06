@@ -1,4 +1,4 @@
-﻿/* bzComfy frontend */
+/* bzComfy frontend */
 
 const el = id => document.getElementById(id)
 
@@ -193,6 +193,8 @@ const state = {
   stepsSincePreview: 0,   // progress steps without a preview frame
   pendingFinalImage: null,   // image info to fetch+show when done fires
   pendingFinalLocked: false, // true once a final:true image has been identified
+  lastActivityTime: 0,       // timestamp of last execution event (for timeout detection)
+  executedNodes: [],         // list of executed node titles for debugging
   // Reference image
   workflows: [],
   currentWorkflow: null,
@@ -628,6 +630,14 @@ function onWorkflowChange() {
   } else {
     upscalerField.classList.add('hidden')
   }
+
+  const samplerStepsField = el('sampler-steps-field')
+  if (state.currentWorkflow?.hasSamplerStepsControl) {
+    samplerStepsField.classList.remove('hidden')
+    initSamplerStepsControl(state.currentWorkflow.samplerStepsControl)
+  } else {
+    samplerStepsField.classList.add('hidden')
+  }
 }
 
 function getActionLabel() {
@@ -672,6 +682,26 @@ function initUpscalerControls(controls = {}) {
   const finalGrainInput = el('upscaler-final-grain')
   finalGrainInput.value = finalGrain
   el('upscaler-final-grain-value').textContent = finalGrain.toFixed(3)
+}
+
+function initSamplerStepsControl(control = {}) {
+  const steps = Number(control.defaultSteps) || 8
+  const min = Number(control.min) || 1
+  const max = Number(control.max) || 50
+
+  const input = el('sampler-steps')
+  input.min = min
+  input.max = max
+  input.value = steps
+  el('sampler-steps-value').textContent = steps
+
+  // Update value display on change
+  if (!input._stepsListener) {
+    input._stepsListener = () => {
+      el('sampler-steps-value').textContent = input.value
+    }
+    input.addEventListener('input', input._stepsListener)
+  }
 }
 
 function renderPowerLoras(loras) {
@@ -839,6 +869,8 @@ async function generate() {
   state.stepsSincePreview = 0
   state.pendingFinalImage = null
   state.pendingFinalLocked = false
+  state.executedNodes = []
+  state.lastActivityTime = Date.now()
   setGenerating(true)
   clearStatus()
   resetViewer()
@@ -898,6 +930,11 @@ async function generate() {
       if (!isNaN(finalGrainIntensity)) body.finalGrainIntensity = finalGrainIntensity
     }
 
+    if (state.currentWorkflow?.hasSamplerStepsControl) {
+      const steps = parseInt(el('sampler-steps').value, 10)
+      if (!isNaN(steps)) body.samplerSteps = steps
+    }
+
     const res = await apiFetch('/api/generate', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -936,11 +973,25 @@ function connectSSE(promptId) {
   es.onmessage = e => {
     try { handleEvent(JSON.parse(e.data)) } catch {}
   }
+
+  // Timeout detection — if no activity for 5 min during generation, warn the user
+  const EXECUTION_TIMEOUT_MS = 5 * 60 * 1000
+  state.lastActivityTime = Date.now()
+  const timeoutCheck = setInterval(() => {
+    if (!state.generating) { clearInterval(timeoutCheck); return }
+    const elapsed = Date.now() - state.lastActivityTime
+    if (elapsed > EXECUTION_TIMEOUT_MS && state.executedNodes.length > 0) {
+      console.warn(`[bzComfy] Execution stalled after ${Math.round(elapsed/1000)}s. Last executed nodes:`, state.executedNodes.slice(-5))
+      showStatus('⏱ La ejecución se detuvo sin respuesta de ComfyUI. Revisa los logs del servidor para más detalles.', 'error')
+    }
+  }, 30000) // check every 30s
+
   es.onerror = () => {
+    clearInterval(timeoutCheck)
     if (state.generating) {
       setGenerating(false)
       showProgressPanel(false)
-      showStatus('Conexion SSE perdida.', 'error')
+      showStatus('Conexión SSE perdida.', 'error')
     }
     es.close()
   }
@@ -949,6 +1000,7 @@ function connectSSE(promptId) {
 function handleEvent({ type, data }) {
   switch (type) {
     case 'progress':
+      state.lastActivityTime = Date.now()
       state.hasProgress = true
       setProgressIndeterminate(false)
       setStep(data.step, data.total)
@@ -960,6 +1012,9 @@ function handleEvent({ type, data }) {
       break
 
     case 'executing':
+      state.lastActivityTime = Date.now()
+      state.executedNodes.push(data.title || data.node)
+      console.log(`[bzComfy] Executing: ${data.title || data.node} (${state.executedNodes.length} nodes so far)`)
       setNode(data.title || data.node)
       if (!state.hasProgress) setProgressIndeterminate(true)
       break
@@ -972,6 +1027,8 @@ function handleEvent({ type, data }) {
       break
 
     case 'images': {
+      state.lastActivityTime = Date.now()
+      console.log(`[bzComfy] Image received: ${data.final ? 'FINAL' : 'intermediate'} (${data.images.length} image(s))`)
       const img = data.images[0]
       // Track which image to show when done fires.
       // Once a final:true image is identified, ignore all later events.
@@ -996,6 +1053,8 @@ function handleEvent({ type, data }) {
     }
 
     case 'done':
+      console.log(`[bzComfy] DONE. Executed ${state.executedNodes.length} nodes total.`)
+      state.lastActivityTime = Date.now()
       // Fetch the definitive final image exactly once — no race conditions.
       if (state.pendingFinalImage) {
         const img = state.pendingFinalImage
@@ -1012,6 +1071,7 @@ function handleEvent({ type, data }) {
       break
 
     case 'error':
+      console.error(`[bzComfy] ERROR: ${data.message || 'Unknown'}. Executed nodes so far:`, state.executedNodes.slice(-5))
       setGenerating(false)
       showProgressPanel(false)
       showStatus(data.message || 'Error desconocido en ComfyUI', 'error')
