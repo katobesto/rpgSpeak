@@ -487,9 +487,12 @@ Reglas estrictas:
   contextAutoExtractModelId:    null,
   // Llamadas auxiliares. Se conservan activadas para no cambiar instalaciones
   // existentes; pueden apagarse para preservar la KV cache del modelo principal.
+  // Las dos de DECISIÓN (árbitro de tiradas y auto-update de tiempo/ubicación)
+  // van OFF por defecto: usan el modelo principal y, al intercalarse con la
+  // narración, desalojan su caché de prefijo en cada turno (conversación lenta).
   llmNsfwGuardEnabled:          true,
-  diceRefereeEnabled:           true,
-  worldStateAutoUpdateEnabled:  true,
+  diceRefereeEnabled:           false,
+  worldStateAutoUpdateEnabled:  false,
   sceneDirectorEnabled:         true,
   autoSummariesEnabled:         true,
   // Generación de eventos de historia
@@ -593,7 +596,7 @@ Responde de forma breve y directa: máximo 2 párrafos cortos. Ve al punto esenc
   summaryBlockSize: 40,  // mensajes por bloque de resumen automático (inmutable)
   // API options
   disableFallbacks: false,
-  // Thinking / razonamiento (DeepSeek V4 y modelos compatibles)
+  // Thinking / razonamiento (esfuerzo recortado por familia de modelo en el proveedor)
   reasoningEnabled: false,
   reasoningEffort: 'high',
   // Cloudflare Access — para ComfyUI remoto tras túnel
