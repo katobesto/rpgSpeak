@@ -1,6 +1,6 @@
 {
-  "comfyUrl": "http://127.0.0.1:8188",
-  "comfyDir": "/Users/javiermac/Documents/ComfyUI",
-  "comfyStartCmd": "python main.py --preview-method latent2rgb",
+  "comfyUrl": "http://127.0.0.1:8000",
+  "comfyDir": "/Users/javiermac/ComfyUI-Installs/ComfyUI",
+  "comfyStartCmd": "/Users/javiermac/Documents/ComfyUI/.venv/bin/python3 -s ${comfyDir}/ComfyUI/main.py --port 8000 --base-directory /Users/javiermac/Documents/ComfyUI --user-directory /Users/javiermac/Documents/ComfyUI/user --database-url sqlite:////Users/javiermac/Documents/ComfyUI/user/comfyui.db --enable-manager --enable-assets",
   "apiToken": "trikipake"
 }

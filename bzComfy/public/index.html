@@ -128,6 +128,23 @@
         </div>
       </div>
 
+      <!-- Multi-image upload — only for workflows with imageInputsControl (Qwen Image Edit) -->
+      <div id="multi-image-field" class="field hidden">
+        <label id="multi-image-label">Imágenes de entrada</label>
+        <div id="multi-drop-zone" class="drop-zone">
+          <input id="multi-image-input" type="file" accept="image/*" multiple hidden />
+          <div id="multi-drop-placeholder" class="drop-placeholder">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="3" y="3" width="18" height="18" rx="2"/>
+              <circle cx="8.5" cy="8.5" r="1.5"/>
+              <polyline points="21 15 16 10 5 21"/>
+            </svg>
+            <span id="multi-drop-text">Haz clic o arrastra imágenes</span>
+          </div>
+        </div>
+        <div id="multi-image-grid" class="multi-image-grid"></div>
+      </div>
+
       <!-- LoRA selector — only shown for workflows with LoRA support -->
       <div id="lora-field" class="field hidden">
         <label for="lora-select">LoRA de estilo</label>
@@ -159,6 +176,7 @@
             <span class="resolution-sublabel">Megapíxeles</span>
             <div class="select-wrap">
               <select id="megapixel-select"></select>
+              <input id="megapixel-input" type="number" class="hidden" step="0.1" min="0.1" max="16" />
             </div>
           </div>
           <div class="resolution-col">

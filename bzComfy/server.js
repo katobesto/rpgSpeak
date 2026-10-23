@@ -288,6 +288,23 @@ function detectImageInputNode(workflow, meta) {
   return null
 }
 
+// Multi-image input (e.g. Qwen Image Edit): the meta declares an "autogrow"
+// slot container on an encode node — images.image_1, image_2, … The server
+// creates one LoadImage node per uploaded image and wires them at submit time.
+function detectMultiImageControl(workflow, meta) {
+  const ctrl = meta?.imageInputsControl
+  if (!ctrl?.nodeId || !ctrl?.inputPrefix) return null
+  const node = workflow[ctrl.nodeId]
+  if (!node) return null
+  return {
+    nodeId: ctrl.nodeId,
+    container: ctrl.container || 'images',
+    inputPrefix: ctrl.inputPrefix,
+    max: Math.max(1, Math.min(16, ctrl.max ?? 10)),
+    label: ctrl.label || 'Imágenes de entrada',
+  }
+}
+
 function detectUpscalerControls(workflow) {
   const seedvrNode = Object.values(workflow).find(n => n.class_type === 'SeedVR2VideoUpscaler')
   const grainNodes = Object.values(workflow).filter(n => n.class_type === 'FastFilmGrain')
@@ -553,7 +570,8 @@ app.get('/api/workflows', async (_req, res) => {
           const workflowData = JSON.parse(
             await readFile(path.join(WORKFLOWS_DIR, f), 'utf-8')
           )
-          const imgNode = detectImageInputNode(workflowData, meta)
+          const multiImage = detectMultiImageControl(workflowData, meta)
+          const imgNode = multiImage ? null : detectImageInputNode(workflowData, meta)
           const promptNodes = detectPromptNodes(workflowData, meta)
           const promptRequired = meta?.promptRequired ?? !!promptNodes.positiveNodeId
           const powerLora = detectPowerLoraNode(workflowData)
@@ -570,18 +588,40 @@ app.get('/api/workflows', async (_req, res) => {
           }
           // Detect FluxResolutionNode for megapixel / aspect_ratio controls
           const resNode = Object.values(workflowData).find(n => n.class_type === 'FluxResolutionNode')
+          // …or ResolutionSelector (megapixels float + aspect_ratio combo), used
+          // by the Qwen Image Edit workflow. Options come live from object_info.
+          const resSelNode = Object.values(workflowData).find(n => n.class_type === 'ResolutionSelector')
+          let resolutionOptions = null
+          if (resSelNode) {
+            try {
+              const r = await fetch(`${config.comfyUrl}/object_info/ResolutionSelector`)
+              if (r.ok) {
+                const info = await r.json()
+                const required = info?.ResolutionSelector?.input?.required ?? {}
+                const arDef = required?.aspect_ratio
+                resolutionOptions = {
+                  // Old style: ["opt1","opt2",…] · New style: ["COMBO", { options: […] }]
+                  aspectRatios:   Array.isArray(arDef?.[0]) ? arDef[0] : (arDef?.[1]?.options ?? []),
+                  megapixelRange: required?.megapixels?.[1] ?? null,
+                }
+              }
+            } catch { /* the UI falls back to the workflow defaults */ }
+          }
           return {
             id,
             label,
             promptRequired,
             hasImageInput: !!imgNode,
             imageInputLabel: imgNode?.label ?? null,
+            hasMultiImageInput: !!multiImage,
+            multiImage,
             hasLora: !!(meta?.loraNodeId),
             hasPowerLora: !!powerLora,
             powerLoras: powerLora?.loras ?? [],
-            hasResolutionControl: !!resNode,
-            defaultMegapixel: resNode?.inputs?.megapixel ?? null,
-            defaultAspectRatio: resNode?.inputs?.aspect_ratio ?? null,
+            hasResolutionControl: !!resNode || !!resSelNode,
+            defaultMegapixel: resNode?.inputs?.megapixel ?? resSelNode?.inputs?.megapixels ?? null,
+            defaultAspectRatio: resNode?.inputs?.aspect_ratio ?? resSelNode?.inputs?.aspect_ratio ?? null,
+            resolutionOptions,
             defaultNegativePrompt: meta?.defaultNegativePrompt ?? null,
             hasModelControl: !!modelControl,
             modelControl: modelControl ? {
@@ -680,8 +720,8 @@ app.post('/api/generate', async (req, res) => {
       return res.status(400).json({ error: 'prompt is required for this workflow' })
     }
 
-    if (positiveNodeId && prompt?.trim()) workflow[positiveNodeId].inputs.text = prompt
-    if (negativeNodeId && negativePrompt.trim()) workflow[negativeNodeId].inputs.text = negativePrompt
+    if (positiveNodeId && prompt?.trim()) workflow[positiveNodeId].inputs[meta?.promptInput   || 'text'] = prompt
+    if (negativeNodeId && negativePrompt.trim()) workflow[negativeNodeId].inputs[meta?.negativeInput || 'text'] = negativePrompt
 
     const modelControl = detectModelControl(workflow, meta)
     if (modelControl && typeof baseModel === 'string' && baseModel.trim()) {
@@ -697,6 +737,48 @@ app.post('/api/generate', async (req, res) => {
     if (referenceImageName) {
       const imgNode = detectImageInputNode(workflow, meta)
       if (imgNode) workflow[imgNode.nodeId].inputs.image = referenceImageName
+    }
+
+    // Multi-image workflows (Qwen Image Edit): create one LoadImage node per
+    // uploaded image and wire them into the autogrow slots (image_1..image_N).
+    const multiImageCtrl = detectMultiImageControl(workflow, meta)
+    if (multiImageCtrl) {
+      const images = Array.isArray(req.body.images)
+        ? req.body.images.filter(s => typeof s === 'string' && s.trim()).slice(0, multiImageCtrl.max)
+        : []
+      if (images.length === 0) {
+        return res.status(400).json({ error: 'Este workflow necesita al menos una imagen de entrada' })
+      }
+      const target = workflow[multiImageCtrl.nodeId]
+      // Autogrow slots are FLAT dotted keys in the API format ("images.image_1"),
+      // not a nested object — writing inputs.images.image_1 would be ignored by
+      // ComfyUI and the placeholder LoadImage from the saved JSON would win.
+      const slotKey = (i) => `${multiImageCtrl.container}.${multiImageCtrl.inputPrefix}${i}`
+      const slotRe = new RegExp(`^${multiImageCtrl.container}\\.${multiImageCtrl.inputPrefix}\\d+$`)
+      for (const key of Object.keys(target.inputs)) {
+        if (slotRe.test(key)) delete target.inputs[key]
+      }
+      images.forEach((name, i) => {
+        const nodeId = `bzimg${i + 1}`
+        workflow[nodeId] = {
+          class_type: 'LoadImage',
+          inputs: { image: name },
+          _meta: { title: `Imagen ${i + 1}` },
+        }
+        target.inputs[slotKey(i + 1)] = [nodeId, 0]
+      })
+      // Drop LoadImage nodes no longer referenced (e.g. the placeholder in the
+      // saved JSON) — ComfyUI executes every node in the graph, and a LoadImage
+      // pointing at a stale filename would fail validation.
+      const referenced = new Set()
+      for (const n of Object.values(workflow)) {
+        for (const v of Object.values(n.inputs || {})) {
+          if (Array.isArray(v) && typeof v[0] === 'string') referenced.add(v[0])
+        }
+      }
+      for (const [id, n] of Object.entries(workflow)) {
+        if (n.class_type === 'LoadImage' && !referenced.has(id)) delete workflow[id]
+      }
     }
 
     // Inject LoRA name and strength if the workflow has a LoRA node
@@ -744,6 +826,12 @@ app.post('/api/generate', async (req, res) => {
         if (node.class_type === 'FluxResolutionNode') {
           if (megapixel)   node.inputs.megapixel    = megapixel
           if (aspectRatio) node.inputs.aspect_ratio = aspectRatio
+          break
+        }
+        if (node.class_type === 'ResolutionSelector') {
+          const mp = Number(megapixel)
+          if (Number.isFinite(mp)) node.inputs.megapixels  = mp
+          if (aspectRatio)         node.inputs.aspect_ratio = aspectRatio
           break
         }
       }

@@ -201,6 +201,9 @@ const state = {
   appliedDefaultNegativePrompt: '',
   uploadedImageName: null,
   uploadPending: false,
+  // Multi-image workflows (Qwen Image Edit): [{ name, previewUrl }, …]
+  uploadedImages: [],
+  multiUploadPending: 0,
   // Current displayed image (for download)
   currentImageSrc: null,
   currentImageFilename: null,
@@ -422,6 +425,18 @@ async function init() {
     const file = e.dataTransfer?.files?.[0]
     if (file && file.type.startsWith('image/')) handleRefFile(file)
   })
+  el('multi-drop-zone').addEventListener('click', () => el('multi-image-input').click())
+  el('multi-image-input').addEventListener('change', e => {
+    handleMultiFiles(e.target.files)
+    e.target.value = ''
+  })
+  el('multi-drop-zone').addEventListener('dragover', e => { e.preventDefault(); el('multi-drop-zone').classList.add('dragover') })
+  el('multi-drop-zone').addEventListener('dragleave', () => el('multi-drop-zone').classList.remove('dragover'))
+  el('multi-drop-zone').addEventListener('drop', e => {
+    e.preventDefault()
+    el('multi-drop-zone').classList.remove('dragover')
+    handleMultiFiles(e.dataTransfer?.files)
+  })
 }
 
 // â”€â”€ Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -558,6 +573,7 @@ function onWorkflowChange() {
   const id = el('workflow-select').value
   state.currentWorkflow = state.workflows.find(w => w.id === id) ?? null
   clearRefImage()
+  clearMultiImages()
 
   const promptRequired = state.currentWorkflow?.promptRequired !== false
   el('prompt-field').classList.toggle('hidden', !promptRequired)
@@ -586,6 +602,16 @@ function onWorkflowChange() {
     refField.classList.remove('hidden')
   } else {
     refField.classList.add('hidden')
+  }
+
+  const multiField = el('multi-image-field')
+  if (state.currentWorkflow?.hasMultiImageInput) {
+    const ctrl = state.currentWorkflow.multiImage || {}
+    el('multi-image-label').textContent = ctrl.label || 'Imágenes de entrada'
+    el('multi-drop-text').textContent = `Haz clic o arrastra imágenes (máx. ${ctrl.max || 10})`
+    multiField.classList.remove('hidden')
+  } else {
+    multiField.classList.add('hidden')
   }
 
   const modelField = el('model-field')
@@ -737,8 +763,29 @@ function renderPowerLoras(loras) {
 // the exact combo values of the installed FluxResolutionNode version.
 
 async function initResolutionControls(defaultMegapixel, defaultAspectRatio) {
-  const mpSel = el('megapixel-select')
-  const arSel = el('aspect-ratio-select')
+  const mpSel  = el('megapixel-select')
+  const mpNum  = el('megapixel-input')
+  const arSel  = el('aspect-ratio-select')
+
+  // ResolutionSelector-style workflows (Qwen Image Edit): megapixels is a
+  // float range, not a combo list — render a number input instead of a select.
+  const options = state.currentWorkflow?.resolutionOptions
+  if (options?.megapixelRange) {
+    const range = options.megapixelRange
+    mpSel.classList.add('hidden')
+    mpNum.classList.remove('hidden')
+    mpNum.min  = range.min ?? 0.1
+    mpNum.max  = range.max ?? 16
+    mpNum.step = range.step ?? 0.1
+    mpNum.value = defaultMegapixel ?? range.default ?? 1
+    arSel.innerHTML = (options.aspectRatios || [])
+      .map(v => `<option value="${escAttr(v)}"${v === defaultAspectRatio ? ' selected' : ''}>${escHtml(v)}</option>`)
+      .join('') || '<option value="">Sin opciones</option>'
+    return
+  }
+
+  mpNum.classList.add('hidden')
+  mpSel.classList.remove('hidden')
   mpSel.innerHTML = '<option value="">Cargando…</option>'
   arSel.innerHTML = '<option value="">Cargando…</option>'
 
@@ -844,6 +891,90 @@ function clearRefImage() {
   el('drop-placeholder').classList.remove('hidden')
 }
 
+// ── Multi-image upload (Qwen Image Edit: up to 10 input images) ────────────
+
+function multiImageMax() {
+  return state.currentWorkflow?.multiImage?.max ?? 10
+}
+
+async function handleMultiFiles(fileList) {
+  const files = Array.from(fileList || []).filter(f => f.type.startsWith('image/'))
+  if (!files.length) return
+  const max = multiImageMax()
+  for (const file of files) {
+    if (state.uploadedImages.length >= max) {
+      setMultiStatus(`Máximo ${max} imágenes — se han ignorado el resto.`, 'err')
+      break
+    }
+    const entry = { name: null, previewUrl: URL.createObjectURL(file), status: 'Subiendo…' }
+    state.uploadedImages.push(entry)
+    renderMultiGrid()
+    try {
+      const formData = new FormData()
+      formData.append('image', file, file.name)
+      const res = await apiFetch('/api/upload', { method: 'POST', body: formData })
+      const data = await res.json()
+      if (!res.ok || data.error) throw new Error(data.error || 'Error al subir')
+      entry.name = data.name
+      entry.status = ''
+    } catch (err) {
+      entry.status = `Error: ${err.message}`
+    }
+    renderMultiGrid()
+  }
+  updateMultiCount()
+}
+
+function renderMultiGrid() {
+  const grid = el('multi-image-grid')
+  grid.innerHTML = state.uploadedImages.map((img, i) => `
+    <div class="multi-thumb${img.status ? ' multi-thumb-err' : ''}" title="${escAttr(img.name || img.status)}">
+      <img src="${img.previewUrl}" alt="Imagen ${i + 1}" />
+      <span class="multi-thumb-num">${i + 1}</span>
+      <button class="multi-thumb-remove" data-index="${i}" title="Quitar">✕</button>
+      ${img.status ? `<span class="multi-thumb-status">${escHtml(img.status)}</span>` : ''}
+    </div>
+  `).join('')
+  grid.querySelectorAll('.multi-thumb-remove').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const i = parseInt(btn.dataset.index, 10)
+      const [removed] = state.uploadedImages.splice(i, 1)
+      if (removed?.previewUrl) URL.revokeObjectURL(removed.previewUrl)
+      renderMultiGrid()
+      updateMultiCount()
+    })
+  })
+  updateMultiCount()
+}
+
+function updateMultiCount() {
+  const total = state.uploadedImages.length
+  setMultiStatus(total ? `${total}/${multiImageMax()} imágenes` : '', total ? 'ok' : '')
+}
+
+function setMultiStatus(text, cls) {
+  const zone = el('multi-drop-zone')
+  let s = zone.querySelector('.multi-image-status')
+  if (!s) {
+    s = document.createElement('span')
+    s.className = 'multi-image-status'
+    zone.appendChild(s)
+  }
+  s.textContent = text
+  s.className = `multi-image-status ${cls}`
+}
+
+function clearMultiImages() {
+  for (const img of state.uploadedImages) {
+    if (img.previewUrl) URL.revokeObjectURL(img.previewUrl)
+  }
+  state.uploadedImages = []
+  state.multiUploadPending = 0
+  const grid = el('multi-image-grid')
+  if (grid) grid.innerHTML = ''
+  setMultiStatus('', '')
+}
+
 // â”€â”€ Generate â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 async function generate() {
@@ -862,6 +993,16 @@ async function generate() {
     if (state.uploadPending) return showStatus('Espera a que termine la subida de la imagen.', 'error')
     if (!state.uploadedImageName) {
       return showStatus(promptRequired ? 'Este workflow necesita una imagen de referencia.' : 'Sube una imagen para escalarla.', 'error')
+    }
+  }
+
+  // Multi-image workflows: at least one uploaded image is mandatory
+  if (state.currentWorkflow?.hasMultiImageInput) {
+    if (state.uploadedImages.some(img => !img.name)) {
+      return showStatus('Espera a que terminen las subidas de imágenes.', 'error')
+    }
+    if (state.uploadedImages.length === 0) {
+      return showStatus('Sube al menos una imagen de entrada.', 'error')
     }
   }
 
@@ -893,6 +1034,9 @@ async function generate() {
     if (promptRequired || negativePrompt) body.negativePrompt = negativePrompt
     if (parsedSeed !== null && !isNaN(parsedSeed)) body.seed = parsedSeed
     if (state.uploadedImageName) body.referenceImageName = state.uploadedImageName
+    if (state.currentWorkflow?.hasMultiImageInput) {
+      body.images = state.uploadedImages.map(img => img.name)
+    }
     if (state.currentWorkflow?.hasModelControl) {
       const selectedModel = el('model-select').value
       if (selectedModel) body.baseModel = selectedModel
@@ -915,7 +1059,10 @@ async function generate() {
     }
 
     if (state.currentWorkflow?.hasResolutionControl) {
-      const mp = el('megapixel-select').value
+      const mpNum = el('megapixel-input')
+      const mp = mpNum.classList.contains('hidden')
+        ? el('megapixel-select').value
+        : mpNum.value
       const ar = el('aspect-ratio-select').value
       if (mp) body.megapixel  = mp
       if (ar) body.aspectRatio = ar

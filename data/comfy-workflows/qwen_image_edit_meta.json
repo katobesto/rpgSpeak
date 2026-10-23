@@ -1,0 +1,16 @@
+{
+  "label": "Qwen Image Edit (hasta 10 imágenes)",
+  "promptNodeId": "459:474",
+  "promptInput": "prompt",
+  "negativeNodeId": "459:474",
+  "negativeInput": "negative_prompt",
+  "imageInputsControl": {
+    "nodeId": "459:474",
+    "container": "images",
+    "inputPrefix": "image_",
+    "max": 10,
+    "label": "Imágenes de entrada (hasta 10)"
+  },
+  "resolutionControl": { "nodeId": "13" },
+  "samplerStepsControl": { "nodeId": "459:458", "input": "steps", "min": 1, "max": 60 }
+}

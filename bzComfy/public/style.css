@@ -306,6 +306,87 @@ textarea { resize: vertical; line-height: 1.55; }
 .ref-upload-status.ok  { color: var(--success); }
 .ref-upload-status.err { color: var(--error); }
 
+/* ── Multi-image upload (Qwen Image Edit) ────────────── */
+
+.multi-image-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 8px;
+  margin-top: 8px;
+}
+.multi-thumb {
+  position: relative;
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  overflow: hidden;
+  aspect-ratio: 1;
+  background: var(--surface);
+}
+.multi-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.multi-thumb-err { border-color: var(--error); }
+.multi-thumb-num {
+  position: absolute;
+  left: 4px;
+  bottom: 4px;
+  font-size: 10px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+}
+.multi-thumb-remove {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.multi-thumb-remove:hover { background: var(--error); }
+.multi-thumb-status {
+  position: absolute;
+  inset: auto 2px 2px 2px;
+  font-size: 9px;
+  color: var(--error);
+  background: rgba(0, 0, 0, 0.7);
+  border-radius: 4px;
+  padding: 1px 3px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.multi-image-status {
+  display: block;
+  padding: 4px 10px 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.multi-image-status.ok  { color: var(--success); }
+.multi-image-status.err { color: var(--error); }
+
+/* Megapixels as a free number (ResolutionSelector workflows) */
+.select-wrap input[type="number"] {
+  width: 100%;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+.select-wrap input[type="number"]:focus { outline: none; border-color: var(--accent); }
+
 .ref-clear-btn {
   background: none;
   border: 1px solid var(--border);
