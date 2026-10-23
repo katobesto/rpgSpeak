@@ -49,6 +49,25 @@ function parseModelEntry(m: RawModelEntry): ProviderModel {
   };
 }
 
+// ── Esfuerzo de razonamiento por familia de modelo ──────────────────────────
+// Cada familia reporta/acepta un conjunto distinto de valores en
+// `reasoning_effort`; enviar uno que el modelo no reconoce hace que el
+// servidor de inferencia falle (p.ej. la chat template de Qwen lanza
+// "Unexpected reasoning effort" con 'high'/'max'):
+//   • DeepSeek (V4, modo thinking): solo 'high' | 'max'.
+//   • Qwen: 'low' | 'medium' | 'xhigh' (xhigh es el default de su template).
+//   • Resto (OpenAI, OpenRouter, LM Studio, llama.cpp, vLLM…): estándar
+//     OpenAI 'low' | 'medium' | 'high'.
+// El esfuerzo configurado se recorta al conjunto de la familia antes de enviar.
+type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
+function effortFamily(model: string | undefined): { allowed: ReasoningEffort[]; default: ReasoningEffort } {
+  const id = model ?? '';
+  if (/deepseek/i.test(id)) return { allowed: ['high', 'max'], default: 'high' };
+  if (/qwen/i.test(id))     return { allowed: ['low', 'medium', 'xhigh'], default: 'xhigh' };
+  return { allowed: ['low', 'medium', 'high'], default: 'high' };
+}
+
 // Compatible with OpenAI, LM Studio, OpenRouter, and any OpenAI-compatible API
 export class OpenAIProvider implements LLMProvider {
   readonly type: string;
@@ -101,6 +120,15 @@ export class OpenAIProvider implements LLMProvider {
     // y otros backends (OpenAI real, LM Studio, MLX, Oobabooga) pueden rechazarlo
     // si es un campo desconocido, así que no se envía fuera de DeepSeek.
     const isDeepSeek = /deepseek/i.test(request.model ?? '');
+    // Esfuerzo recortado al conjunto que la familia del modelo reporta como
+    // válido (ver effortFamily) — evita errores 4xx/5xx en servidores que no
+    // reconocen el valor guardado (p.ej. 'max' en Qwen).
+    const family = effortFamily(request.model);
+    const configuredEffort = request.reasoning?.effort;
+    const safeEffort =
+      configuredEffort && family.allowed.includes(configuredEffort)
+        ? configuredEffort
+        : family.default;
     return {
       model: request.model ?? '',
       messages: this.normalizeMessages(request.messages),
@@ -119,8 +147,14 @@ export class OpenAIProvider implements LLMProvider {
       stop: request.stopSequences?.length ? request.stopSequences : undefined,
       // OpenRouter: prevent automatic fallback to alternative (potentially paid) providers.
       ...(request.disableFallbacks ? { allow_fallbacks: false } : {}),
-      // DeepSeek V4 thinking mode
-      ...(reasoning ? { thinking: { type: 'enabled' }, reasoning_effort: request.reasoning?.effort ?? 'high' }
+      // Thinking / razonamiento según la familia del modelo:
+      //  • 'thinking' es un campo EXCLUSIVO de DeepSeek — enviarlo a otros
+      //    servidores de inferencia (OpenRouter, LM Studio, llama.cpp, vLLM…)
+      //    provoca error por parámetro desconocido.
+      //  • 'reasoning_effort' es el parámetro estándar OpenAI; su valor se
+      //    recorta a lo que la familia del modelo reporta (ver effortFamily).
+      ...(reasoning
+        ? { ...(isDeepSeek ? { thinking: { type: 'enabled' } } : {}), reasoning_effort: safeEffort }
         : isDeepSeek ? { thinking: { type: 'disabled' } }
         : {}),
     };

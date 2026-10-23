@@ -24,6 +24,24 @@ const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'default
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret', 'bzComfyUrl', 'bzComfyApiToken', 'bzComfyWorkflow'];
 
+// ─── Esfuerzo de razonamiento: opciones según lo que reporta cada familia ───
+// Cada familia de modelos acepta un conjunto distinto de valores en
+// reasoning_effort (DeepSeek: high/max · Qwen: low/medium/xhigh · resto:
+// low/medium/high). Enviar un valor no soportado hace fallar al servidor de
+// inferencia, así que el selector solo ofrece los válidos para el modelo
+// seleccionado y el proveedor los recorta además en el servidor.
+type ReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+const EFFORT_LABELS: Record<ReasoningEffort, string> = {
+  low: 'Bajo (low)', medium: 'Medio (medium)', high: 'Alto (high)',
+  xhigh: 'Muy alto (xhigh)', max: 'Máximo (max)',
+};
+function effortFamily(modelId: string | null): { allowed: ReasoningEffort[]; default: ReasoningEffort } {
+  const id = modelId ?? '';
+  if (/deepseek/i.test(id)) return { allowed: ['high', 'max'], default: 'high' };
+  if (/qwen/i.test(id))     return { allowed: ['low', 'medium', 'xhigh'], default: 'xhigh' };
+  return { allowed: ['low', 'medium', 'high'], default: 'high' };
+}
+
 // ─── Ejemplo compacto "mal / bien" para explicar un parámetro de muestreo ────
 function ParamExample({ bad, good, note }: { bad: string; good: string; note?: string }) {
   return (
@@ -80,6 +98,18 @@ export function SettingsPanel() {
   function update<K extends keyof AppSettings>(key: K, value: AppSettings[K]) {
     setDraft((d) => d ? { ...d, [key]: value } : d);
   }
+
+  // Esfuerzos válidos para el modelo por defecto seleccionado
+  const effortFam = effortFamily(draft?.defaultModelId ?? null);
+
+  // Si el esfuerzo guardado no es válido para la familia del modelo (p.ej.
+  // 'max' con Qwen, que solo acepta low/medium/xhigh), corregirlo en el draft
+  // al default de la familia — evita errores en el servidor de inferencia.
+  useEffect(() => {
+    if (!draft?.reasoningEnabled) return;
+    const eff = draft.reasoningEffort;
+    if (!eff || !effortFam.allowed.includes(eff)) update('reasoningEffort', effortFam.default);
+  }, [draft?.defaultModelId, draft?.reasoningEnabled]);
 
   // Save a subset of draft keys to the server
   function save(keys: (keyof AppSettings)[]) {
@@ -273,7 +303,7 @@ export function SettingsPanel() {
                     />
                     <ToggleRow
                       label="Razonamiento (thinking) en el modelo principal"
-                      description="Activa el modo thinking (p.ej. DeepSeek V4: thinking:enabled + reasoning_effort). Mejora la coherencia y el seguimiento de detalles (objetos, ubicaciones), pero aumenta la latencia y el coste por respuesta. Solo funciona con modelos que soporten este modo."
+                      description="Activa el modo thinking en el modelo principal (parámetro reasoning_effort; DeepSeek añade además thinking:enabled). Mejora la coherencia y el seguimiento de detalles (objetos, ubicaciones), pero aumenta la latencia y el coste por respuesta. Solo funciona con modelos que soporten este modo."
                       checked={draft.reasoningEnabled ?? false}
                       onChange={(v) => update('reasoningEnabled', v)}
                     />
@@ -282,12 +312,18 @@ export function SettingsPanel() {
                         <label className="block text-sm font-medium text-text-secondary mb-1">Nivel de esfuerzo</label>
                         <select
                           className="w-full px-3 py-2 rounded-lg bg-surface-2 border border-border text-sm text-text-primary"
-                          value={draft.reasoningEffort ?? 'high'}
+                          value={effortFam.allowed.includes(draft.reasoningEffort) ? draft.reasoningEffort : effortFam.default}
                           onChange={(e) => update('reasoningEffort', e.target.value as AppSettings['reasoningEffort'])}
                         >
-                          <option value="high">Alto</option>
-                          <option value="max">Máximo</option>
+                          {effortFam.allowed.map((v) => (
+                            <option key={v} value={v}>{EFFORT_LABELS[v]}</option>
+                          ))}
                         </select>
+                        <p className="text-[10px] text-text-muted mt-1 leading-relaxed">
+                          Los niveles disponibles son los que reporta la familia del modelo por defecto
+                          (DeepSeek: high/max · Qwen: low/medium/xhigh · resto: low/medium/high).
+                          Si cambias de modelo, el esfuerzo se ajusta automáticamente al equivalente válido.
+                        </p>
                       </div>
                     )}
                   </Section>

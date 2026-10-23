@@ -748,9 +748,11 @@ export interface AppSettings {
   summaryBlockSize: number;
   // Opciones de API
   disableFallbacks: boolean;
-  // Thinking / razonamiento (DeepSeek V4 y modelos compatibles con `thinking`)
+  // Thinking / razonamiento. Los valores válidos de esfuerzo dependen de la
+  // familia del modelo (DeepSeek: high|max · Qwen: low|medium|xhigh · resto:
+  // low|medium|high); el proveedor los recorta antes de enviarlos.
   reasoningEnabled: boolean;
-  reasoningEffort: 'high' | 'max';
+  reasoningEffort: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
   // Cloudflare Access — para proteger ComfyUI remoto tras un túnel
   comfyUiCfClientId: string | null;
   comfyUiCfClientSecret: string | null;
@@ -796,8 +798,8 @@ export interface GenerateRequest {
   stream: boolean;
   /** When true, adds allow_fallbacks:false to OpenAI-compatible requests (e.g. OpenRouter). */
   disableFallbacks?: boolean;
-  /** Enables `thinking` mode on supporting models (e.g. DeepSeek V4). */
-  reasoning?: { enabled: boolean; effort?: 'high' | 'max'; expose?: boolean };
+  /** Enables reasoning mode; `effort` is clamped per model family by the provider. */
+  reasoning?: { enabled: boolean; effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'; expose?: boolean };
 }
 
 export interface ChatMessage {
