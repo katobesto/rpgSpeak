@@ -1329,12 +1329,19 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     // abierto absorba el cierre por el emparejado tolerante de `close()`.
     // Las etiquetas se eliminan siempre del contenido visible, aunque el parseo
     // falle — un marcador técnico nunca debe llegar al jugador.
-    const THREAD_OPEN_RE  = /\[HILO_ABIERTO:\s*([^\]|]{1,120}?)\s*(?:\|\s*([^\]|]{0,400}?)\s*)?(?:\|\s*(\d{1,2})\s*)?\]/gi;
+    // El tercer segmento admite tanto el número pelado ('10') como la forma que
+    // el propio prompt instruye y los modelos copian literalmente
+    // ('importancia 10/10', 'importancia: 8', '8 de 10') — con solo \d{1,2} el
+    // parser no casaba NUNCA con la salida real y los hilos no se registraban.
+    const THREAD_OPEN_RE  = /\[HILO_ABIERTO:\s*([^\]|]{1,120}?)\s*(?:\|\s*([^\]|]{0,400}?)\s*)?(?:\|\s*(?:importancia\s*:?\s*)?(\d{1,2})(?:\s*(?:de|\/)\s*10)?\s*)?\]/gi;
     const THREAD_CLOSE_RE = /\[HILO_CERRADO:\s*([^\]]{1,120}?)\s*\]/gi;
 
     const threadOpenMatches  = [...cleanContent.matchAll(THREAD_OPEN_RE)];
     const threadCloseMatches = [...cleanContent.matchAll(THREAD_CLOSE_RE)];
     cleanContent = cleanContent.replace(THREAD_OPEN_RE, '').replace(THREAD_CLOSE_RE, '').trimEnd();
+    // Red de seguridad: cualquier [HILO_ABIERTO:...] malformado que el parser no
+    // haya podido registrar se borra igualmente del contenido visible.
+    cleanContent = cleanContent.replace(/\[HILO_ABIERTO:[^\]]*\]/gi, '').trimEnd();
 
     if (!aborted) {
       for (const m of threadCloseMatches) {
