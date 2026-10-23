@@ -34,6 +34,10 @@ tts-service/venv/
 # ── Backup / temp restore ─────────────────────────────────────────────────────
 .restore-tmp/
 data/comfy-workflows/*.json2
+data/*.db.bak-*
+
+# ── bzHarness (agente local) ──────────────────────────────────────────────────
+.bzharness/
 
 # ── Claude Code local files ───────────────────────────────────────────────────
 # /memory/ (barra inicial) solo ignora el directorio memory/ en la raíz del
