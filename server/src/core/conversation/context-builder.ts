@@ -1286,14 +1286,19 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // narrador para el diálogo), de modo que el historial es auto-explicativo en
   // ambos modos. Los mensajes del narrador ya llevan su formato canónico y no se
   // tocan. Determinista por mensaje → no afecta a la estabilidad del prefijo.
+  // Al LLM solo se envía la respuesta, nunca cadenas de razonamiento: se
+  // descartan bloques <think> que pudieran haber quedado en mensajes antiguos.
+  const stripThink = (text: string): string =>
+    text.replace(/<think>[\s\S]*?(?:<\/think>|$)/g, '').replace(/<\/think>/g, '').trim();
   const formatHistoryMessage = (m: Message): ChatMessage => {
+    const content = m.role === 'assistant' ? stripThink(m.content) : m.content;
     if (m.role === 'assistant' && m.characterId && !m.metadata?.narrator) {
       const name = charNameMap.get(m.characterId);
-      if (name && !m.content.trimStart().startsWith(`**${name}:**`)) {
-        return { role: m.role, content: `**${name}:** ${m.content}` };
+      if (name && !content.trimStart().startsWith(`**${name}:**`)) {
+        return { role: m.role, content: `**${name}:** ${content}` };
       }
     }
-    return { role: m.role, content: m.content };
+    return { role: m.role, content };
   };
 
   // ── Context index injection (world-state background, further from generation) ──
