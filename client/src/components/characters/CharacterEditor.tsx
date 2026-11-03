@@ -121,31 +121,47 @@ export function CharacterEditor({ character, open, onClose }: CharacterEditorPro
     setForm((f) => ({ ...f, [key]: value }));
   }
 
-  function setRpg<K extends keyof RpgStats>(key: K, value: RpgStats[K]) {
-    setForm((f) => ({ ...f, rpgStats: { ...(f.rpgStats ?? {}), [key]: value } }));
+  // Acepta valor directo o updater funcional (como useState), para que las
+  // altas rápidas se apliquen sobre el estado más reciente y no sobre un
+  // `form` desfasado.
+  function setRpg<K extends keyof RpgStats>(
+    key: K,
+    valueOrUpdater: RpgStats[K] | ((prev: RpgStats[K] | undefined) => RpgStats[K]),
+  ) {
+    setForm((f) => {
+      const prev = f.rpgStats ?? {};
+      const value =
+        typeof valueOrUpdater === 'function'
+          ? (valueOrUpdater as (p: RpgStats[K] | undefined) => RpgStats[K])(prev[key])
+          : valueOrUpdater;
+      return { ...f, rpgStats: { ...prev, [key]: value } };
+    });
   }
 
+  // Updater funcional en los tres add*: con `form` del cierre, dos altas
+  // seguidas a toda velocidad (Enter doble) hacían que la segunda perdiera
+  // la primera — parecía que el elemento "no se había guardado".
   function addAbility() {
-    if (newAbility.trim()) {
-      setRpg('abilities', [...(form.rpgStats?.abilities ?? []), newAbility.trim()]);
-      setNewAbility('');
-    }
+    const value = newAbility.trim();
+    if (!value) return;
+    setRpg('abilities', (arr) => [...(arr ?? []), value]);
+    setNewAbility('');
   }
 
   function addInventoryItem() {
-    if (newInventoryItem.trim()) {
-      setRpg('inventory', [...(form.rpgStats?.inventory ?? []), newInventoryItem.trim()]);
-      setNewInventoryItem('');
-    }
+    const value = newInventoryItem.trim();
+    if (!value) return;
+    setRpg('inventory', (arr) => [...(arr ?? []), value]);
+    setNewInventoryItem('');
   }
 
   function addStat() {
-    if (newStatKey.trim()) {
-      const val = parseFloat(newStatVal) || 0;
-      setRpg('stats', { ...(form.rpgStats?.stats ?? {}), [newStatKey.trim()]: val });
-      setNewStatKey('');
-      setNewStatVal('');
-    }
+    const key = newStatKey.trim();
+    if (!key) return;
+    const val = parseFloat(newStatVal) || 0;
+    setRpg('stats', (obj) => ({ ...(obj ?? {}), [key]: val }));
+    setNewStatKey('');
+    setNewStatVal('');
   }
 
   function addExample() {

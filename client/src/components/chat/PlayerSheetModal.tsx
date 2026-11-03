@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Trash2, Sword, Dices } from 'lucide-react';
 import { Modal } from '../ui/Modal.tsx';
 import { Button } from '../ui/Button.tsx';
 import { Input, Textarea } from '../ui/Input.tsx';
 import { conversationsApi } from '../../api/conversations.ts';
+import { useChatStore } from '../../stores/chat.store.ts';
 import { DICE_DIFFICULTY_LEVELS, effectiveDiceDifficulty } from '@rpgspeak/shared';
 import type { PlayerSheet, DiceDifficulty } from '@rpgspeak/shared';
 
@@ -30,6 +31,9 @@ interface PlayerSheetModalProps {
  */
 export function PlayerSheetModal({ conversationId, sheet, diceDifficulty, adventureMode, onClose }: PlayerSheetModalProps) {
   const qc = useQueryClient();
+  // La ficha vive en `conversation.metadata`, y la UI (esta ventana, el combate,
+  // el contexto del narrador) la lee del store de chat — NO de una query por id.
+  const setActiveConversation = useChatStore((s) => s.setActiveConversation);
   const [form, setForm] = useState<PlayerSheet>(sheet ?? {});
   const [difficulty, setDifficulty] = useState<DiceDifficulty>(
     effectiveDiceDifficulty(diceDifficulty, adventureMode),
@@ -38,51 +42,113 @@ export function PlayerSheetModal({ conversationId, sheet, diceDifficulty, advent
   const [newStatVal, setNewStatVal] = useState('');
   const [newAbility, setNewAbility] = useState('');
   const [newInventoryItem, setNewInventoryItem] = useState('');
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Estado tal y como se abrió la ventana: sirve para detectar cambios sin
+  // guardar y no cerrar (X, Escape, toque fuera, botón Cancelar) perdiéndolos.
+  const initialSnapshot = useRef(JSON.stringify({ sheet: sheet ?? {}, difficulty }));
+  const touchedRef = useRef(false);
+
+  // La ficha puede llegar desfasada al store (otra pestaña, una lista de
+  // conversaciones recargada antes de entrar). Al abrir la ventana se pide la
+  // versión del servidor: si el usuario todavía no ha tocado nada, esa manda.
+  // Sin esto, abrir la ficha vacía y pulsar Guardar sobrescribía en la BD una
+  // ficha que sí tenía elementos.
+  useEffect(() => {
+    let cancelled = false;
+    conversationsApi.get(conversationId)
+      .then((fresh) => {
+        if (cancelled) return;
+        setActiveConversation(fresh);
+        if (touchedRef.current) return;
+        const freshSheet = (fresh.metadata?.playerSheet as PlayerSheet | undefined) ?? null;
+        const freshDifficulty = effectiveDiceDifficulty(
+          fresh.metadata?.diceDifficulty as DiceDifficulty | undefined,
+          adventureMode,
+        );
+        setForm(freshSheet ?? {});
+        setDifficulty(freshDifficulty);
+        initialSnapshot.current = JSON.stringify({ sheet: freshSheet ?? {}, difficulty: freshDifficulty });
+      })
+      .catch(() => { /* sin red o sin respuesta, se sigue usando lo que había en pantalla */ });
+    return () => { cancelled = true; };
+    // conversationId es la única dependencia real: el resto se lee al abrir.
+  }, [conversationId]);
 
   const mutation = useMutation({
     mutationFn: async () => {
       await conversationsApi.updatePlayerSheet(conversationId, form);
       return conversationsApi.updateDiceDifficulty(conversationId, difficulty);
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['conversation', conversationId] });
+    onSuccess: (updated) => {
+      // Refrescar la fuente de verdad real: sin esto, al reabrir la ficha se
+      // ve la versión anterior (los elementos "no se guardaron") y el siguiente
+      // Guardar sobrescribe en el servidor lo que sí estaba guardado.
+      setActiveConversation(updated);
+      qc.invalidateQueries({ queryKey: ['conversations'] });
       onClose();
+    },
+    onError: (err) => {
+      setSaveError(err instanceof Error ? err.message : 'No se pudo guardar la ficha');
     },
   });
 
   const activeLevel = DICE_DIFFICULTY_LEVELS[difficulty];
 
-  function setField<K extends keyof PlayerSheet>(key: K, value: PlayerSheet[K]) {
-    setForm((f) => ({ ...f, [key]: value }));
+  function requestClose() {
+    if (mutation.isPending) return;
+    const dirty = touchedRef.current || JSON.stringify({ sheet: form, difficulty }) !== initialSnapshot.current;
+    if (dirty && !window.confirm('Tienes cambios sin guardar en la ficha. ¿Cerrar sin guardarlos?')) return;
+    onClose();
   }
 
+  function setField<K extends keyof PlayerSheet>(key: K, value: PlayerSheet[K]) {
+    touchedRef.current = true;
+    setForm((f) => ({ ...f, [key]: value }));
+    setSaveError(null);
+  }
+
+  // Updater funcional en vez de leer `form` del cierre: dos altas seguidas a
+  // mucha velocidad (Enter doble) no se pisan entre sí.
   function addStat() {
     const val = parseFloat(newStatVal);
     if (!newStatKey.trim() || Number.isNaN(val)) return;
-    setField('stats', { ...(form.stats ?? {}), [newStatKey.trim()]: val });
+    const key = newStatKey.trim();
+    touchedRef.current = true;
+    setForm((f) => ({ ...f, stats: { ...(f.stats ?? {}), [key]: val } }));
     setNewStatKey(''); setNewStatVal('');
   }
   function addAbility() {
-    if (!newAbility.trim()) return;
-    setField('abilities', [...(form.abilities ?? []), newAbility.trim()]);
+    const value = newAbility.trim();
+    if (!value) return;
+    touchedRef.current = true;
+    setForm((f) => ({ ...f, abilities: [...(f.abilities ?? []), value] }));
     setNewAbility('');
   }
   function addInventoryItem() {
-    if (!newInventoryItem.trim()) return;
-    setField('inventory', [...(form.inventory ?? []), newInventoryItem.trim()]);
+    const value = newInventoryItem.trim();
+    if (!value) return;
+    touchedRef.current = true;
+    setForm((f) => ({ ...f, inventory: [...(f.inventory ?? []), value] }));
     setNewInventoryItem('');
   }
 
   return (
     <Modal
       open
-      onClose={onClose}
+      onClose={requestClose}
       title="Ficha del jugador"
       size="md"
       footer={
         <>
-          <Button variant="ghost" onClick={onClose}>Cancelar</Button>
-          <Button onClick={() => mutation.mutate()} disabled={mutation.isPending}>
+          {saveError && (
+            <span className="text-xs text-red-400 mr-auto max-w-[60%]">{saveError}</span>
+          )}
+          <Button variant="ghost" onClick={requestClose}>Cancelar</Button>
+          <Button
+            onClick={() => { setSaveError(null); mutation.mutate(); }}
+            disabled={mutation.isPending}
+          >
             {mutation.isPending ? 'Guardando…' : 'Guardar'}
           </Button>
         </>
@@ -276,7 +342,7 @@ export function PlayerSheetModal({ conversationId, sheet, diceDifficulty, advent
             max={DICE_DIFFICULTY_LEVELS.length - 1}
             step={1}
             value={difficulty}
-            onChange={(e) => setDifficulty(Number(e.target.value) as DiceDifficulty)}
+            onChange={(e) => { touchedRef.current = true; setDifficulty(Number(e.target.value) as DiceDifficulty); }}
             className="w-full accent-accent cursor-pointer"
             aria-label="Dificultad de esta conversación"
           />

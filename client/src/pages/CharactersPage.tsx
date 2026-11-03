@@ -13,6 +13,10 @@ export function CharactersPage() {
   const [storyFilter, setStoryFilter] = useState('');
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingChar, setEditingChar] = useState<Character | null>(null);
+  // El editor guarda su formulario en estado local y solo se reinicia al
+  // desmontarse. Sin este contador, reabrir el mismo personaje (o "Nuevo"
+  // después de crear uno) conservaba los datos anteriores en pantalla.
+  const [editorNonce, setEditorNonce] = useState(0);
 
   const { data: stories = [] } = useQuery({
     queryKey: ['stories'],
@@ -26,11 +30,13 @@ export function CharactersPage() {
 
   function openCreate() {
     setEditingChar(null);
+    setEditorNonce((n) => n + 1);
     setEditorOpen(true);
   }
 
   function openEdit(char: Character) {
     setEditingChar(char);
+    setEditorNonce((n) => n + 1);
     setEditorOpen(true);
   }
 
@@ -139,7 +145,7 @@ export function CharactersPage() {
         )}
       </div>
 
-      <CharacterEditor key={editingChar?.id ?? 'new'} open={editorOpen} character={editingChar} onClose={() => setEditorOpen(false)} />
+      <CharacterEditor key={`${editingChar?.id ?? 'new'}-${editorNonce}`} open={editorOpen} character={editingChar} onClose={() => setEditorOpen(false)} />
     </div>
   );
 }
