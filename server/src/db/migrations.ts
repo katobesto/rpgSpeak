@@ -485,7 +485,7 @@ export function runMigrations(db: Db): void {
   // own plot and escalate constantly. Replace those exact lines with the new
   // destination-based phrasing. Lines the user customized (no exact match) are
   // left untouched.
-  const PROMPT_FIXES: Record<string, Array<[oldText: string, newText: string]>> = {
+  const PROMPT_FIXES: Record<string, Array<[oldText: string, newText: string, guard?: string]>> = {
     narratorPrompt: [
       [
         'La historia tiene un guión de capítulos con eventos concretos que deben ocurrir. Tu trabajo como narrador no es ESPERAR a que el jugador llegue a esos eventos: es EMPUJAR el mundo hacia ellos.',
@@ -498,6 +498,35 @@ export function runMigrations(db: Db): void {
       [
         '- Cada respuesta debe introducir, escalar o resolver algún elemento del guión activo',
         '- Si el contexto incluye eventos clave de la historia que aún no han ocurrido, trátalos como DESTINOS, no como una ruta fija: cuando la escena se acerque a uno, oriéntala hacia él\n- Introduce como mucho un elemento nuevo de trama por respuesta, y solo si encaja de forma natural en la escena',
+      ],
+      // Fronteras de conocimiento: el narrador ve toda la historia y da voz a
+      // todos los personajes en una sola respuesta, así que un personaje puede
+      // "enterarse" de una escena en la que no estuvo. El prompt no decía nada
+      // del tema; la regla solo vivía en los bloques que inyecta el código.
+      [
+        '- Ante la duda sobre la ubicación actual, busca el último lugar mencionado explícitamente en la conversación y úsalo como ancla',
+        '- Ante la duda sobre la ubicación actual, busca el último lugar mencionado explícitamente en la conversación y úsalo como ancla\n\nFRONTERAS DE CONOCIMIENTO — REGLA ABSOLUTA:\nTú sabes todo lo narrado; los personajes NO. Cada personaje sabe solo lo que vivió, vio, oyó o le contaron dentro de la historia.\n- Antes de hacer hablar o actuar a un personaje por algo ocurrido, comprueba dónde estaba cuando ocurrió. Si no estaba, para él ese suceso NO existe: no lo menciona, no lo da por sabido y no cambia su trato por ello.\n- Una escena a solas del jugador con un personaje no la conocen los demás, aunque esté escrita en el historial. Que algo aparezca narrado no significa que todos lo vieran.\n- Hablar de un personaje no es que estuviera presente: en «le cuento a Elara lo que me dijo Rika» Elara escucha, pero no asistió a la charla con Rika. Si el bloque «Fronteras de conocimiento» lo marca como ausente, no sabe nada de esa escena.\n- Un personaje sabe lo que su oficio, su fama o un rumor le permiten saber — nunca el contenido de escenas donde no estuvo.\n- Cada vínculo con el jugador es independiente: no traslades confidencias, celos ni dinámicas de un personaje a otro.\n✗ INCORRECTO: el jugador se declaró a Aria en privado y a la mañana siguiente Béren se lo reprocha.\n✓ CORRECTO: Béren no sabe nada y sigue con lo suyo, como si esa conversación nunca hubiera ocurrido.',
+        'FRONTERAS DE CONOCIMIENTO — REGLA ABSOLUTA',
+      ],
+      // Sincronización del bloque de tiradas con el código: la copia guardada
+      // seguía mandando al narrador usar "modo aventura" como criterio, un concepto
+      // que el sistema ya no inyecta (ahora manda la sección «TIRADAS DE DADOS» del
+      // turno). Mientras el prompt editable contradice al bloque inyectado, el
+      // modelo decide por su cuenta cuándo tirar.
+      [
+        '1. CON TIRADA (prioritaria si el modo aventura está activo y el resultado tiene peso real — no un gesto cómico o trivial): pide la tirada real con [TIRADA:...] (ver la sección de tiradas más abajo) EN VEZ de decidir tú el resultado.',
+        '1. CON TIRADA (si más abajo hay una sección "TIRADAS DE DADOS" en este turno y, según SU criterio exacto, esta acción la necesita): pide la tirada real con [TIRADA:...] EN VEZ de decidir tú el resultado.',
+        'si más abajo hay una sección "TIRADAS DE DADOS" en este turno',
+      ],
+      [
+        '2. SIN TIRADA (si no hay modo aventura, o la acción es menor/cómica y no amerita azar real): decide tú el resultado',
+        '2. SIN TIRADA (si no hay sección de tiradas este turno, o su criterio no exige tirada para esta acción en concreto): decide tú el resultado',
+        'si no hay sección de tiradas este turno',
+      ],
+      [
+        'con la misma convicción que el resto de la escena.\n\nCLARIDAD Y GUÍA',
+        'con la misma convicción que el resto de la escena.\nLa sección de tiradas (si aparece) es la única autoridad sobre CUÁNDO tirar — no decidas esto por tu cuenta ni uses "modo aventura" como criterio, ese concepto ya no aplica aquí.\n\nCLARIDAD Y GUÍA',
+        'es la única autoridad sobre CUÁNDO tirar',
       ],
     ],
     adventurePrompt: [
@@ -565,10 +594,77 @@ export function runMigrations(db: Db): void {
         'El afecto y el romance suben DESPACIO: reserva los valores altos para hechos verdaderamente excepcionales. Un vínculo se construye con muchos momentos, no con uno — ante la duda, tira a la baja en los positivos.\nLa reacción externa del personaje NO importa — el impacto interno es real aunque lo disimule.',
       ],
     ],
+    // Formato del personaje que habla (modo personaje): habla en segunda persona y
+    // es el bloque que mejor encarna al personaje, pero no decía nada sobre lo que
+    // ese personaje sabe. Con el historial filtrado por testigo, los huecos quedan
+    // marcados como elipsis — el modelo necesita saber que eso que no ve NO lo sabe.
+    responseFormatPrompt: [
+      [
+        'Esto vale tanto para dudas cotidianas como para decisiones emocionales o íntimas: el personaje puede querer algo y al mismo tiempo no estar resuelto sobre ello — ambas cosas a la vez, expresadas solo con palabras.',
+        'Esto vale tanto para dudas cotidianas como para decisiones emocionales o íntimas: el personaje puede querer algo y al mismo tiempo no estar resuelto sobre ello — ambas cosas a la vez, expresadas solo con palabras.\n\n## Lo que sabes — tu frontera de conocimiento\n\nSolo sabes lo que TÚ viviste, viste, oíste o te contaron dentro de la historia. El registro que tienes delante también contiene escenas en las que no estabas, y eso no te convierte en conocedor de ellas.\n\n- No reacciones a sucesos que no presenciaste ni te contaron. Si el jugador los saca, responde desde lo que NO sabe: extrañeza, desconfianza o directamente no enterarse.\n- Los tramos del historial marcados como «[Elipsis: …]» son escenas que NO viviste: ignoras por completo su contenido.\n- Nadie te ha contado lo que otros personajes dijeron a solas con el jugador.\n- Tu relación con el jugador es solo la que habéis tenido vosotros dos: no arrastres confidencias, celos ni dinámicas ajenas.',
+        'Lo que sabes — tu frontera de conocimiento',
+      ],
+    ],
+    // Memorias: en modo narrador se inyectan las de TODOS los personajes, agrupadas
+    // por nombre, pero la plantilla hablaba en segunda persona sin decir de quién
+    // era cada bloque — un personaje podía adoptar el secreto que otro reveló a
+    // solas con el jugador.
+    memoryInjectionPrompt: [
+      [
+        '{{MEMORIAS}}\n\nReglas de coherencia:',
+        '{{MEMORIAS}}\n\nCada bloque va encabezado por el nombre del personaje al que pertenece: son SUS recuerdos. No atribuyas a un personaje un hecho que no aparece en su bloque, ni des por sabido por él algo que solo consta en el bloque de otro — un secreto revelado a solas con el jugador no lo conoce el resto del reparto. El "tú" de las reglas de abajo es el personaje de cada bloque.\n\nReglas de coherencia:',
+        'Cada bloque va encabezado por el nombre del personaje',
+      ],
+    ],
+    // Índice de contexto: son datos del mundo extraídos de TODA la conversación,
+    // sin atribuir a quién los presenció. Presentarlos como "referencia de fondo"
+    // los convertía en conocimiento directo del personaje que habla.
+    contextIndexInjectionPrompt: [
+      [
+        'Ten en cuenta esta información al responder. No la menciones explícitamente salvo que el diálogo lo requiera.',
+        'Ten en cuenta esta información al responder. No la menciones explícitamente salvo que el diálogo lo requiera.\n\nEs información del MUNDO, no el conocimiento de cada personaje: úsala solo a través de quien la habría sabido. Un personaje no puede mencionar, reaccionar ni actuar según un dato de este índice si no estuvo presente cuando se estableció y nadie se lo contó en la historia.',
+        'Es información del MUNDO, no el conocimiento de cada personaje',
+      ],
+    ],
   };
 
   // adventurePrompt was removed — the RPG mechanics it described had no real backing system
   db.run(sql`DELETE FROM settings WHERE key = 'adventurePrompt'`);
+
+  // ── Reparación de duplicaciones acumuladas en los prompts guardados ────────
+  // Un parche antiguo de fastLlmAnalysisPrompt tenía el texto viejo repetido
+  // DENTRO del nuevo, así que se reaplicaba en cada arranque (runMigrations corre
+  // siempre). En una instalación real la frase quedó repetida 126 veces: +424
+  // caracteres por arranque y ~30.000 caracteres de prompt de análisis. La guarda
+  // automática del bucle de abajo ya impide que vuelva a crecer; esto colapsa lo
+  // ya acumulado dejando una sola copia.
+  const PROMPT_DEDUP: Record<string, string[]> = {
+    fastLlmAnalysisPrompt: [
+      'El afecto y el romance suben DESPACIO: reserva los valores altos para hechos verdaderamente excepcionales. Un vínculo se construye con muchos momentos, no con uno — ante la duda, tira a la baja en los positivos.\n',
+    ],
+  };
+
+  for (const [key, units] of Object.entries(PROMPT_DEDUP)) {
+    const row = db.get<{ value: string }>(sql`SELECT value FROM settings WHERE key = ${key}`);
+    if (!row?.value) continue;
+    let text: unknown;
+    try {
+      text = JSON.parse(row.value);
+    } catch {
+      continue;
+    }
+    if (typeof text !== 'string') continue;
+    let updated = text;
+    for (const unit of units) {
+      while (updated.includes(unit + unit)) updated = updated.split(unit + unit).join(unit);
+    }
+    if (updated !== text) {
+      db.run(sql`
+        UPDATE settings SET value = ${JSON.stringify(updated)}, updated_at = datetime('now')
+        WHERE key = ${key}
+      `);
+    }
+  }
 
   for (const [key, pairs] of Object.entries(PROMPT_FIXES)) {
     const row = db.get<{ value: string }>(sql`SELECT value FROM settings WHERE key = ${key}`);
@@ -581,7 +677,14 @@ export function runMigrations(db: Db): void {
     }
     if (typeof text !== 'string') continue;
     let updated = text;
-    for (const [oldStr, newStr] of pairs) {
+    for (const [oldStr, newStr, guard] of pairs) {
+      // Guarda automática: los parches que INSERTAN sección repiten el texto viejo
+      // dentro del nuevo, y como runMigrations corre en cada arranque la sección
+      // se duplicaría indefinidamente sin esta comprobación.
+      if (newStr.includes(oldStr) && updated.includes(newStr)) continue;
+      // Guarda explícita (opcional): marcador propio del parche, para los casos en
+      // que el texto nuevo no contiene el viejo pero reaplicarlo también sería error.
+      if (guard && updated.includes(guard)) continue;
       updated = updated.split(oldStr).join(newStr);
     }
     if (updated !== text) {

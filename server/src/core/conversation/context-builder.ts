@@ -158,6 +158,34 @@ function buildSingleCharIdentityBlock(activeName: string): string {
   );
 }
 
+// ── Fronteras de conocimiento — refuerzo tardío (footer) ────────────────────
+//
+// La regla ya vive en el prefijo estático (buildNarratorIdentityBlock /
+// buildSingleCharIdentityBlock) y en los prompts editables, pero ahí queda al
+// principio de un prompt de 10-15k caracteres con todo el historial detrás: la
+// misma dilución que ya obligó a mover las tiradas, la afinidad y la coherencia
+// al footer. Este bloque corto va cerca del punto de generación y aterriza la
+// regla en el caso concreto que falla: escenas que SÍ están escritas arriba pero
+// que el personaje que habla no vivió.
+function buildKnowledgeLateBlock(narratorMode: boolean, activeName: string | null): string {
+  if (narratorMode) {
+    return (
+      `## Antes de escribir — fronteras de conocimiento\n` +
+      `Tú lo sabes todo; los personajes no. Antes de hacer hablar o actuar a uno por algo ocurrido, comprueba dónde estaba cuando ocurrió: si no estaba, para él ese suceso NO existe.\n` +
+      `- Una escena a solas del jugador con un personaje no la conocen los demás, aunque esté escrita en el historial.\n` +
+      `- Que se HABLE de un personaje no es que estuviera presente.\n` +
+      `- Cada vínculo con el jugador es independiente: no traslades confidencias ni dinámicas de un personaje a otro.`
+    );
+  }
+  return (
+    `## Antes de responder — lo que sabes\n` +
+    `Eres ${activeName ?? 'tu personaje'}: solo sabes lo que TÚ viviste, viste, oíste o te contaron en la historia.\n` +
+    `- No reacciones a sucesos que no presenciaste ni te contaron, aunque estén escritos más arriba.\n` +
+    `- Los tramos marcados como «[Elipsis: …]» son escenas que NO viviste: ignoras su contenido.\n` +
+    `- Tu relación con el jugador es solo la que habéis tenido vosotros dos.`
+  );
+}
+
 // ── Formato de acciones y gestos ─────────────────────────────────────────────
 // Instrucción estática: garantiza que las descripciones de gestos y acciones
 // físicas vayan siempre en tercera persona, incluso en modo personaje (donde
@@ -1570,12 +1598,27 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // filtra por testigo (el narrador es omnisciente), así que este ancla evita que
   // un personaje "conozca" escenas privadas del jugador con otro. Cerca de la
   // generación por ser restricción dura; footer → fuera del prefijo cacheado.
-  if (narratorMode && needsSplit) {
-    const presenceLedger = buildPresenceLedgerBlock(trimmedMessages, allKnownChars, windowStart);
-    if (presenceLedger) {
-      history.push({ role: 'system', content: presenceLedger });
-      footerCount++;
-    }
+  const presenceLedger =
+    narratorMode && needsSplit
+      ? buildPresenceLedgerBlock(trimmedMessages, allKnownChars, windowStart)
+      : null;
+  if (presenceLedger) {
+    history.push({ role: 'system', content: presenceLedger });
+    footerCount++;
+  }
+
+  // 9c-bis. Fronteras de conocimiento — refuerzo tardío de la regla (ver
+  // buildKnowledgeLateBlock). En modo personaje entra cuando el historial está
+  // filtrado por testigo (con reparto), que es justo cuando hay escenas escritas
+  // arriba que el personaje NO vivió. En modo narrador solo entra si este turno
+  // no hubo ledger: el ledger ya trae la regla y su lista factual de presentes y
+  // ausentes, y duplicarla compite por la atención del modelo.
+  if (needsSplit && (narratorMode ? !presenceLedger : groupCharacters.length > 0)) {
+    history.push({
+      role: 'system',
+      content: buildKnowledgeLateBlock(narratorMode, character?.name ?? null),
+    });
+    footerCount++;
   }
 
   // 9c-bis. Mundo vivo / Teoría de la Mente — directiva maestra incondicional (a
