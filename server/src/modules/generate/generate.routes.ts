@@ -3,6 +3,7 @@ import type { MemoryEntry, BackgroundImage, ConversationBackground } from '@rpgs
 import { matchCharacterName } from '@rpgspeak/shared';
 import { generateStream } from '../../core/conversation/engine.js';
 import { ValidationError, NotFoundError } from '../../shared/errors.js';
+import { startSse, startSseHeartbeat } from '../../shared/sse.js';
 import { z } from 'zod';
 import path from 'path';
 import fs from 'fs';
@@ -222,12 +223,15 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
 
     const { conversationId, message, characterId, branchId, narratorMode, overrides } = result.data;
 
-    reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
+    startSse(reply.raw);
+
+    // Cloudflare responde 524 si el origen pasa ~100 s sin mandarle bytes, y con
+    // prefills largos (contextos enormes, modelos locales, razonamiento
+    // prolongado) pueden pasar varios minutos entre el inicio de la petición y el
+    // primer token: el stream se caía aunque el LLM siguiera trabajando. El latido
+    // cada 15 s mantiene tráfico visible en el proxy; el cliente ignora las líneas
+    // de comentario (solo lee `data: `). Se detiene solo, al cerrarse la respuesta.
+    const stopHeartbeat = startSseHeartbeat(reply.raw);
 
     // Los pasos de enriquecimiento de fondo (director de escena, resúmenes…)
     // ahora se ejecutan DENTRO de generateStream() —ya no fire-and-forget— para
@@ -253,6 +257,11 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
     reply.raw.on('close', () => {
       if (!reply.raw.writableEnded) abortController.abort();
     });
+
+    // El latido se detiene con la propia respuesta: 'close' se emite tanto al
+    // terminar normal (end al final del handler), como por el camino de error o
+    // por corte del cliente. Así no queda un intervalo escribiendo a ciegas.
+    reply.raw.once('close', stopHeartbeat);
 
     const { displayName: userDisplayName } = (req as any).authUser ?? {};
 
@@ -908,12 +917,12 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
       powerLoraUpdates,
     } = body;
 
-    reply.raw.writeHead(200, {
-      'Content-Type':  'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection':    'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
+    startSse(reply.raw);
+    // Imágenes: ComfyUI puede estar minutos sin emitir progreso (cola, upscale,
+    // descarga) y el proxy lo leía como origen mudo → 524. Mismo latido que el
+    // stream de chat.
+    const stopHeartbeat = startSseHeartbeat(reply.raw);
+    reply.raw.once('close', stopHeartbeat);
 
     const send = (data: object) => {
       try { reply.raw.write(`data: ${JSON.stringify(data)}\n\n`); } catch { /* client gone */ }
@@ -1072,12 +1081,12 @@ export const generateRoutes: FastifyPluginAsync = async (app) => {
 
     const { conversationId, prompt, workflowName, loraName, loraStrength, width, height } = body;
 
-    reply.raw.writeHead(200, {
-      'Content-Type':  'text/event-stream',
-      'Cache-Control': 'no-cache',
-      'Connection':    'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
+    startSse(reply.raw);
+    // Imágenes: ComfyUI puede estar minutos sin emitir progreso (cola, upscale,
+    // descarga) y el proxy lo leía como origen mudo → 524. Mismo latido que el
+    // stream de chat.
+    const stopHeartbeat = startSseHeartbeat(reply.raw);
+    reply.raw.once('close', stopHeartbeat);
 
     const send = (data: object) => {
       try { reply.raw.write(`data: ${JSON.stringify(data)}\n\n`); } catch { /* client gone */ }

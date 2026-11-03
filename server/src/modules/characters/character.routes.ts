@@ -2,6 +2,7 @@ import type { FastifyPluginAsync } from 'fastify';
 import { CharacterService } from './character.service.js';
 import { createCharacterSchema, updateCharacterSchema } from './character.schema.js';
 import { ValidationError, NotFoundError, ForbiddenError } from '../../shared/errors.js';
+import { startSse, startSseHeartbeat } from '../../shared/sse.js';
 import { SettingsService } from '../settings/settings.service.js';
 import { createImageProvider } from '../../core/image/image-provider.factory.js';
 
@@ -164,12 +165,11 @@ export const characterRoutes: FastifyPluginAsync = async (app) => {
       workflowName?: string;
     };
 
-    reply.raw.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
+    startSse(reply.raw);
+    // ComfyUI puede tardar minutos sin emitir progreso → latido para que el
+    // proxy (Cloudflare/Caddy) no corte la conexión por silencio del origen.
+    const stopHeartbeat = startSseHeartbeat(reply.raw);
+    reply.raw.once('close', stopHeartbeat);
     const send = (data: object) => {
       try { reply.raw.write(`data: ${JSON.stringify(data)}\n\n`); } catch { /* client gone */ }
     };

@@ -38,8 +38,13 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:3000',
         changeOrigin: true,
-        proxyTimeout: 240_000, // 4 min — TTS CPU synthesis can be slow
-        timeout: 240_000,
+        // El stream de generación puede estar varios minutos sin emitir tokens
+        // (prefill largo, modelo local lento, razonamiento prolongado). 4 min se
+        // quedaba corto: el proxy cortaba el SSE en mitad de la respuesta.
+        // 8 min deja margen para prefills de hasta ~7 min; el latido SSE del
+        // servidor (: ping cada 15 s) evita además los cortes por inactividad.
+        proxyTimeout: 480_000,
+        timeout: 480_000,
       },
       '/images': {
         target: 'http://localhost:3000',
