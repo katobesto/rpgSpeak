@@ -4,11 +4,21 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { SettingsService } from './settings.service.js';
 import type { AppSettings, BzWorkflow } from '@rpgspeak/shared';
+import { z } from 'zod';
+import { ValidationError } from '../../shared/errors.js';
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../');
 const WORKFLOWS_DIR = path.join(PROJECT_ROOT, 'data', 'comfy-workflows');
 
 const service = new SettingsService();
+
+const generationSettingsSchema = z.object({
+  generationTemperature: z.number().finite().min(0).max(2).optional(),
+  generationTopP: z.number().finite().min(0).max(1).optional(),
+  generationRepetitionPenalty: z.number().finite().min(1).max(2).optional(),
+  generationFrequencyPenalty: z.number().finite().min(-2).max(2).optional(),
+  generationPresencePenalty: z.number().finite().min(-2).max(2).optional(),
+}).passthrough();
 
 type WorkflowNode = { class_type?: string; inputs?: Record<string, unknown> };
 type WorkflowGraph = Record<string, WorkflowNode>;
@@ -93,7 +103,9 @@ export const settingsRoutes: FastifyPluginAsync = async (app) => {
   app.get('/', async () => ({ success: true, data: service.getAll() }));
 
   app.patch('/', async (req) => {
-    const updated = service.setMany(req.body as Record<string, unknown>);
+    const parsed = generationSettingsSchema.safeParse(req.body);
+    if (!parsed.success) throw new ValidationError(parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; '));
+    const updated = service.setMany(parsed.data as Partial<AppSettings>);
     return { success: true, data: updated };
   });
 

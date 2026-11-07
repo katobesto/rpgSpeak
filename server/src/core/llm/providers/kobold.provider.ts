@@ -30,6 +30,7 @@ export class KoboldProvider implements LLMProvider {
       top_p: request.topP ?? 0.9,
       top_k: request.topK ?? 40,
       rep_pen: request.repetitionPenalty ?? 1.1,
+      max_context_length: request.contextSize,
       stop_sequence: request.stopSequences ?? [],
     };
 
@@ -64,6 +65,8 @@ export class KoboldProvider implements LLMProvider {
       top_p: request.topP ?? 0.9,
       top_k: request.topK ?? 40,
       rep_pen: request.repetitionPenalty ?? 1.1,
+      max_context_length: request.contextSize,
+      stop_sequence: request.stopSequences ?? [],
     };
 
     const res = await fetch(`${this.baseUrl}/api/extra/generate/stream`, {

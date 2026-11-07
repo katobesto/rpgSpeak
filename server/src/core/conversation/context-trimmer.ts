@@ -1,4 +1,5 @@
 import type { ChatMessage } from '@rpgspeak/shared';
+import { ValidationError } from '../../shared/errors.js';
 
 /**
  * Estimates token count using the ~4 chars/token heuristic.
@@ -18,72 +19,76 @@ export interface TrimResult {
   estimatedTokens: number;
 }
 
-/**
- * Trims conversation history to fit within maxTokens budget.
- * Always preserves the leading system message(s) and the most recent N messages.
- * Drops oldest messages from the middle first.
- *
- * IMPORTANT: only the leading contiguous block of system messages is treated as
- * "header" (moved to the front). System messages interspersed in the conversation
- * body (e.g. memory injection just before the last user message) keep their
- * relative position — they are NOT pulled out and reordered.
- *
- * Recorte cuantizado (estabilidad del prefix-cache): recortar "lo mínimo para
- * caber" mueve el punto de corte en CADA turno una vez desbordado el presupuesto,
- * invalidando el prefix-cache del provider en todos los turnos siguientes. En su
- * lugar, el número de mensajes descartados se redondea hacia arriba al múltiplo
- * de TRIM_STEP: el punto de corte queda fijo durante ~TRIM_STEP turnos entre
- * salto y salto. El sobrecoste es descartar hasta TRIM_STEP-1 mensajes antes de
- * lo estrictamente necesario — barato comparado con perder el caché del historial
- * completo turno tras turno.
- */
+interface TrimOptions {
+  /** Footer completo, incluido el mensaje actual: nunca se descarta. */
+  requiredRecent?: number;
+  /** Sistema y ejemplos estables, para conservar también su caché. */
+  prefixCount?: number;
+}
+
 const TRIM_STEP = 8;
 
-export function trimContext(messages: ChatMessage[], maxTokens: number, preserveRecent = 6): TrimResult {
-  if (estimateContextTokens(messages) <= maxTokens) {
-    return { messages, trimmed: 0, estimatedTokens: estimateContextTokens(messages) };
+/** Recorte escalonado. preserveRecent es una preferencia; el prefijo y el
+ * footer son obligatorios. No devolver prompts que excedan el presupuesto. */
+export function trimContext(messages: ChatMessage[], maxTokens: number, preserveRecent = 6, options: TrimOptions = {}): TrimResult {
+  const total = estimateContextTokens(messages);
+  if (total <= maxTokens) return { messages, trimmed: 0, estimatedTokens: total };
+
+  let bodyStart = options.prefixCount ?? 0;
+  while (bodyStart < messages.length && messages[bodyStart].role === 'system') bodyStart++;
+  const header = messages.slice(0, bodyStart);
+  const body = messages.slice(bodyStart);
+  const requiredRecent = Math.min(body.length, Math.max(1, options.requiredRecent ?? 1));
+  const budget = maxTokens - estimateContextTokens(header);
+  if (estimateContextTokens(body.slice(-requiredRecent)) > budget) {
+    throw new ValidationError('El contexto fijo y el mensaje actual superan el presupuesto. Aumenta la ventana de contexto o reduce lore, notas y directivas.');
   }
 
-  // Separate the leading "header" system messages from the conversation body.
-  // Any system message that appears AFTER the first user/assistant message is
-  // considered "inline" and stays in the body (preserving its position).
-  let bodyStart = 0;
-  while (bodyStart < messages.length && messages[bodyStart].role === 'system') {
-    bodyStart++;
-  }
-  const headerMessages = messages.slice(0, bodyStart);
-  const body = messages.slice(bodyStart); // may contain inline system messages
-
-  const headerTokens = estimateContextTokens(headerMessages);
-  const budget = maxTokens - headerTokens;
-
-  // Always keep the most recent N items from the body (includes inline system msgs)
-  const preserved = body.slice(-preserveRecent);
-  const trimable = body.slice(0, -preserveRecent);
-
-  // Pass 1 — minimal drop: walk from most-recent trimable backwards until the
-  // budget is exhausted; whatever doesn't fit is the minimal number to drop.
+  let keep = Math.min(body.length, Math.max(requiredRecent, preserveRecent));
+  while (keep > requiredRecent && estimateContextTokens(body.slice(-keep)) > budget) keep--;
+  const preserved = body.slice(-keep);
+  const trimmable = body.slice(0, body.length - keep);
   let currentTokens = estimateContextTokens(preserved);
-  let minimalDrop = trimable.length;
-  for (let i = trimable.length - 1; i >= 0; i--) {
-    const msgTokens = estimateTokens(trimable[i].content) + 4;
-    if (currentTokens + msgTokens <= budget) {
-      currentTokens += msgTokens;
-      minimalDrop--;
-    } else {
-      break;
-    }
+  let minimalDrop = trimmable.length;
+  for (let i = trimmable.length - 1; i >= 0; i--) {
+    const tokens = estimateTokens(trimmable[i].content) + 4;
+    if (currentTokens + tokens > budget) break;
+    currentTokens += tokens;
+    minimalDrop--;
   }
 
-  // Pass 2 — quantize: round the drop count up to the next multiple of TRIM_STEP
-  // so the cut point stays stable across turns (see comment above).
-  const trimmed = Math.min(trimable.length, Math.ceil(minimalDrop / TRIM_STEP) * TRIM_STEP);
-  const kept = trimable.slice(trimmed);
+  let trimmed = Math.min(trimmable.length, Math.ceil(minimalDrop / TRIM_STEP) * TRIM_STEP);
+  // No empezar el historial por una respuesta huérfana. No tocar el footer.
+  if (body[trimmed]?.role === 'assistant' && trimmed < body.length - requiredRecent) trimmed++;
+  const result = [...header, ...body.slice(trimmed)];
+  return { messages: result, trimmed, estimatedTokens: estimateContextTokens(result) };
+}
 
-  const result = [...headerMessages, ...kept, ...preserved];
-  return {
-    messages: result,
-    trimmed,
-    estimatedTokens: estimateContextTokens(result),
-  };
+/** Ajusta los resúmenes al corte real por tokens, además del corte por número
+ * de mensajes. Si el resumen ocupa más espacio, recorta otra vez sin recuperar
+ * historial ya descartado: el proceso es monótono y termina. */
+export function trimContextWithSummary(messages: ChatMessage[], maxTokens: number, options: Required<TrimOptions> & {
+  summaryMessage: ChatMessage | null;
+  summaryForTrimmed: (additionalTrimmed: number) => ChatMessage | null;
+}): TrimResult {
+  let working = messages;
+  let summaryMessage = options.summaryMessage;
+  let requiredRecent = options.requiredRecent;
+  let totalTrimmed = 0;
+  for (;;) {
+    const result = trimContext(working, maxTokens, requiredRecent + 6, { prefixCount: options.prefixCount, requiredRecent });
+    totalTrimmed += result.trimmed;
+    const nextSummary = options.summaryForTrimmed(totalTrimmed);
+    if (nextSummary?.content === summaryMessage?.content) return { ...result, trimmed: totalTrimmed };
+    working = [...result.messages];
+    const oldIndex = summaryMessage ? working.indexOf(summaryMessage) : -1;
+    if (oldIndex !== -1) {
+      working.splice(oldIndex, 1, ...(nextSummary ? [nextSummary] : []));
+      if (!nextSummary) requiredRecent--;
+    } else if (nextSummary) {
+      working.splice(working.length - requiredRecent, 0, nextSummary);
+      requiredRecent++;
+    }
+    summaryMessage = nextSummary;
+  }
 }

@@ -557,8 +557,8 @@ async function loadWorkflows() {
     select.innerHTML = state.workflows
       .map(w => `<option value="${w.id}">${w.label}</option>`)
       .join('')
-    if (state.workflows.some(w => w.id === 'seedvr_upscaler')) {
-      select.value = 'seedvr_upscaler'
+    if (state.workflows.some(w => w.id === 'generador4k')) {
+      select.value = 'generador4k'
     }
 
     // Trigger change for initial selection

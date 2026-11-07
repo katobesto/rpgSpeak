@@ -20,7 +20,7 @@ import { AvatarCropModal } from '../characters/AvatarCropModal.tsx';
 
 type STab = 'appearance' | 'generation' | 'providers' | 'context' | 'voice' | 'users' | 'profile' | 'stats' | 'backup';
 
-const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'characterCoherencePrompt', 'livingWorldPrompt', 'sceneImagePrompt', 'charImagePrompt', 'backgroundImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmPreAnalysisEnabled', 'fastLlmPostAnalysisEnabled', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'llmNsfwGuardEnabled', 'diceRefereeEnabled', 'worldStateAutoUpdateEnabled', 'sceneDirectorEnabled', 'autoSummariesEnabled', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'summaryBlockSize', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort', 'generationTemperature', 'generationTopP', 'generationFrequencyPenalty', 'generationPresencePenalty'];
+const GENERATION_KEYS:    (keyof AppSettings)[] = ['defaultProviderId', 'defaultModelId', 'sendOnEnter', 'streamingEnabled', 'globalSystemPrompt', 'responseFormatPrompt', 'narratorPrompt', 'characterCoherencePrompt', 'livingWorldPrompt', 'sceneImagePrompt', 'charImagePrompt', 'backgroundImagePrompt', 'fastLlmEnabled', 'fastLlmProviderId', 'fastLlmModelId', 'fastLlmPreAnalysisEnabled', 'fastLlmPostAnalysisEnabled', 'fastLlmDebugMode', 'fastLlmAnalysisPrompt', 'affinitySystemPrompt', 'memoryInjectionPrompt', 'embeddingEnabled', 'embeddingProviderId', 'embeddingModel', 'contextIndexInjectionEnabled', 'contextIndexInjectionMaxItems', 'contextIndexInjectionPrompt', 'contextIndexPrompt', 'contextIndexContextSize', 'contextAutoExtractEnabled', 'contextAutoExtractInterval', 'contextAutoExtractProviderId', 'contextAutoExtractModelId', 'llmNsfwGuardEnabled', 'diceRefereeEnabled', 'worldStateAutoUpdateEnabled', 'sceneDirectorEnabled', 'autoSummariesEnabled', 'storyEventGenerationPrompt', 'storyLocationGenerationPrompt', 'narrationMediumPrompt', 'narrationShortPrompt', 'allowNsfw', 'nsfwBlockedMessage', 'summaryMaxLength', 'summaryBlockSize', 'disableFallbacks', 'reasoningEnabled', 'reasoningEffort', 'generationTemperature', 'generationTopP', 'generationFrequencyPenalty', 'generationRepetitionPenalty', 'generationPresencePenalty'];
 const CONTEXT_KEYS:       (keyof AppSettings)[] = ['contextStrategy', 'maxContextMessages', 'autoSummarizeThreshold', 'maxResponseTokens', 'defaultContextLength'];
 const INTEGRATIONS_KEYS:  (keyof AppSettings)[] = ['comfyUiUrl', 'imageProvider', 'imageProviderApiKey', 'pollinationsModel', 'geminiModel', 'falModel', 'comfyUiCfClientId', 'comfyUiCfClientSecret', 'bzComfyUrl', 'bzComfyApiToken', 'bzComfyWorkflow'];
 
@@ -329,6 +329,16 @@ export function SettingsPanel() {
                   </Section>
 
                   <Section title="Tono de respuesta">
+                    <Input
+                      type="number" min={0} max={2} step={0.01}
+                      label="Temperatura"
+                      value={draft.generationTemperature ?? 0.7}
+                      onChange={(e) => {
+                        const value = e.target.valueAsNumber;
+                        if (Number.isFinite(value)) update('generationTemperature', Math.min(2, Math.max(0, value)));
+                      }}
+                      hint="De 0 a 2. Admite valores como 0.1, 0.2 o 0.35; 0 solicita el muestreo más determinista que permita el proveedor."
+                    />
                     <p className="text-xs text-text-muted mb-2 leading-relaxed">
                       Controla la <strong className="text-text-secondary">temperatura de muestreo</strong>: cuánto se aleja el modelo de su respuesta "más probable" (que suele coincidir con la más genérica y complaciente). Más bajo = predecible y estable; más alto = más decidido y variado, con algo más de riesgo de incoherencia. Global, manda sobre el valor del personaje.
                     </p>
@@ -338,7 +348,7 @@ export function SettingsPanel() {
                         { label: 'Equilibrado', temp: 0.7, hint: 'Punto medio' },
                         { label: 'Expresivo',   temp: 1.0, hint: 'Variado, espontáneo' },
                       ].map((opt) => {
-                        const active = Math.abs((draft.generationTemperature ?? 0.7) - opt.temp) < 0.15;
+                        const active = Math.abs((draft.generationTemperature ?? 0.7) - opt.temp) < 0.001;
                         return (
                           <button
                             key={opt.label}
@@ -361,7 +371,7 @@ export function SettingsPanel() {
                     {draft.reasoningEnabled && (
                       <p className="text-[11px] text-amber-500/90 mt-2 flex items-start gap-1">
                         <TriangleAlert size={12} className="mt-0.5 flex-shrink-0" />
-                        <span>Con el modo <strong>thinking</strong> activado, el modelo ignora estos parámetros de muestreo — no tendrán efecto hasta que lo desactives (o uses un modelo que sí los respete).</span>
+                        <span>El efecto de estos controles con <strong>thinking</strong> depende del modelo y del proveedor. DeepSeek thinking y algunos modelos de razonamiento no los admiten; los backends locales compatibles siguen recibiéndolos.</span>
                       </p>
                     )}
 
@@ -370,6 +380,16 @@ export function SettingsPanel() {
                         Avanzado — top_p / penalizaciones de repetición
                       </summary>
                       <div className="mt-2 space-y-3 pl-3 border-l border-border">
+                        <Input
+                          type="number" min={1} max={2} step={0.01}
+                          label="Penalización por repetición"
+                          value={draft.generationRepetitionPenalty ?? 1.1}
+                          onChange={(e) => {
+                            const value = e.target.valueAsNumber;
+                            if (Number.isFinite(value)) update('generationRepetitionPenalty', Math.min(2, Math.max(1, value)));
+                          }}
+                          hint="Multiplicativa: 1 = desactivada. Prueba 1.05–1.15 para reducir muletillas. Compatible con Ollama, Kobold, LM Studio, MLX, Oobabooga y modelos de OpenRouter que la admitan. OpenAI y Custom reciben los controles de frecuencia y presencia."
+                        />
                         <div>
                           <Input
                             type="number" min={0} max={1} step={0.05}

@@ -114,76 +114,16 @@ Eres consciente de tu ficha RPG (stats, habilidades, inventario). Actúa de form
 // jugador ("me llamaste Javier"), y (2) confundir quién dijo o hizo algo entre
 // jugador y personaje. Estático por conversación → cache-safe.
 function buildUserIdentityBlock(name: string): string {
-  return (
-    `## IDENTIDAD DEL JUGADOR — REGLA ABSOLUTA E INVIOLABLE\n` +
-    `El usuario (la persona real que juega) se llama **${name}**. Ese nombre pertenece EXCLUSIVAMENTE al jugador.\n` +
-    `- Ningún personaje, PNJ ni el propio narrador lleva, adopta ni comparte el nombre ${name}: es solo del jugador.\n` +
-    `- Dirígete SIEMPRE al jugador en segunda persona ("tú", "te", "tu"). Los personajes pueden llamarlo ${name} cuando le hablan, pero NUNCA se aplican ese nombre a sí mismos.\n` +
-    `- PROHIBIDO atribuir al jugador palabras, gestos o decisiones de un personaje, o viceversa. El jugador es "tú"; cada personaje se nombra por su propio nombre. No confundas quién es quién.`
-  );
+  return `## Jugador\nEl jugador se llama **${name}**. Háblale en segunda persona. No atribuyas sus palabras o decisiones a un personaje ni las de un personaje al jugador.`;
 }
 
-// ── Identidad y conocimiento por personaje (modo narrador) ───────────────────
-// Condensado: antes eran dos bloques separados (candado de identidad + conocimiento
-// por personaje) cuyos bullets se repetían entre sí, sumados a la avalancha de
-// directivas "REGLA ABSOLUTA" que compiten por la atención del modelo. Con el
-// historial ya atribuido por hablante (**Nombre:**), el modelo tiene la referencia
-// primaria de quién es quién; este bloque queda como refuerzo breve.
 function buildNarratorIdentityBlock(multipleChars: boolean): string {
-  const identity =
-    `### Identidad de cada personaje\n` +
-    `Cada personaje es una identidad cerrada: su nombre, raza, oficio, apariencia, voz e historia le pertenecen SOLO a él y nunca se mezclan ni se transfieren a otro. ` +
-    `Ejemplo: si una es cazarrecompensas humana y otra es arquera elfa, la primera JAMÁS se describe como elfa ni como arquera, y viceversa. ` +
-    `Antes de hacer hablar o actuar a un personaje, confirma sus datos en SU bloque de ficha y usa únicamente esos.`;
-  if (!multipleChars) return identity;
-  const knowledge =
-    `### Conocimiento por personaje — FRONTERA ABSOLUTA\n` +
-    `Cada personaje solo conoce lo que presenció en primera persona. Los momentos privados del jugador con un personaje (a solas, en un lugar apartado) NO los conocen los demás, y un recién incorporado ignora todo lo anterior a su llegada.\n` +
-    `- FALLO A ERRADICAR: que un personaje mencione, dé por sabido o reaccione a algo ocurrido en una escena donde NO estuvo. Si el jugador se declaró a una chica a solas, las demás NO lo saben después — no lo insinúan, no lo reprochan y no cambian su trato por ello.\n` +
-    `- Que una escena esté en el historial NO significa que todos la presenciaran. Guíate por quién aparecía NOMBRADO y presente en cada escena, no por lo que TÚ (narrador omnisciente) sabes. El bloque «Fronteras de conocimiento» del final es la lista factual de quién presenció qué: respétala.\n` +
-    `- ANTES de que un personaje mencione o reaccione a un suceso, verifica que él estuvo presente cuando ocurrió. Si no lo estuvo, para él ese suceso NO existe.\n` +
-    `- Cada vínculo con el jugador es independiente — no traslades dinámicas, sentimientos ni afinidades de un personaje a otro.`;
-  return `${identity}\n\n${knowledge}`;
+  return `## Identidades y conocimiento\nCada personaje conserva los datos, la voz y la historia de SU ficha.` +
+    (multipleChars ? ` Cada uno solo sabe lo que presenció, le contaron o su papel permite saber. El historial del narrador no es conocimiento compartido: respeta las fronteras de conocimiento y los vínculos independientes.` : '');
 }
 
-// ── Identidad y conocimiento del personaje activo (modo personaje) ───────────
-// Condensado desde dos bloques (candado de identidad + conocimiento limitado):
-// blinda al personaje que habla para que no absorba rasgos de los "otros
-// personajes presentes" ni "lea" en el historial compartido lo que no vivió.
 function buildSingleCharIdentityBlock(activeName: string): string {
-  return (
-    `### Tu identidad y tu conocimiento\n` +
-    `Eres **${activeName}** y nadie más: no adoptes el nombre, la raza, el oficio, la voz ni las habilidades de los otros personajes del contexto — si dudas de quién eres, vuelve a tu propia ficha.\n` +
-    `Solo conoces lo que TÚ viviste o presenciaste en primera persona. Lo ocurrido sin ti (momentos privados del jugador con otros personajes, o todo lo anterior a tu incorporación a la escena) para ti NO existe aunque aparezca en el historial: no lo menciones ni reacciones a ello. Tu relación con el jugador es solo tuya — no la mezcles con la que él tenga con otros.`
-  );
-}
-
-// ── Fronteras de conocimiento — refuerzo tardío (footer) ────────────────────
-//
-// La regla ya vive en el prefijo estático (buildNarratorIdentityBlock /
-// buildSingleCharIdentityBlock) y en los prompts editables, pero ahí queda al
-// principio de un prompt de 10-15k caracteres con todo el historial detrás: la
-// misma dilución que ya obligó a mover las tiradas, la afinidad y la coherencia
-// al footer. Este bloque corto va cerca del punto de generación y aterriza la
-// regla en el caso concreto que falla: escenas que SÍ están escritas arriba pero
-// que el personaje que habla no vivió.
-function buildKnowledgeLateBlock(narratorMode: boolean, activeName: string | null): string {
-  if (narratorMode) {
-    return (
-      `## Antes de escribir — fronteras de conocimiento\n` +
-      `Tú lo sabes todo; los personajes no. Antes de hacer hablar o actuar a uno por algo ocurrido, comprueba dónde estaba cuando ocurrió: si no estaba, para él ese suceso NO existe.\n` +
-      `- Una escena a solas del jugador con un personaje no la conocen los demás, aunque esté escrita en el historial.\n` +
-      `- Que se HABLE de un personaje no es que estuviera presente.\n` +
-      `- Cada vínculo con el jugador es independiente: no traslades confidencias ni dinámicas de un personaje a otro.`
-    );
-  }
-  return (
-    `## Antes de responder — lo que sabes\n` +
-    `Eres ${activeName ?? 'tu personaje'}: solo sabes lo que TÚ viviste, viste, oíste o te contaron en la historia.\n` +
-    `- No reacciones a sucesos que no presenciaste ni te contaron, aunque estén escritos más arriba.\n` +
-    `- Los tramos marcados como «[Elipsis: …]» son escenas que NO viviste: ignoras su contenido.\n` +
-    `- Tu relación con el jugador es solo la que habéis tenido vosotros dos.`
-  );
+  return `## Tu identidad\nEres **${activeName}**; las demás fichas no son la tuya. Solo sabes lo que viviste, presenciaste o te contaron. Las elipsis omiten escenas que no conoces; no adoptes recuerdos ni vínculos ajenos.`;
 }
 
 // ── Formato de acciones y gestos ─────────────────────────────────────────────
@@ -191,14 +131,8 @@ function buildKnowledgeLateBlock(narratorMode: boolean, activeName: string | nul
 // físicas vayan siempre en tercera persona, incluso en modo personaje (donde
 // el diálogo va en primera persona). Cacheada junto con el bloque de personaje.
 const GESTURE_FORMAT_INSTRUCTION =
-  `## Formato de acciones y gestos físicos (solo si tu formato de respuesta incluye acciones)\n` +
-  `Si tu formato de respuesta es estrictamente diálogo, esta sección no aplica — no añadas gestos ni acciones.\n` +
-  `Cuando sí incluyas descripciones de acciones o gestos (entre asteriscos o como narración entre turnos de diálogo), escríbelas siempre en TERCERA PERSONA, nunca en primera:\n` +
-  `- ✗ INCORRECTO: *me acaricio el pelo mirándote a los ojos y sonrío de forma pícara*\n` +
-  `- ✓ CORRECTO: *se acaricia el pelo mirándote a los ojos y sonríe de forma pícara*\n` +
-  `El diálogo hablado (lo que el personaje dice en voz alta) sí va en primera persona.\n` +
-  `Si el personaje describe acciones del jugador/usuario, también en tercera persona ("se acerca", "alza la vista", "te toma de la mano").\n` +
-  `NO uses paréntesis para acciones ni gestos: en esta historia los paréntesis del jugador son notas fuera de personaje (OOC) y los tuyos podrían confundirse con ellas. Usa asteriscos.`;
+  `## Acciones (solo si el formato las permite)\n` +
+  `Describe gestos y acciones del personaje en tercera persona entre asteriscos. El diálogo hablado va en primera persona; al jugador te diriges en segunda persona. No uses paréntesis para acciones: están reservados a notas OOC. Si el formato exige solo diálogo, no añadas narración.`;
 
 // ── Filtrado de historial por testigo (modo personaje) ──────────────────────
 //
@@ -567,6 +501,8 @@ const MAX_FLAGGED_PHRASES = 3;
  *  el texto real. */
 function stripForComparison(content: string): string {
   return content
+    .replace(/^\s*\|[^\n]*\d{1,2}:\d{2}[^\n]*\|\s*/, '') // cabecera ambiental canónica
+    .replace(/^\s*\[[^\]\n]*\d{1,2}:\d{2}[^\]\n]*\]\s*/, '') // cabecera ambiental
     .replace(/^\s*\*\*[^*\n]{1,40}:\*\*\s*/, '') // "**Nombre:** " inicial
     .replace(/[*_`#]/g, '')
     .replace(/\s+/g, ' ')
@@ -597,7 +533,7 @@ export function buildVarietyBlock(
 ): string | null {
   const ownTurns = sourceMessages
     .filter((m) => m.role === 'assistant' && m.content.trim())
-    .filter((m) => (narratorMode ? (m.metadata?.narrator || !m.characterId) : m.characterId === activeCharacterId))
+    .filter((m) => (narratorMode ? (m.metadata?.narrator || !m.characterId) : !m.metadata?.narrator && m.characterId === activeCharacterId))
     .slice(-RECENT_TURNS_FOR_VARIETY)
     .map((m) => stripForComparison(m.content));
 
@@ -605,7 +541,9 @@ export function buildVarietyBlock(
 
   // Aperturas: las últimas 3, si al menos dos tienen contenido real.
   const openings = ownTurns.slice(-3).map((t) => firstWords(t, OPENING_WORDS)).filter((o) => o.length > 8);
-  const uniqueOpenings = [...new Set(openings)];
+  const repeatedOpenings = openings.filter((opening, i) =>
+    openings.some((other, j) => i !== j && firstWords(opening, 4).toLowerCase() === firstWords(other, 4).toLowerCase()));
+  const uniqueOpenings = [...new Set(repeatedOpenings)];
 
   // Frases repetidas: n-gramas que aparecen en ≥2 turnos DISTINTOS.
   const ngramToTurns = new Map<string, Set<number>>();
@@ -619,10 +557,10 @@ export function buildVarietyBlock(
     .map(([gram]) => gram)
     .slice(0, MAX_FLAGGED_PHRASES);
 
-  if (openings.length < 2 && repeated.length === 0) return null; // nada que de verdad se repita
+  if (uniqueOpenings.length === 0 && repeated.length === 0) return null; // nada que de verdad se repita
 
   const parts: string[] = ['## Variedad — no repitas lo último que ya dijiste'];
-  if (openings.length >= 2) {
+  if (uniqueOpenings.length > 0) {
     parts.push(
       `Tus últimas respuestas empezaron así:\n` +
       uniqueOpenings.map((o) => `- «${o}…»`).join('\n') +
@@ -844,36 +782,13 @@ function buildWorldHeaderBlock(header: string): string {
 // bloque reduce la fatiga de directivas en el footer (menos bloques "REGLA
 // ABSOLUTA" compitiendo entre sí) y ahorra un mensaje del presupuesto.
 function buildSceneCoherenceBlock(currentLocation: string | null | undefined, narratorMode = false): string {
-  // Condensado (2026-07-22): la cabecera ambiental ya declara el lugar en la
-  // primera línea de cada respuesta y ofrece [ESCENA:hora|lugar] para corregirlo,
-  // así que aquí sobraba repetir toda la mecánica de ubicación.
-  const locationPart = currentLocation?.trim()
-    ? `### Ubicación actual\n` +
-      `La acción transcurre en **${currentLocation.trim()}**. No teleportes a nadie: los desplazamientos se narran. ` +
-      `Si la escena se traslada de verdad a otro lugar, decláralo al final con [UBICACION:nuevo lugar].`
-    : `### Ubicación de la escena\n` +
-      `Aún no consta. Si tu respuesta la sitúa en un lugar concreto, decláralo al final con [UBICACION:nombre del lugar].`;
-
-  const objectsPart =
-    `### Objetos y elementos establecidos\n` +
-    `Lo ya descrito (aspecto, ubicación, quién lo lleva, para qué sirve) son HECHOS FIJOS: no los reinventes ni los ` +
-    `reubiques sin que la narrativa lo justifique. Si no recuerdas un detalle, no inventes uno nuevo — deja la ` +
-    `incógnita abierta o reutiliza lo último que se dijo.`;
-
-  // Voz narrativa (solo narrador): refuerzo cerca del punto de generación.
-  // El narratorPrompt (lejano, en el mensaje de sistema) ya lo prohíbe, pero los
-  // modelos flash obedecen mucho mejor la instrucción con ejemplo situada cerca
-  // del final del contexto. Estático → no afecta a la estabilidad del prefijo.
-  const voicePart = narratorMode
-    ? `\n\n### Voz narrativa — tercera persona SIEMPRE\n` +
-      `La narración describe a los personajes DESDE FUERA, en tercera persona, con el nombre del personaje como sujeto. ` +
-      `La primera persona solo puede existir dentro de una línea de diálogo (**Nombre:** …).\n` +
-      `✗ INCORRECTO: *Me quedo mirándote fijamente y me aparto un mechón de pelo.* **Lala:** ¿Entonces te parece bien?\n` +
-      `✓ CORRECTO: *Lala se queda mirándote fijamente y se aparta un mechón de pelo.* **Lala:** ¿Entonces te parece bien?\n` +
-      `Si notas que la narración ha empezado a hablar como "yo" (me acerco, me quedo, siento…), corrige de inmediato a tercera persona.`
-    : '';
-
-  return `## COHERENCIA DE ESCENA — REGLAS ABSOLUTAS\n\n${locationPart}\n\n${objectsPart}${voicePart}`;
+  const location = currentLocation?.trim();
+  return `## Continuidad de escena\n` +
+    (location
+      ? `Ubicación actual: **${location}**. Narra los desplazamientos; si cambia, indica [UBICACION:nuevo lugar].\n`
+      : `Si estableces un lugar, indica [UBICACION:nombre del lugar].\n`) +
+    `Conserva los objetos, sus propiedades y quién los lleva. No inventes detalles para rellenar lagunas.` +
+    (narratorMode ? ` La narración va en tercera persona; la primera persona solo en diálogo atribuido a su hablante.` : '');
 }
 
 // ── Estado del grupo (combate) — persistido desde el minijuego de combate ───
@@ -910,6 +825,10 @@ function buildPartyStateBlock(partyState: PartyState | undefined): string | null
  * Order: global prompt → character system prompt → story context → memory → summary → conversation history
  */
 export interface BuildContextResult {
+  /** Mensaje de sistema y ejemplos de voz estables, antes del historial. */
+  prefixCount: number;
+  summaryMessage: ChatMessage | null;
+  summaryForTrimmed: (additionalTrimmed: number) => ChatMessage | null;
   messages: ChatMessage[];
   /**
    * Number of trailing "footer" messages (late injections: context index, memories,
@@ -1114,7 +1033,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
         affinity >= 21 ? 'frialdad y desconfianza — ni cercanía ni romance' :
                          'hostilidad activa';
       const intimacy = affinity >= 80
-        ? 'ha dado su consentimiento emocional para interacciones íntimas'
+        ? 'intimidad posible según su voluntad y la situación'
         : 'NO ha dado consentimiento para contacto íntimo';
       return `- ${name}: afinidad ${affinity}/100 — ${romance}; ${intimacy}`;
     });
@@ -1131,82 +1050,17 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     // prompt entero le decía al modelo «esto va de tu relación con el jugador»
     // justo mientras el texto le pedía que los personajes tuvieran vida propia.
     const affinityCoreDirective =
-      `## ESTADO EMOCIONAL ACTUAL — TIENE PRECEDENCIA SOBRE LA FICHA\n\n` +
-      `${consentLines.join('\n')}\n\n` +
-      `Estos números son el estado emocional REAL de cada personaje hacia el jugador AHORA. Mandan sobre lo que diga su ficha ` +
-      `en cuanto a SI hay atracción o apertura romántica: lo que la ficha describe es su POTENCIAL, no su realidad actual.\n` +
-      `Lo que la afinidad NO decide es el CÓMO: un personaje frío, reservado o calculador sigue siéndolo con afinidad alta — ` +
-      `el vínculo se expresa a través de su carácter, nunca anulándolo.\n\n` +
-      `ANTI-ADULACIÓN: el aprecio vive en el TONO y en las DECISIONES, no en cumplidos. PROHIBIDO recapitular los méritos del ` +
-      `jugador ("me regalaste…", "fuiste tan valiente…") como relleno o para justificar cercanía. Los personajes tienen su propia ` +
-      `vida y sus propios temas: la conversación NO gira en torno a lo bueno que es el jugador.\n\n` +
-      `RITMO: el enamoramiento es fruto de mucho tiempo compartido, no de unas pocas interacciones agradables. Con afinidad < 60 ` +
-      `no hay atracción romántica hacia el jugador — y NUNCA se verbaliza que "es pronto" o "quizás más adelante": insinuar que el ` +
-      `romance llegará a su debido tiempo ya lo pone sobre la mesa. Simplemente no es un tema vivo; se redirige a lo práctico.`;
+      `## Estado emocional actual\n${consentLines.join('\n')}\n\n` +
+      `La afinidad actual prevalece sobre el potencial romántico de la ficha; no cambia la personalidad ni implica consentimiento automático. ` +
+      `El aprecio se expresa en el trato, sin recapitular méritos del jugador. A baja afinidad, no prometas romance futuro.`;
 
     const intimacyDirective =
-      `## ROMANCE, CONSENTIMIENTO Y CONTACTO FÍSICO — REGLAS DETALLADAS\n\n` +
-      `NOTA CRÍTICA: Este estado de afinidad refleja el estado emocional REAL Y PRESENTE del personaje ` +
-      `hacia el jugador en este momento. Tiene PRECEDENCIA ABSOLUTA sobre cualquier rasgo de personalidad ` +
-      `o sentimiento descrito en la ficha del personaje SOLO en cuanto a SI existe atracción o apertura ` +
-      `romántica hacia el jugador. Si la descripción dice que el personaje siente algo por el jugador, eso ` +
-      `es su POTENCIAL — no su realidad actual dado lo ocurrido.\n\n` +
-      `RESPALDO NARRATIVO — calibración INTERNA, nunca verbalizada: si hay memorias activas de momentos ` +
-      `compartidos con el jugador (ver más abajo), úsalas para calibrar POR DENTRO cuánta confianza tiene sentido ` +
-      `mostrar — son la historia real que sostiene el número. Si no hay memorias que lo respalden, trata el número ` +
-      `con más cautela de la que sugiere por sí solo. Esta calibración JAMÁS se dice en voz alta: el personaje no ` +
-      `enumera ni recapitula los actos del jugador para justificar lo que siente.\n\n` +
-      `CÓMO SE EXPRESA EL APRECIO — REGLA ANTI-ADULACIÓN:\n` +
-      `El aprecio vive en el TONO y en las DECISIONES (más confianza, más paciencia, pequeños gestos), no en cumplidos.\n` +
-      `• La gratitud o la admiración por un acto concreto se expresa UNA sola vez, cuando el acto ocurre. Después queda en el trato — no se vuelve a mencionar salvo que el diálogo actual lo traiga de forma natural.\n` +
-      `• PROHIBIDO recapitular los méritos del jugador ("me regalaste…", "fuiste tan valiente…", "hablas con tanta franqueza…", "eres increíble") como relleno de conversación o para justificar cercanía. El elogio no pedido y repetido suena servil, no afectuoso.\n` +
-      `• Los personajes tienen su propia vida, sus preocupaciones y sus temas: la conversación NO gira en torno a lo bueno que es el jugador. Habla de lo que a TI te ocupa, no de lo que él ha hecho por ti.\n\n` +
-      `LO QUE LA AFINIDAD NO ANULA — CÓMO se expresa, no SI existe:\n` +
-      `La afinidad decide si la puerta al romance/intimidad está abierta. La personalidad base del personaje ` +
-      `decide CÓMO camina por esa puerta: con qué ritmo, qué condiciones pone, qué dudas conserva, qué tono usa. ` +
-      `Un personaje frío, calculador o reservado por naturaleza NO se vuelve cálido, dócil o complaciente solo ` +
-      `porque la afinidad sea alta — sigue siendo él mismo, pero ahora ese deseo o apertura es real y puede abrirse ` +
-      `paso a través de su forma de ser (con cautela, con condiciones, a su manera), no a pesar de ella ni anulándola.\n\n` +
-      `PROGRESIÓN ROMÁNTICA — REGLA DE NATURALIDAD:\n` +
-      `El enamoramiento es fruto de MUCHO tiempo compartido y de varios momentos significativos, no de unas pocas interacciones agradables. La afinidad mide esa historia acumulada y sube despacio.\n` +
-      `• Afinidad < 60: el personaje NO siente atracción romántica por el jugador. Responde a insinuaciones, coqueteos o declaraciones con cortesía distante, humor, evasión o incomodidad — NUNCA las corresponde. No se sonroja por él, no fantasea, no busca cercanía romántica.\n` +
-      `• Afinidad 60-79: hay aprecio y confianza, pero el romance es como mucho una semilla incipiente y CAUTELOSA: dudas, contención, miedo a malinterpretar. El personaje NO declara sentimientos ni da por hecha una relación; necesita más tiempo y más momentos compartidos.\n` +
-      `• Afinidad ≥ 80: el vínculo es lo bastante profundo como para abrirse al romance o la intimidad si la situación lo acompaña.\n` +
-      `• PROHIBIDO acelerar el romance: por encantador que sea el jugador, el personaje no pasa de neutral a enamorado en unos pocos turnos. Que dude, que cueste, que el jugador se lo gane.\n` +
-      `• Esto rige AUNQUE la ficha describa al personaje como sensual, coqueto, provocador, cariñoso, "atrevido" o propenso a situaciones subidas de tono. Con afinidad < 60 esos rasgos NO se dirigen al jugador como interés romántico: se expresan con ligereza, torpeza involuntaria, humor o hacia el mundo en general — jamás como atracción declarada ni reciprocada hacia el jugador. Un personaje coqueto por naturaleza coquetea con todos por igual y con nadie en serio mientras la afinidad sea baja.\n` +
-      `• Si turnos anteriores se desviaron hacia el romance por encima de lo que la afinidad permite, NO lo perpetúes: corrige el rumbo con naturalidad (el personaje se contiene, se da cuenta de que va demasiado rápido, recula). El estado de afinidad manda sobre la inercia de la conversación.\n` +
-      `• NUNCA verbalices que "es pronto", "aún no nos conocemos lo suficiente" o "quizás más adelante": insinuar que el romance llegará a su debido tiempo YA pone el romance sobre la mesa y alimenta una falsa sensación de cercanía o esperanza. A baja afinidad el personaje simplemente NO trata el romance como un tema vivo — no lo nombra, no lo niega "para luego", lo deja fuera. Redirige hacia lo práctico, lo cotidiano o lo que de verdad le ocupa, como haría con cualquier conocido reciente. No todo encuentro gira en torno a conocerse o a un posible vínculo sentimental: las interacciones son racionales y sobre el mundo, no sobre la relación.\n\n` +
-      `REGLA ABSOLUTA SOBRE CONTACTO FÍSICO ÍNTIMO:\n` +
-      `Si el jugador intenta tocar partes íntimas (pechos, trasero, entrepierna, genitales) sin afinidad ≥ 80:\n` +
-      `• Rechazo CLARO e INEQUÍVOCO — retrocede, aparta la mano, crea distancia\n` +
-      `• Expresa incomodidad, indignación o enfado proporcional al nivel de afinidad\n` +
-      `• PROHIBIDO normalizar ("deberías haberme avisado", "no lo esperaba"…)\n` +
-      `• PROHIBIDO mostrar curiosidad o atracción ante ese contacto\n` +
-      `• afinidad < 40 = enfado explícito o rechazo duro; 40-60 = rechazo firme; 61-79 = rechazo claro con herida\n\n` +
-      `CON AFINIDAD ≥ 80 — el contacto íntimo es POSIBLE, no automático:\n` +
-      `Hay consentimiento emocional de base, pero la reacción concreta a CADA intento sigue pasando por el filtro ` +
-      `de la personalidad del personaje y el momento de la escena — no es un "sí" garantizado en cada ocasión. ` +
-      `Un personaje cauteloso o calculador por naturaleza puede aceptar el deseo y aun así dudar, poner una ` +
-      `condición, tomar la iniciativa él mismo en vez de dejarse llevar, o frenar un momento que percibe ` +
-      `inoportuno (mal lugar, mal momento, algo que le preocupa ahora) — sin que eso sea un rechazo emocional. ` +
-      `Lo que NUNCA debe hacer con afinidad ≥ 80 es reaccionar con la frialdad o el enfado de un rechazo por ` +
-      `falta de consentimiento: la indecisión, si aparece, se expresa como ambivalencia propia del personaje ` +
-      `(vacilación, una condición, un "todavía no aquí"), nunca como las reacciones de incomodidad/enfado ` +
-      `descritas arriba para afinidad insuficiente.\n\n` +
-      `CONTINUIDAD DE UNA ESCENA ÍNTIMA YA EN MARCHA (afinidad ≥ 80):\n` +
-      `Si en los turnos recientes de esta misma conversación el personaje ya participó en la escena íntima sin ` +
-      `rechazarla, la siguiente acción del jugador dentro de esa misma escena es CONTINUACIÓN, no un nuevo intento ` +
-      `que deba volver a evaluarse desde cero. No reinicies el consentimiento en cada turno.\n` +
-      `• Verbos de intensidad física (empujar, sujetar, guiar, tirar de, atraer hacia sí) dentro de esa continuidad ` +
-      `se interpretan como pasión o intensidad del momento, NO como agresión o falta de consentimiento — siempre ` +
-      `que no exista en el propio mensaje del jugador una señal real de rechazo o incomodidad (un "no", "para", ` +
-      `"suéltame", apartarse, pedir que se detenga, etc.). Esa señal explícita SIEMPRE se respeta y tiene prioridad ` +
-      `sobre cualquier regla de continuidad — el consentimiento de base no es un cheque en blanco que anule un ` +
-      `límite expresado en el momento.\n` +
-      `• Mientras no aparezca esa señal, no interrumpas la escena con sorpresa, enfado o un discurso de límites: ` +
-      `prioriza la coherencia y la fluidez narrativa de lo que el jugador está describiendo sobre la cautela ` +
-      `reflexiva. Un límite genuino del personaje, si lo hay, se expresa como pausa suave dentro de la escena ` +
-      `(un matiz, una condición, un cambio de ritmo) — no como un freno seco que rompe la continuidad ya aceptada.`;
+      `## Contacto e intimidad\n` +
+      `Con afinidad menor de 80, rechaza el contacto íntimo con claridad y de forma proporcional al vínculo, sin normalizarlo ni corresponderlo. ` +
+      `Con afinidad de 80 o más, la intimidad es posible según la personalidad y el momento, nunca obligatoria. ` +
+      `En una escena íntima ya aceptada, mantén su continuidad sin reiniciar el mismo discurso en cada turno. ` +
+      `Una señal de rechazo, incomodidad o petición de parar siempre prevalece; respeta también cualquier límite concreto del personaje. ` +
+      `La confianza se apoya en lo vivido y no transforma por sí sola el carácter ni acelera el romance.`;
 
     // El reglamento detallado solo entra cuando el turno lo justifica:
     //   · el jugador ha hecho algo físico/sexual (lo detecta el regex del engine), o
@@ -1217,12 +1071,10 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     const romanceLive = affinitiesForBlock.some((a) => a.affinity >= 60);
     const needsIntimacyRules = intimacyContext || romanceLive;
 
-    // La guía de tramos editable (affinitySystemPrompt) acompaña al núcleo: es
-    // una tabla de comportamiento por nivel, útil en todos los turnos.
-    const tierGuide = !fastLlmEnabled && affinitySystemPrompt?.trim()
-      ? `\n\n---\n\n${affinitySystemPrompt.trim()}`
-      : '';
-    affinityBlock = `${affinityCoreDirective}${tierGuide}`;
+    // La tabla editable es estable: cachearla con las fichas, no repetirla
+    // junto a los valores dinámicos en cada prefill.
+    if (affinitySystemPrompt?.trim()) systemParts.push(affinitySystemPrompt.trim());
+    affinityBlock = affinityCoreDirective;
     intimacyBlock = needsIntimacyRules ? intimacyDirective : null;
 
     // Con el LLM rápido apagado, el principal debe emitir las etiquetas
@@ -1299,9 +1151,11 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       ? filterWitnessedMessages(messages, character, allKnownChars)
       : messages;
 
-  const WINDOW_STEP = 8;
+  const WINDOW_STEP = Math.min(8, Math.max(1, maxMessages));
   const overflow    = Math.max(0, sourceMessages.length - maxMessages);
-  const windowStart = Math.ceil(overflow / WINDOW_STEP) * WINDOW_STEP;
+  let windowStart = Math.min(Math.max(0, sourceMessages.length - 1), Math.ceil(overflow / WINDOW_STEP) * WINDOW_STEP);
+  // No empezar por una respuesta huérfana: conserva el turno user/assistant.
+  if (windowStart > 0 && sourceMessages[windowStart]?.role === 'assistant' && sourceMessages[windowStart - 1].role === 'user') windowStart--;
   const trimmedMessages = sourceMessages.slice(windowStart);
   const history: ChatMessage[] = [];
 
@@ -1525,63 +1379,71 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // del personaje activo (generado solo con lo que él presenció). Si aún no
   // existe, no se inyecta nada: el historial filtrado cubre lo reciente.
   const useCharacterSummary = !narratorMode && groupCharacters.length > 0;
-  if (useCharacterSummary) {
-    if (characterSummary?.trim()) {
-      history.push({
-        role: 'system',
-        content: `## Historia hasta ahora (lo que TÚ has vivido)\n${characterSummary.trim()}`,
-      });
-      footerCount++;
-    }
-  } else if (windowStart > 0) {
-    // Solo hay pasado fuera de la ventana si windowStart > 0; si todo el
-    // historial cabe en el contexto, cualquier resumen sería redundante.
-    //
-    // Inyección PIRAMIDAL: el pasado lejano entra como ARCOS (cada uno condensa
-    // ~4 bloques, conservando el arco relacional); el pasado cercano entra como
-    // BLOQUES con su detalle completo. Un bloque cubierto por un arco no se
-    // inyecta — su contenido ya viaja dentro del arco.
-    // Dedupe defensivo por messageIndexFrom: en BD han existido bloques
-    // duplicados (carrera de pasadas concurrentes, ya corregida) y un duplicado
-    // aquí significa inyectar el mismo pasado dos veces.
-    const uniqueByFrom = <T extends { messageIndexFrom: number }>(xs: T[]): T[] => {
-      const seen = new Set<number>();
-      return xs.filter((x) => !seen.has(x.messageIndexFrom) && seen.add(x.messageIndexFrom));
-    };
-    const pastBlocks = uniqueByFrom(blockSummaries.filter((b) => b.messageIndexFrom < windowStart));
-    if (pastBlocks.length > 0) {
-      const pastArcs = uniqueByFrom(arcSummaries.filter((a) => a.messageIndexTo < windowStart));
-      const coveredByArc = (b: { messageIndexFrom: number; messageIndexTo: number }) =>
-        pastArcs.some((a) => a.messageIndexFrom <= b.messageIndexFrom && a.messageIndexTo >= b.messageIndexTo);
+  // El recorte por tokens puede retirar más historial que la ventana por
+  // mensajes. Recalcular el resumen con ese corte evita perder ese pasado.
+  const summaryForTrimmed = (additionalTrimmed: number): ChatMessage | null => {
+    const pastStart = windowStart + additionalTrimmed;
+    if (useCharacterSummary) {
+      if (characterSummary?.trim()) {
+        return {
+          role: 'system',
+          content: `## Historia hasta ahora (lo que TÚ has vivido)\n${characterSummary.trim()}`,
+        };
+      }
+    } else if (pastStart > 0) {
+      // Solo hay pasado fuera de la ventana si pastStart > 0; si todo el
+      // historial cabe en el contexto, cualquier resumen sería redundante.
+      //
+      // Inyección PIRAMIDAL: el pasado lejano entra como ARCOS (cada uno condensa
+      // ~4 bloques, conservando el arco relacional); el pasado cercano entra como
+      // BLOQUES con su detalle completo. Un bloque cubierto por un arco no se
+      // inyecta — su contenido ya viaja dentro del arco.
+      // Dedupe defensivo por messageIndexFrom: en BD han existido bloques
+      // duplicados (carrera de pasadas concurrentes, ya corregida) y un duplicado
+      // aquí significa inyectar el mismo pasado dos veces.
+      const uniqueByFrom = <T extends { messageIndexFrom: number }>(xs: T[]): T[] => {
+        const seen = new Set<number>();
+        return xs.filter((x) => !seen.has(x.messageIndexFrom) && seen.add(x.messageIndexFrom));
+      };
+      const pastBlocks = uniqueByFrom(blockSummaries.filter((b) => b.messageIndexFrom < pastStart));
+      if (pastBlocks.length > 0) {
+        const pastArcs = uniqueByFrom(arcSummaries.filter((a) => a.messageIndexTo < pastStart));
+        const coveredByArc = (b: { messageIndexFrom: number; messageIndexTo: number }) =>
+          pastArcs.some((a) => a.messageIndexFrom <= b.messageIndexFrom && a.messageIndexTo >= b.messageIndexTo);
 
-      const entries = [
-        ...pastArcs.map((a) => ({
-          from: a.messageIndexFrom,
-          text: `[Mensajes ${a.messageIndexFrom + 1}–${a.messageIndexTo + 1} — arco condensado]\n${a.content.trim()}`,
-        })),
-        ...pastBlocks
-          .filter((b) => !coveredByArc(b))
-          .map((b) => ({
-            from: b.messageIndexFrom,
-            text: `[Mensajes ${b.messageIndexFrom + 1}–${b.messageIndexTo + 1}]\n${b.content.trim()}`,
+        const entries = [
+          ...pastArcs.map((a) => ({
+            from: a.messageIndexFrom,
+            text: `[Mensajes ${a.messageIndexFrom + 1}–${a.messageIndexTo + 1} — arco condensado]\n${a.content.trim()}`,
           })),
-      ].sort((x, y) => x.from - y.from);
+          ...pastBlocks
+            .filter((b) => !coveredByArc(b))
+            .map((b) => ({
+              from: b.messageIndexFrom,
+              text: `[Mensajes ${b.messageIndexFrom + 1}–${b.messageIndexTo + 1}]\n${b.content.trim()}`,
+            })),
+        ].sort((x, y) => x.from - y.from);
 
-      history.push({
-        role: 'system',
-        content:
-          `## Historia hasta ahora\n` +
-          `Lo ocurrido antes del historial reciente, en orden cronológico (lo más antiguo primero). ` +
-          `Los tramos marcados como «arco condensado» resumen etapas largas ya lejanas:\n\n` +
-          entries.map((e) => e.text).join('\n\n'),
-      });
-      footerCount++;
-    } else if (summary?.trim()) {
-      // Fallback legacy: conversación anterior al sistema de bloques cuyos
-      // bloques aún no se han generado — se usa el último resumen rodante.
-      history.push({ role: 'system', content: `## Historia hasta ahora\n${summary.trim()}` });
-      footerCount++;
+        return {
+          role: 'system',
+          content:
+            `## Historia hasta ahora\n` +
+            `Lo ocurrido antes del historial reciente, en orden cronológico (lo más antiguo primero). ` +
+            `Los tramos marcados como «arco condensado» resumen etapas largas ya lejanas:\n\n` +
+            entries.map((e) => e.text).join('\n\n'),
+        };
+      } else if (summary?.trim()) {
+        // Fallback legacy: conversación anterior al sistema de bloques cuyos
+        // bloques aún no se han generado — se usa el último resumen rodante.
+        return { role: 'system', content: `## Historia hasta ahora\n${summary.trim()}` };
+      }
     }
+    return null;
+  };
+  const summaryMessage = summaryForTrimmed(0);
+  if (summaryMessage) {
+    history.push(summaryMessage);
+    footerCount++;
   }
 
   // 9b. Auto-reporte de afinidad — último bloque antes del mensaje del usuario.
@@ -1604,20 +1466,6 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       : null;
   if (presenceLedger) {
     history.push({ role: 'system', content: presenceLedger });
-    footerCount++;
-  }
-
-  // 9c-bis. Fronteras de conocimiento — refuerzo tardío de la regla (ver
-  // buildKnowledgeLateBlock). En modo personaje entra cuando el historial está
-  // filtrado por testigo (con reparto), que es justo cuando hay escenas escritas
-  // arriba que el personaje NO vivió. En modo narrador solo entra si este turno
-  // no hubo ledger: el ledger ya trae la regla y su lista factual de presentes y
-  // ausentes, y duplicarla compite por la atención del modelo.
-  if (needsSplit && (narratorMode ? !presenceLedger : groupCharacters.length > 0)) {
-    history.push({
-      role: 'system',
-      content: buildKnowledgeLateBlock(narratorMode, character?.name ?? null),
-    });
     footerCount++;
   }
 
@@ -1821,7 +1669,7 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     footerCount++;
   }
 
-  return { messages: [systemMessage, ...fewShot, ...history], footerCount };
+  return { messages: [systemMessage, ...fewShot, ...history], footerCount, prefixCount: 1 + fewShot.length, summaryMessage, summaryForTrimmed };
 }
 
 // Cabeceras en español (antes «# Character:», «## Personality»…): en un prompt

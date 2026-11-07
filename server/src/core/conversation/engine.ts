@@ -6,7 +6,7 @@ import {
   resolveEffectiveCalendar, todayCalendarAnchor,
 } from '../world/calendar.js';
 import { buildContext, filterWitnessedMessages } from './context-builder.js';
-import { trimContext } from './context-trimmer.js';
+import { trimContextWithSummary } from './context-trimmer.js';
 import { createProvider } from '../llm/provider.factory.js';
 import { ProviderRepository } from '../../modules/providers/provider.repository.js';
 import { CharacterRepository } from '../../modules/characters/character.repository.js';
@@ -898,7 +898,7 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
       };
     }
 
-    const { messages: rawContext, footerCount } = await buildContext({
+    const { messages: rawContext, footerCount, prefixCount, summaryMessage, summaryForTrimmed } = await buildContext({
       character: character ?? groupCharacters[0],
       stories: linkedStories,
       messages: contextMessages,
@@ -958,14 +958,8 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     const activeChar = character ?? groupCharacters[0];
     const globalCtxTokens = settings.defaultContextLength ?? 32768;
     const maxCtxTokens = Math.max(activeChar?.contextLength ?? 0, globalCtxTokens);
-    // Always preserve `footerCount` trailing directive blocks (context index, memories,
-    // affinity, spatial/object coherence, narration style, last user msg) PLUS at least
-    // 6 real conversation turns. Without this, when maxCtxTokens is small (e.g. a
-    // character with the 4096-token default), the directive footer alone can fill the
-    // whole "preserveRecent" window and trim away ALL real history — the LLM then has
-    // no idea what just happened a couple of messages ago.
-    const { messages: trimmedMessagesRaw } = trimContext(rawContext, maxCtxTokens, footerCount + 6);
-    const trimmedMessages = [...trimmedMessagesRaw];
+    // Añadir primero las directivas; el ajuste al presupuesto se hace al final.
+    const trimmedMessages = [...rawContext];
 
     // ── Pre-turn behavioral directive injection ────────────────────────────────
     // Two-stage pipeline:
@@ -1052,19 +1046,30 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
     // contextSize = input budget + 8192 output buffer (Ollama sets num_ctx to this)
     const contextSize = maxCtxTokens + 8192;
 
+    // Presupuestar DESPUÉS de añadir las correcciones del turno. Antes podían
+    // desbordar la ventana porque se añadían sobre un prompt ya recortado.
+    const protectedFooter = footerCount + injectedDirectives.length;
+    const { messages: finalMessages } = trimContextWithSummary(trimmedMessages, maxCtxTokens, {
+      requiredRecent: protectedFooter,
+      prefixCount,
+      summaryMessage,
+      summaryForTrimmed,
+    });
+
     const request: GenerateRequest = {
-      messages: trimmedMessages,
+      messages: finalMessages,
       model: modelId,
       contextSize,
       // Tono global manda sobre el valor por personaje; el override puntual (regenerar
-      // con otra temp) sigue teniendo prioridad. Modo thinking la ignora (ver provider).
+      // con otra temp) sigue teniendo prioridad. El soporte de thinking depende del proveedor.
       temperature: opts.overrides?.temperature ?? settings.generationTemperature ?? activeChar?.temperature,
       maxTokens: resolvedMaxTokens,
       // Mismo patrón que temperature: el ajuste global manda sobre el valor por
-      // personaje. Modo thinking los ignora todos (ver provider).
+      // personaje. El proveedor omite los controles incompatibles con el modelo.
       topP: settings.generationTopP ?? activeChar?.llmParams?.topP,
       topK: activeChar?.llmParams?.topK,
-      repetitionPenalty: settings.generationFrequencyPenalty ?? activeChar?.llmParams?.repetitionPenalty,
+      repetitionPenalty: settings.generationRepetitionPenalty ?? activeChar?.llmParams?.repetitionPenalty,
+      frequencyPenalty: settings.generationFrequencyPenalty ?? activeChar?.llmParams?.frequencyPenalty,
       presencePenalty: settings.generationPresencePenalty ?? activeChar?.llmParams?.presencePenalty,
       stopSequences: activeChar?.llmParams?.stopSequences,
       stream: true,
@@ -1612,13 +1617,13 @@ export async function generateStream(opts: StreamOptions): Promise<void> {
         ...(narratorMode ? { narrator: true } : {}),
         ...(thinkAccumulated ? { thinkContent: thinkAccumulated } : {}),
         ...(diceRoll ? { diceRoll } : {}),
-        promptMessages: trimmedMessages,
+        promptMessages: finalMessages,
       },
     });
 
     if (!aborted) {
       convRepo.incrementCounts(conversationId, finalTokens);
-      onDone({ messageId: assistantMsg.id, userMessageId: userMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: trimmedMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, locationUpdate, thinkContent: thinkAccumulated || undefined, deathLoop: deathLoopUpdate, diceRoll });
+      onDone({ messageId: assistantMsg.id, userMessageId: userMsg.id, tokens: finalTokens, tokenBreakdown, promptMessages: finalMessages, affinityUpdates, fastLlmDebug, narrator: narratorMode, characterId: assistantMsg.characterId ?? null, content: cleanContent, locationUpdate, thinkContent: thinkAccumulated || undefined, deathLoop: deathLoopUpdate, diceRoll });
 
       // ── Enriquecimiento de fondo, secuencial y con progreso visible ─────────
       //

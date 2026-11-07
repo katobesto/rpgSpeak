@@ -14,7 +14,9 @@ const rpgStatsSchema = z.object({
 const llmParamsSchema = z.object({
   topP: z.number().min(0).max(1).optional(),
   topK: z.number().int().min(0).optional(),
-  repetitionPenalty: z.number().optional(),
+  repetitionPenalty: z.number().min(0.01).max(2).optional(),
+  frequencyPenalty: z.number().min(-2).max(2).optional(),
+  presencePenalty: z.number().min(-2).max(2).optional(),
   maxTokens: z.number().int().positive().optional(),
   stopSequences: z.array(z.string()).optional(),
   seed: z.number().int().optional(),

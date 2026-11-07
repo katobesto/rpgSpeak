@@ -89,26 +89,45 @@ export class OpenAIProvider implements LLMProvider {
     return h;
   }
 
-  // LM Studio's Jinja chat templates only tolerate one 'system' message at
-  // position 0 followed by strict user/assistant alternation. Our context
-  // builder injects several 'system'-role footer blocks (scene coherence,
-  // memories, affinity…) as separate messages — those cause the template to
-  // throw "No user query found in messages."
-  //
-  // Fix: for lmstudio, merge all system messages into one at position 0.
-  // Non-system messages keep their original relative order; content is unchanged.
+  // Templates estrictos: un sistema inicial y alternancia user/assistant.
+  // Los sistemas tardíos se adjuntan al siguiente user EN SU POSICIÓN, nunca
+  // a la cabecera: subir el estado cambiante invalidaba todo el prefix-cache.
   private normalizeMessages(messages: { role: string; content: string }[]): typeof messages {
     if (this.type !== 'lmstudio') return messages;
 
-    const systemParts: string[] = [];
-    const nonSystem: typeof messages = [];
+    const result: typeof messages = [];
+    const pending: string[] = [];
     for (const msg of messages) {
-      if (msg.role === 'system') systemParts.push(msg.content);
-      else nonSystem.push(msg);
+      if (msg.role === 'system') {
+        if (result.length === 0 || (result.length === 1 && result[0].role === 'system')) {
+          if (result.length === 0) result.push({ ...msg });
+          else result[0].content += `\n\n${msg.content}`;
+        } else {
+          pending.push(msg.content);
+        }
+        continue;
+      }
+      if (pending.length && msg.role === 'assistant') {
+        const last = result[result.length - 1];
+        if (last?.role === 'user') last.content += `\n\n${pending.join('\n\n')}`;
+        else result.push({ role: 'user', content: pending.join('\n\n') });
+        pending.length = 0;
+      }
+      const content = pending.length ? `${pending.join('\n\n')}\n\n${msg.content}` : msg.content;
+      pending.length = 0;
+      const previous = result[result.length - 1];
+      if (msg.role === 'assistant' && (!previous || previous.role === 'system')) {
+        result.push({ role: 'user', content: 'Continúa la conversación.' });
+      }
+      if (previous?.role === msg.role) previous.content += `\n\n${content}`;
+      else result.push({ role: msg.role, content });
     }
-
-    if (systemParts.length <= 1) return messages;
-    return [{ role: 'system', content: systemParts.join('\n\n---\n\n') }, ...nonSystem];
+    if (pending.length) {
+      const last = result[result.length - 1];
+      if (last?.role === 'user') last.content += `\n\n${pending.join('\n\n')}`;
+      else result.push({ role: 'user', content: pending.join('\n\n') });
+    }
+    return result;
   }
 
   private buildBody(request: GenerateRequest, stream: boolean) {
@@ -133,20 +152,26 @@ export class OpenAIProvider implements LLMProvider {
       model: request.model ?? '',
       messages: this.normalizeMessages(request.messages),
       stream,
-      // Thinking mode (e.g. DeepSeek V4) ignores temperature/top_p/penalties anyway,
-      // but omit them so the intent is explicit and providers don't warn about them.
-      ...(reasoning ? {} : {
+      ...(stream ? { stream_options: { include_usage: true } } : {}),
+      // DeepSeek thinking y OpenAI reasoning no admiten los mismos controles
+      // que los backends locales. No desactivarlos para Qwen/LM Studio/MLX.
+      ...(reasoning && (isDeepSeek || this.type === 'openai') ? {} : {
         temperature: request.temperature,
         top_p: request.topP,
-        frequency_penalty: request.repetitionPenalty,
+        frequency_penalty: request.frequencyPenalty,
         presence_penalty: request.presencePenalty,
+        ...(this.type === 'lmstudio' ? { repeat_penalty: request.repetitionPenalty } : {}),
+        ...(['openrouter', 'mlx', 'oobabooga'].includes(this.type)
+          ? { repetition_penalty: request.repetitionPenalty } : {}),
+        ...(['openrouter', 'lmstudio', 'mlx', 'oobabooga'].includes(this.type)
+          ? { top_k: request.topK } : {}),
       }),
       // Si no hay límite explícito, enviamos -1 para LM Studio / OpenRouter que lo aceptan,
       // o lo omitimos si el valor es undefined (OpenAI real usa el máximo del modelo)
       ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
       stop: request.stopSequences?.length ? request.stopSequences : undefined,
       // OpenRouter: prevent automatic fallback to alternative (potentially paid) providers.
-      ...(request.disableFallbacks ? { allow_fallbacks: false } : {}),
+      ...(this.type === 'openrouter' && request.disableFallbacks ? { provider: { allow_fallbacks: false } } : {}),
       // Thinking / razonamiento según la familia del modelo:
       //  • 'thinking' es un campo EXCLUSIVO de DeepSeek — enviarlo a otros
       //    servidores de inferencia (OpenRouter, LM Studio, llama.cpp, vLLM…)

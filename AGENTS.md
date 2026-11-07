@@ -35,7 +35,7 @@ npm run db:migrate -w server
 npm rebuild better-sqlite3
 ```
 
-No test suite exists in the project.
+Focused conversation-engine, provider, and generation-settings regression tests: `npm run test -w server` (Node test runner via tsx; isolated in-memory databases and mocked HTTP providers).
 
 ## Architecture
 

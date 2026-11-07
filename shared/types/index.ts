@@ -169,6 +169,7 @@ export interface LLMParams {
   topP?: number;
   topK?: number;
   repetitionPenalty?: number;
+  frequencyPenalty?: number;
   presencePenalty?: number;
   maxTokens?: number;
   stopSequences?: string[];
@@ -660,14 +661,16 @@ export interface AppSettings {
   maxResponseTokens: number | null;  // null = sin límite (deja decidir al modelo)
   defaultContextLength: number;       // ventana de contexto de entrada por defecto
   // Tono de respuesta del LLM (temperatura de muestreo). Global; manda sobre el
-  // valor por personaje. Ignorada por modelos en modo thinking (p.ej. DeepSeek).
-  generationTemperature: number;      // ~0.4 preciso · ~0.7 equilibrado · ~1.0 expresivo
+  // valor por personaje. Su efecto con thinking depende del modelo y proveedor.
+  generationTemperature: number;      // 0–2; 0 = muestreo determinista si el proveedor lo admite
   // Parámetros avanzados de muestreo — global, mandan sobre character.llmParams.
-  // Ignorados por modelos en modo thinking, igual que la temperatura.
+  // El adaptador omite los controles incompatibles con el modo de razonamiento.
   generationTopP: number;             // 1.0 = sin recorte (default OpenAI-compatible)
   /** Penaliza tokens PROPORCIONALMENTE a cuántas veces ya se repitieron — reduce
    *  muletillas y elogios reiterados ("me regalaste…", "eres increíble…"). 0 = off. */
   generationFrequencyPenalty: number;
+  /** Penalización multiplicativa: 1 = neutra; >1 reduce repetición. Solo backends compatibles. */
+  generationRepetitionPenalty: number;
   /** Penaliza con un castigo FIJO cualquier token ya usado en el contexto — empuja
    *  a no reciclar el mismo vocabulario de evasivas ("no lo sé", "quizá"). 0 = off. */
   generationPresencePenalty: number;
@@ -793,10 +796,11 @@ export interface GenerateRequest {
   topP?: number;
   topK?: number;
   repetitionPenalty?: number;
+  frequencyPenalty?: number;
   presencePenalty?: number;
   stopSequences?: string[];
   stream: boolean;
-  /** When true, adds allow_fallbacks:false to OpenAI-compatible requests (e.g. OpenRouter). */
+  /** When true, adds provider.allow_fallbacks:false to OpenRouter requests. */
   disableFallbacks?: boolean;
   /** Enables reasoning mode; `effort` is clamped per model family by the provider. */
   reasoning?: { enabled: boolean; effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'; expose?: boolean };
