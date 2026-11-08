@@ -1,15 +1,17 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { test, mock } from 'node:test';
 import { sql } from 'drizzle-orm';
-import type { Character, Message, ChatMessage } from '@rpgspeak/shared';
+import type { Character, Message, ChatMessage, Story, NarrativeThread } from '@rpgspeak/shared';
 import { initDb } from '../src/db/index.js';
 import { buildContext, buildVarietyBlock } from '../src/core/conversation/context-builder.js';
 import { trimContext, trimContextWithSummary, estimateContextTokens } from '../src/core/conversation/context-trimmer.js';
 import { CONVERSATION_PROMPTS, resolveConversationPrompt } from '../src/modules/settings/conversation-prompts.js';
+import { ProviderRepository } from '../src/modules/providers/provider.repository.js';
 
 // Base aislada en memoria: ninguna prueba abre los datos de una partida real.
 const db = initDb(':memory:');
 db.run(sql`CREATE TABLE memory_entries (id TEXT, conversation_id TEXT, character_id TEXT, type TEXT, content TEXT, importance INTEGER, is_active INTEGER, created_at TEXT, updated_at TEXT)`);
+db.run(sql`CREATE TABLE providers (id TEXT PRIMARY KEY, name TEXT, type TEXT, base_url TEXT, api_key TEXT, default_model TEXT, is_enabled INTEGER, config TEXT, created_at TEXT, updated_at TEXT)`);
 
 const character: Character = {
   id: 'aria', name: 'Aria', userId: null, ownerName: null, storyIds: [], avatar: null,
@@ -136,4 +138,117 @@ test('token-based trimming also injects summaries for newly discarded history', 
   assert.match(text, /Pasado del primer bloque/);
   assert.match(text, /Pasado del segundo bloque/);
   assert.equal(result.messages.at(-1)?.content, messages.at(-1)?.content);
+});
+
+test('scene anchor restates location, present and the player action at the generation point', async () => {
+  const messages = [message(0), message(1), message(2, 'Ataca al dragón con la espada')];
+  const result = await buildContext({
+    ...options, messages, currentLocation: 'Cueva del dragón',
+    sceneState: {
+      situacion: 'El jugador ataca al dragón', tension: 'Alta: combate',
+      characters: { aria: { quiere: 'derrotar al dragón', preocupa: 'sus heridas', pendiente: '', impresion: '' } },
+      npcs: [{ nombre: 'Dragón', rasgo: 'feroz', estado: 'furioso', conoceAlJugador: true }],
+      updatedAtIndex: 2, updatedAt: '',
+    },
+  });
+  const footer = result.messages.slice(-result.footerCount);
+  const anchor = footer[footer.length - 2]; // justo antes del último mensaje del jugador
+  assert.equal(anchor.role, 'system');
+  assert.match(anchor.content, /Cueva del dragón/);
+  assert.match(anchor.content, /Aria, Dragón/);
+  assert.match(anchor.content, /El jugador acaba de hacer esto: Ataca al dragón con la espada/);
+  assert.match(anchor.content, /No recapitules el pasado/);
+});
+
+test('relevance keeps only threads, memories and events connected to the current action', async () => {
+  const prov = new ProviderRepository().create({
+    name: 'embeddings', type: 'openai', baseUrl: 'http://test/v1', apiKey: null,
+    defaultModel: 'emb-model', isEnabled: true, config: {},
+  });
+  const insertMemory = (id: string, type: string, content: string, importance: number) =>
+    db.run(sql`INSERT INTO memory_entries (id, conversation_id, character_id, type, content, importance, is_active, created_at, updated_at)
+               VALUES (${id}, 'test', 'aria', ${type}, ${content}, ${importance}, 1, '2026-01-01', '2026-01-01')`);
+  insertMemory('mem1', 'fact', 'El dragón guardaba un tesoro maldito', 8);
+  insertMemory('mem2', 'fact', 'El herrero le debe un yelmo', 7);
+  insertMemory('mem3', 'offense', 'El herrero la insultó en la plaza', 9);
+
+  const story: Story = {
+    id: 's1', userId: null, ownerName: null, name: 'La cueva', description: '',
+    globalContext: '', narrativeRules: '', worldLore: '',
+    persistentEvents: [
+      { id: 'e1', title: 'El dragón despierta', description: 'El dragón ataca sin piedad', trigger: 'el jugador ataca al dragón', importance: 8, timestamp: '' },
+      { id: 'e2', title: 'Fiesta en el pueblo', description: 'El pueblo celebra', trigger: 'el jugador llega al pueblo', importance: 5, timestamp: '' },
+    ],
+    locations: [], stateVariables: {}, behaviorRestrictions: [], isActive: true,
+    adventureMode: false, openWorld: false, deathMode: false, calendar: null,
+    characters: [], createdAt: '', updatedAt: '',
+  };
+  const thread = (id: string, title: string, description: string): NarrativeThread => ({
+    id, conversationId: 'test', title, description, status: 'open',
+    importance: 8, openedAtIndex: 0, closedAtIndex: null, createdAt: '', updatedAt: '',
+  });
+
+  // Embeddings deterministas: todo lo que menciona al dragón es "relevante".
+  const stub = mock.method(globalThis, 'fetch', async (_url: unknown, init?: RequestInit) => {
+    const body = JSON.parse(init?.body as string) as { input: string[] };
+    return Response.json({
+      data: body.input.map((t, i) => ({ index: i, embedding: t.includes('dragón') ? [1, 0] : [0, 1] })),
+    });
+  });
+  try {
+    const result = await buildContext({
+      ...options, stories: [story],
+      messages: [message(0), message(1), message(2, 'Ataca al dragón')],
+      occurredEventIds: new Set<string>(),
+      openThreads: [thread('t1', 'La maldición del dragón', 'El dragón está maldito'),
+                    thread('t2', 'La deuda con el herrero', 'Falta pagar el yelmo')],
+      embeddingEnabled: true, embeddingProviderId: prov.id, embeddingModel: 'emb-model',
+    });
+    const text = result.messages.map((m) => m.content).join('\n');
+    // Hilos: el relevante se lista; el irrelevante se oculta con nota.
+    assert.match(text, /La maldición del dragón/);
+    assert.doesNotMatch(text, /La deuda con el herrero/);
+    assert.match(text, /no los traigas este turno/);
+    // Memorias: el hecho relevante y la ofensa (emocional, exenta) se inyectan;
+    // el hecho irrelevante se filtra.
+    assert.match(text, /tesoro maldito/);
+    assert.doesNotMatch(text, /yelmo/);
+    assert.match(text, /la insultó/);
+    // Eventos: solo el relevante es destino inmediato; el otro no se menciona.
+    assert.match(text, /El dragón despierta/);
+    assert.doesNotMatch(text, /Fiesta en el pueblo/);
+  } finally {
+    stub.mock.restore();
+  }
+});
+
+test('without embeddings, lexical overlap with the current action still filters', async () => {
+  const story: Story = {
+    id: 's2', userId: null, ownerName: null, name: 'Sin embeddings', description: '',
+    globalContext: '', narrativeRules: '', worldLore: '',
+    persistentEvents: [
+      { id: 'e1', title: 'Fiesta en el pueblo', description: 'El pueblo celebra', trigger: 'el jugador llega al pueblo', importance: 5, timestamp: '' },
+    ],
+    locations: [], stateVariables: {}, behaviorRestrictions: [], isActive: true,
+    adventureMode: false, openWorld: false, deathMode: false, calendar: null,
+    characters: [], createdAt: '', updatedAt: '',
+  };
+  const base = {
+    ...options, stories: [story],
+    occurredEventIds: new Set<string>(),
+    openThreads: [{ id: 't1', conversationId: 'test', title: 'La deuda con el herrero', description: 'Falta pagar el yelmo', status: 'open' as const, importance: 8, openedAtIndex: 0, closedAtIndex: null, createdAt: '', updatedAt: '' }],
+    // Sin proveedor de embeddings: no hay llamadas extra, filtra el solapamiento léxico.
+    embeddingEnabled: true, embeddingProviderId: null, embeddingModel: null,
+  };
+  // Acción clara: el hilo y el evento ajenos a "dragón" se filtran.
+  const filtered = await buildContext({ ...base, messages: [message(0), message(1), message(2, 'Ataca al dragón')] });
+  const text = filtered.messages.map((m) => m.content).join('\n');
+  assert.doesNotMatch(text, /La deuda con el herrero/);
+  assert.doesNotMatch(text, /Fiesta en el pueblo/);
+  assert.match(text, /no los traigas este turno/);
+  // Sin señal (mensaje demasiado corto): no se recorta a ciegas, se inyecta todo.
+  const full = await buildContext({ ...base, messages: [message(0), message(1), message(2, 'Sigo.')] });
+  const fullText = full.messages.map((m) => m.content).join('\n');
+  assert.match(fullText, /La deuda con el herrero/);
+  assert.match(fullText, /Fiesta en el pueblo/);
 });

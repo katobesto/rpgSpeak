@@ -7,7 +7,7 @@ import { Input, Textarea } from '../ui/Input.tsx';
 import { conversationsApi } from '../../api/conversations.ts';
 import { useChatStore } from '../../stores/chat.store.ts';
 import { DICE_DIFFICULTY_LEVELS, effectiveDiceDifficulty } from '@rpgspeak/shared';
-import type { PlayerSheet, DiceDifficulty } from '@rpgspeak/shared';
+import type { PlayerSheet, DiceDifficulty, Conversation } from '@rpgspeak/shared';
 
 interface PlayerSheetModalProps {
   conversationId: string;
@@ -18,6 +18,62 @@ interface PlayerSheetModalProps {
    *  mostrar cuando el usuario aún no ha elegido ninguno. */
   adventureMode: boolean;
   onClose: () => void;
+}
+
+/**
+ * Comprueba los mismos límites que `playerSheetSchema` en el servidor. Sin esto,
+ * un campo demasiado largo o un número a medio escribir hacía que el PATCH
+ * devolviera 400 con un mensaje de zod críptico (o directamente nada).
+ */
+function validateSheet(f: PlayerSheet): string | null {
+  const badNumber = (v: unknown) => v !== undefined && v !== null && !Number.isFinite(v as number);
+  if (badNumber(f.level) || badNumber(f.hp) || badNumber(f.maxHp)) {
+    return 'Hay un número sin terminar en Nivel, HP o HP máximo.';
+  }
+  if (f.level !== undefined && (f.level < 1 || f.level > 20)) return 'El nivel debe estar entre 1 y 20.';
+  if (f.class && f.class.length > 60) return 'La clase no puede pasar de 60 caracteres.';
+  if (f.notes && f.notes.length > 1000) return 'Las notas no pueden pasar de 1000 caracteres.';
+  if (f.abilities && f.abilities.length > 30) return 'Máximo 30 habilidades.';
+  if (f.abilities?.some((a) => a.length > 100)) return 'Una habilidad no puede pasar de 100 caracteres.';
+  if (f.inventory && f.inventory.length > 50) return 'Máximo 50 objetos de inventario.';
+  if (f.inventory?.some((i) => i.length > 150)) return 'Un objeto no puede pasar de 150 caracteres.';
+  if (f.stats) {
+    for (const [k, v] of Object.entries(f.stats)) {
+      if (!Number.isFinite(v)) return `El valor de la stat «${k}» no es un número.`;
+    }
+  }
+  return null;
+}
+
+/** Deja solo los campos conocidos y con valor útil (recorta, tira los vacíos). */
+function sanitizeSheet(f: PlayerSheet): PlayerSheet {
+  const out: PlayerSheet = {};
+  if (f.class?.trim()) out.class = f.class.trim();
+  if (f.level !== undefined) out.level = f.level;
+  if (f.hp !== undefined) out.hp = f.hp;
+  if (f.maxHp !== undefined) out.maxHp = f.maxHp;
+  const stats = { ...(f.stats ?? {}) };
+  if (Object.keys(stats).length > 0) out.stats = stats;
+  const abilities = (f.abilities ?? []).map((a) => a.trim()).filter(Boolean);
+  if (abilities.length > 0) out.abilities = abilities;
+  const inventory = (f.inventory ?? []).map((i) => i.trim()).filter(Boolean);
+  if (inventory.length > 0) out.inventory = inventory;
+  if (f.notes?.trim()) out.notes = f.notes.trim();
+  return out;
+}
+
+/** Comparación canónica (el orden de claves no cuenta) para verificar la copia
+ *  que el servidor devuelve después de guardar. */
+function canonical(v: unknown): string {
+  if (v === null || v === undefined) return 'null';
+  if (Array.isArray(v)) return `[${v.map(canonical).join(',')}]`;
+  if (typeof v === 'object') {
+    return `{${Object.entries(v as Record<string, unknown>)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([k, val]) => `${k}:${canonical(val)}`)
+      .join(',')}}`;
+  }
+  return String(v);
 }
 
 /**
@@ -77,8 +133,41 @@ export function PlayerSheetModal({ conversationId, sheet, diceDifficulty, advent
 
   const mutation = useMutation({
     mutationFn: async () => {
-      await conversationsApi.updatePlayerSheet(conversationId, form);
-      return conversationsApi.updateDiceDifficulty(conversationId, difficulty);
+      const problem = validateSheet(form);
+      if (problem) throw new Error(problem);
+      const sheetToSave = sanitizeSheet(form);
+
+      let saved: Conversation | undefined;
+      try {
+        saved = await conversationsApi.updatePlayerSheet(conversationId, sheetToSave);
+      } catch (err) {
+        throw new Error(`No se pudo guardar la ficha — ${err instanceof Error ? err.message : String(err)}`);
+      }
+
+      let difficultyResult: Conversation | undefined;
+      try {
+        difficultyResult = await conversationsApi.updateDiceDifficulty(conversationId, difficulty);
+      } catch (err) {
+        throw new Error(
+          `La ficha se envió, pero falló guardar la dificultad — ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      const conv = difficultyResult ?? saved;
+
+      // Verificación de verdad: el servidor devuelve la conversación entera, así
+      // que se compara su copia con lo que acabamos de enviar. Si no coincide, el
+      // guardado NO fue real (ruta de API que cae en el fallback del SPA, proxy
+      // que devuelve HTML, instancia distinta…). Sin esta comprobación la ventana
+      // se cerraba como si todo hubiera ido bien y al reabrir estaba vacío.
+      const echoedSheet = (conv?.metadata?.playerSheet as PlayerSheet | undefined) ?? null;
+      const echoedDifficulty = conv?.metadata?.diceDifficulty as DiceDifficulty | undefined;
+      if (canonical(echoedSheet) !== canonical(sheetToSave) || echoedDifficulty !== difficulty) {
+        throw new Error(
+          'El servidor respondió sin la ficha guardada. ' +
+          `Enviado: ${canonical(sheetToSave).slice(0, 140)} · Devuelto: ${canonical(echoedSheet).slice(0, 140)}`,
+        );
+      }
+      return conv;
     },
     onSuccess: (updated) => {
       // Refrescar la fuente de verdad real: sin esto, al reabrir la ficha se
@@ -89,7 +178,14 @@ export function PlayerSheetModal({ conversationId, sheet, diceDifficulty, advent
       onClose();
     },
     onError: (err) => {
-      setSaveError(err instanceof Error ? err.message : 'No se pudo guardar la ficha');
+      // Nunca se deja el mensaje vacío: un error sin texto era exactamente el
+      // caso que dejaba al usuario sin saber qué había fallado.
+      const message =
+        err instanceof Error && err.message.trim()
+          ? err.message
+          : 'No se pudo guardar la ficha (el servidor no dio detalle).';
+      console.error('[player-sheet] Error al guardar:', err);
+      setSaveError(message);
     },
   });
 

@@ -590,7 +590,7 @@ export function buildVarietyBlock(
 // acumulando asuntos nuevos.
 const THREADS_MAX_INJECTED = 6;
 
-function buildThreadsBlock(threads: NarrativeThread[], currentIndex: number): string {
+function buildThreadsBlock(threads: NarrativeThread[], currentIndex: number, hiddenByRelevance = 0): string {
   // ANTES: con threads.length === 0 esta función devolvía null y el bloque
   // entero (incluido el REGISTRO DE HILOS de abajo, que es la única
   // instrucción de CÓMO abrir uno) desaparecía del prompt. Resultado: el
@@ -612,12 +612,20 @@ function buildThreadsBlock(threads: NarrativeThread[], currentIndex: number): st
   const overflowNote = overflow > 0
     ? `\n\n(Hay ${overflow} hilo(s) abierto(s) más, de menor importancia, que no se listan aquí.)`
     : '';
+  // Hilos que existen pero no conectan con la acción actual (filtrados por
+  // relevancia): se avisa de su existencia sin listarlos, para que el modelo
+  // no los traiga este turno.
+  const hiddenNote = hiddenByRelevance > 0
+    ? `\n\n(Hay ${hiddenByRelevance} hilo(s) abierto(s) más que NO conectan con la acción actual: no los traigas este turno.)`
+    : '';
 
   const listSection = threads.length > 0
     ? `Asuntos que la partida ha planteado y siguen pendientes. Son deuda narrativa: el mundo no los ha olvidado.\n\n` +
       lines.join('\n') +
-      overflowNote
-    : `Todavía no hay ningún hilo abierto en esta historia. Es buena señal poder abrir el primero en cuanto la escena lo pida de forma natural — no hace falta forzarlo.`;
+      overflowNote + hiddenNote
+    : hiddenByRelevance > 0
+      ? hiddenNote.replace(/^\n\n/, '')
+      : `Todavía no hay ningún hilo abierto en esta historia. Es buena señal poder abrir el primero en cuanto la escena lo pida de forma natural — no hace falta forzarlo.`;
 
   return (
     `## HILOS ABIERTOS — LO QUE ESTA HISTORIA DEJÓ SIN RESOLVER\n` +
@@ -1231,6 +1239,84 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
     }
   }
 
+  // ── Inyección por relevancia (hilos / memorias / eventos pendientes) ────────
+  //
+  // El footer inyectaba CADA turno todos los hilos abiertos, todas las memorias
+  // seleccionadas y todos los eventos pendientes. Cada uno es una "tarea" que el
+  // modelo intenta satisfacer, y en conversaciones largas eso es lo que lo
+  // empujaba a traer temas ajenos a la acción actual del jugador — la escena
+  // perdía foco y la inmersión se rompía.
+  //
+  // Cada candidato se puntúa contra la acción presente (último mensaje del
+  // jugador, reforzado con la situación del director de escena) y solo se
+  // inyecta lo que conecta de verdad. Lo irrelevante deja de existir para el
+  // modelo: no se le pide "no lo menciones", simplemente no lo ve.
+  //
+  // Dos niveles, del más barato al más preciso:
+  //   1. Solapamiento léxico (SIEMPRE activo, cero costo, un solo modelo):
+  //      palabras compartidas entre la acción actual y el candidato, sin
+  //      acentos ni mayúsculas. No entiende de sinónimos, pero los nombres,
+  //      lugares y verbos concretos — que es de lo que están hechos los hilos
+  //      y los disparadores — se capturan de sobra.
+  //   2. Embeddings (opcional, solo si hay proveedor configurado): similitud
+  //      semántica real. Sin proveedor no se hace NINGUNA llamada extra.
+  //
+  // Exenciones: las memorias emocionales (ofensa/trauma/preferencia/relación)
+  // NUNCA se filtran — no son temas, colorean la actitud del personaje.
+  //
+  // Sin señal clara (mensaje del jugador demasiado corto) no se filtra:
+  // mejor inyectar todo que recortar a ciegas. No afecta al KV-cache: el
+  // footer entero va tras el historial creciente y nunca forma parte del
+  // prefijo cacheable.
+  const lastUserContent = [...messages].reverse().find((m) => m.role === 'user')?.content ?? '';
+  const relevanceQueryWords = normalizeRelevanceWords(`${lastUserContent} ${sceneState?.situacion ?? ''}`);
+  type RelevanceResult = { query: Float32Array; items: Float32Array[] } | null;
+  let embedForRelevance: ((texts: string[]) => Promise<RelevanceResult>) | null = null;
+  if (embeddingEnabled && embeddingProviderId && embeddingModel && lastUserContent.trim()) {
+    const embProv = provRepo.findById(embeddingProviderId);
+    if (embProv?.isEnabled) {
+      const embLlm = createProvider(embProv);
+      if (embLlm.embed) {
+        const embedFn = embLlm.embed.bind(embLlm);
+        const embModel = embeddingModel;
+        embedForRelevance = async (texts: string[]) => {
+          try {
+            const vecs = await embedFn([lastUserContent, ...texts], embModel);
+            if (!vecs?.[0]?.length) return null;
+            return { query: new Float32Array(vecs[0]), items: vecs.slice(1).map((v) => new Float32Array(v)) };
+          } catch (e) {
+            console.warn('[relevance] Embedding falló; se usa el filtro léxico:', e);
+            return null;
+          }
+        };
+      }
+    }
+  }
+  /** Puntúa un grupo de candidatos contra la acción actual del jugador.
+   *  `keep` exime a los candidatos que nunca se filtran (memorias emocionales). */
+  const filterByRelevance = async <T,>(
+    candidates: T[],
+    texts: string[],
+    keep?: (c: T) => boolean,
+  ): Promise<T[]> => {
+    if (candidates.length === 0) return candidates;
+    if (embedForRelevance) {
+      const res = await embedForRelevance(texts);
+      if (res) {
+        return candidates.filter((c, i) =>
+          (keep?.(c) ?? false) || cosineSim(res.query, res.items[i]) >= RELEVANCE_THRESHOLD,
+        );
+      }
+      // El proveedor falló: se continúa con el filtro léxico.
+    }
+    // Filtro léxico (siempre disponible, sin llamadas al modelo). Sin señal
+    // clara no se recorta a ciegas: se inyecta todo.
+    if (relevanceQueryWords.size < 2) return candidates;
+    return candidates.filter((c, i) =>
+      (keep?.(c) ?? false) || isLexicallyRelevant(texts[i], relevanceQueryWords),
+    );
+  };
+
   // ── Late injections — all share the same "hold the last user message" split ──
   //
   // Injection order (furthest → closest to the generation point):
@@ -1262,7 +1348,33 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // modes — the narrator needs the current location just as much as a single
   // character; the voice section only applies in narrator mode.
   const sceneCoherenceBlock   = buildSceneCoherenceBlock(currentLocation, narratorMode);
-  const pendingEventsBlock    = buildPendingEventsBlock(stories, occurredEventIds);
+  // Relevancia de los eventos pendientes contra la acción actual del jugador.
+  // Sin proveedor de embeddings (o si falla) se usa el solapamiento léxico;
+  // sin señal clara, `pendingRelevance` queda undefined y el bloque se
+  // comporta exactamente como antes.
+  let pendingRelevance: ((e: Story['persistentEvents'][number]) => boolean) | undefined;
+  {
+    const pendingAll = stories.flatMap((s) =>
+      s.persistentEvents.filter((e) => e.trigger.trim() && !occurredEventIds.has(e.id)),
+    );
+    if (pendingAll.length > 0) {
+      const eventText = (e: Story['persistentEvents'][number]) => `${e.title}. ${e.trigger}. ${e.description}`;
+      if (embedForRelevance) {
+        const res = await embedForRelevance(pendingAll.map(eventText));
+        if (res) {
+          const scores = pendingAll.map((_, i) => cosineSim(res.query, res.items[i]));
+          pendingRelevance = (e) => {
+            const idx = pendingAll.indexOf(e);
+            return idx >= 0 && scores[idx] >= RELEVANCE_THRESHOLD;
+          };
+        }
+      }
+      if (!pendingRelevance && relevanceQueryWords.size >= 2) {
+        pendingRelevance = (e) => isLexicallyRelevant(eventText(e), relevanceQueryWords);
+      }
+    }
+  }
+  const pendingEventsBlock    = buildPendingEventsBlock(stories, occurredEventIds, pendingRelevance);
   const occurredEventsBlock   = buildOccurredEventsBlock(stories, occurredEventIds);
   const partyStateBlock       = buildPartyStateBlock(partyState);
 
@@ -1311,17 +1423,30 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // cada turno como temas pendientes y recapitula los actos del jugador una y
   // otra vez ("me regalaste…", "fuiste tan valiente…") — adulación repetitiva.
   if (allMemories.length > 0) {
-    const memBlock = memoryInjectionPrompt?.trim()
-      ? buildMemoryInjectionBlock(allMemories, charNameMap, memoryInjectionPrompt!)
-      : buildMemoryBlock(allMemories, charNameMap);
-    const silentCoda =
-      `\n\n⚠ CONTEXTO SILENCIOSO: estas memorias moldean tu actitud, tono y decisiones, pero NO son temas de ` +
-      `conversación pendientes. No las menciones, enumeres ni recapitules ("me regalaste…", "cuando me salvaste…") ` +
-      `salvo que el diálogo actual las traiga de forma natural. El peso de lo vivido se nota en CÓMO tratas al ` +
-      `jugador, no en recordárselo.`;
-    console.log(`[memory] Injecting ${allMemories.length} memories for conv ${conversationId} (${charNameMap.size} chars, template: ${Boolean(memoryInjectionPrompt?.trim())})`);
-    history.push({ role: 'system', content: memBlock + silentCoda });
-    footerCount++;
+    // Las memorias emocionales (ofensa/trauma/preferencia/relación) nunca se
+    // filtran: no son temas de conversación, colorean cómo trata el personaje
+    // al jugador AHORA. Solo los hechos/eventos/resúmenes dependen de que
+    // conecten con la acción actual.
+    const emotionalMemory = (m: MemoryEntry) =>
+      m.type === 'offense' || m.type === 'trauma' || m.type === 'preference' || m.type === 'relationship';
+    const memoriesForBlock = await filterByRelevance(
+      allMemories,
+      allMemories.map((m) => m.content),
+      emotionalMemory,
+    );
+    if (memoriesForBlock.length > 0) {
+      const memBlock = memoryInjectionPrompt?.trim()
+        ? buildMemoryInjectionBlock(memoriesForBlock, charNameMap, memoryInjectionPrompt!)
+        : buildMemoryBlock(memoriesForBlock, charNameMap);
+      const silentCoda =
+        `\n\n⚠ CONTEXTO SILENCIOSO: estas memorias moldean tu actitud, tono y decisiones, pero NO son temas de ` +
+        `conversación pendientes. No las menciones, enumeres ni recapitules ("me regalaste…", "cuando me salvaste…") ` +
+        `salvo que el diálogo actual las traiga de forma natural. El peso de lo vivido se nota en CÓMO tratas al ` +
+        `jugador, no en recordárselo.`;
+      console.log(`[memory] Injecting ${memoriesForBlock.length}/${allMemories.length} memories for conv ${conversationId} (${charNameMap.size} chars, template: ${Boolean(memoryInjectionPrompt?.trim())})`);
+      history.push({ role: 'system', content: memBlock + silentCoda });
+      footerCount++;
+    }
   }
 
   // 6. Scene coherence anchor — location + established objects in one block.
@@ -1537,7 +1662,15 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // bloque en vez de competir como secciones independientes.
   const demoteHeading = (block: string) => block.replace(/^## /, '### ');
 
-  const threadsBlock = buildThreadsBlock(openThreads, currentMessageIndex);
+  // Solo se listan los hilos que conectan con la acción actual del jugador
+  // (con embeddings configurados); los demás se cuentan pero no se muestran,
+  // para no convertir el footer en una lista de tareas que el modelo satura.
+  const threadsForBlock = await filterByRelevance(
+    openThreads,
+    openThreads.map((t) => `${t.title}. ${t.description}`),
+  );
+  const hiddenThreadCount = openThreads.length - threadsForBlock.length;
+  const threadsBlock = buildThreadsBlock(threadsForBlock, currentMessageIndex, hiddenThreadCount);
 
   let sheetBlock: string | null = null;
   if (playerSheet) {
@@ -1660,6 +1793,36 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
   // dilución del resto del prompt.
   if (needsSplit && preResolvedDiceRoll) {
     history.push({ role: 'system', content: buildResolvedDiceBlock(preResolvedDiceRoll) });
+    footerCount++;
+  }
+
+  // 9g. Ancla de escena — el "estás aquí" en el punto de generación.
+  //
+  // En conversaciones largas el presente (dónde estás, quién hay, qué acaba de
+  // hacer el jugador) vive a miles de tokens del punto de generación y el
+  // modelo responde al CONTEXTO (hilos, memorias, eventos) en vez de a la
+  // acción: habla de cosas sin relevancia para el momento y la inmersión se
+  // rompe. Este bloque reafirma el presente en tres líneas en la posición de
+  // máxima atención y subordina explícitamente el resto del contexto a la
+  // acción actual. Dinámico por definición → footer, sin coste de caché.
+  if (needsSplit && lastMessage) {
+    const anchorParts: string[] = [];
+    const anchorLoc = currentLocation?.trim();
+    if (anchorLoc) anchorParts.push(`Estás en: ${anchorLoc}.`);
+    if (sceneState) {
+      const present = [
+        ...Object.keys(sceneState.characters).map((id) => charNameMap.get(id)).filter((n): n is string => Boolean(n)),
+        ...sceneState.npcs.map((n) => n.nombre),
+      ];
+      if (present.length > 0) anchorParts.push(`Presentes: ${present.join(', ')}.`);
+    }
+    const action = lastMessage.content.trim().replace(/\s+/g, ' ');
+    anchorParts.push(`El jugador acaba de hacer esto: ${action.length > 300 ? `${action.slice(0, 300)}…` : action}`);
+    anchorParts.push(
+      'Responde a ESTA acción. El resto del contexto (hilos, memorias, eventos, historia) es fondo: ' +
+      'solo tráelo si afecta directamente a lo que ocurre ahora. No recapitules el pasado.',
+    );
+    history.push({ role: 'system', content: anchorParts.join('\n') });
     footerCount++;
   }
 
@@ -1855,13 +2018,27 @@ function buildLocationsSection(story: Story): string {
 // (el pendiente de mayor importancia), se destaca su UBICACIÓN, y se exige
 // sembrar un gancho hacia él en cada respuesta, con el resto de eventos como
 // horizonte. Guiar sin railroading: ganchos, no teletransportes.
-function buildPendingEventsBlock(stories: Story[], occurredEventIds: Set<string>): string | null {
+function buildPendingEventsBlock(
+  stories: Story[],
+  occurredEventIds: Set<string>,
+  isRelevant?: (e: Story['persistentEvents'][number]) => boolean,
+): string | null {
   const pending = stories.flatMap((story) =>
     story.persistentEvents.filter((e) => e.trigger.trim() && !occurredEventIds.has(e.id)),
   );
   if (pending.length === 0) return null;
 
-  const sorted = pending.sort((a, b) => b.importance - a.importance).slice(0, 6);
+  // Con relevancia activa, el "destino inmediato" se elige entre los eventos
+  // que conectan con la acción actual del jugador. Si ninguno conecta, el
+  // bloque se omite por completo: listar los títulos (aunque sea en modo
+  // "no los fuerces") los seguiría poniendo en la cabeza del modelo. El
+  // evento no se pierde — sigue en la base de datos y reaparece con sus
+  // instrucciones completas en cuanto la acción del jugador vuelva a
+  // conectar con él.
+  const relevant = isRelevant ? pending.filter(isRelevant) : pending;
+  if (isRelevant && relevant.length === 0) return null;
+
+  const sorted = relevant.sort((a, b) => b.importance - a.importance).slice(0, 6);
   const [next, ...horizon] = sorted;
 
   const fmtEvent = (e: Story['persistentEvents'][number]) =>
@@ -2011,6 +2188,54 @@ function capitalize(s: string) {
 }
 
 // ── Context index helpers ─────────────────────────────────────────────────────
+
+// Umbral de similitud coseno para la inyección por relevancia (solo cuando hay
+// proveedor de embeddings): por debajo, el candidato no conecta con la acción
+// actual del jugador y no se inyecta.
+const RELEVANCE_THRESHOLD = 0.40;
+
+// Palabras funcionales y abstractas muy frecuentes: compartirlas no dice nada
+// sobre la conexión con la acción actual. Sin acentos (la normalización los
+// quita antes de comparar).
+const RELEVANCE_STOPWORDS = new Set([
+  'que', 'del', 'las', 'los', 'una', 'uno', 'por', 'con', 'para', 'como',
+  'cuando', 'donde', 'cual', 'cuales', 'este', 'esta', 'esto', 'ese', 'esa',
+  'eso', 'esos', 'esas', 'aquel', 'aquella', 'muy', 'pero', 'porque', 'pues',
+  'sin', 'sobre', 'entre', 'luego', 'ahora', 'entonces', 'tambien', 'siempre',
+  'nunca', 'todo', 'toda', 'todos', 'todas', 'algo', 'alguien', 'aqui', 'alli',
+  'mas', 'menos', 'hoy', 'manana', 'ayer', 'nada', 'ningun', 'ninguna', 'otro',
+  'otra', 'otros', 'otras', 'cada', 'tal', 'mismo', 'misma', 'poco', 'mucho',
+  'muchos', 'muchas', 'bien', 'mal', 'vez', 'veces', 'manera', 'forma', 'lado',
+  'parte', 'momento', 'tiempo', 'cosa', 'cosas', 'gente', 'mundo', 'vida',
+  'dia', 'noche', 'tarde', 'palabra', 'palabras', 'jugar', 'jugador', 'jugadores',
+]);
+
+/** Palabras útiles de un texto: minúsculas, sin acentos, ≥3 letras, sin
+ *  stopwords. Base común del filtro léxico de relevancia. */
+function normalizeRelevanceWords(text: string): Set<string> {
+  return new Set(
+    text.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((w) => w.length >= 3 && !RELEVANCE_STOPWORDS.has(w)),
+  );
+}
+
+/** Relevancia léxica: el candidato conecta con la acción actual si comparte
+ *  una palabra "fuerte" (≥5 letras: nombres, lugares, sustantivos concretos)
+ *  o dos palabras cualesquiera. Coincidencia exacta sin stemming, a propósito:
+ *  un falso negativo solo oculta el candidato un turno (sigue en la BD y
+ *  reaparece cuando la acción vuelva a conectar). */
+function isLexicallyRelevant(text: string, queryWords: Set<string>): boolean {
+  const words = normalizeRelevanceWords(text);
+  let strong = 0;
+  let shared = 0;
+  for (const w of queryWords) {
+    if (!words.has(w)) continue;
+    shared++;
+    if (w.length >= 5) strong++;
+  }
+  return strong >= 1 || shared >= 2;
+}
 
 function cosineSim(a: Float32Array, b: Float32Array): number {
   let dot = 0, na = 0, nb = 0;

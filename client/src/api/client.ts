@@ -36,7 +36,22 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (res.status === 204) return undefined as T;
 
-  const json = await res.json().catch(() => ({ success: false, message: res.statusText }));
+  // Se lee como texto y se parsea a mano: así una respuesta NO JSON (página de
+  // error de Cloudflare, HTML del SPA cuando la ruta de API no existe, cuerpo
+  // vacío) se convierte en un mensaje útil en lugar de un `undefined` silencioso.
+  const raw = await res.text();
+  let json: unknown = null;
+  let parseFailed = false;
+  try {
+    json = raw ? JSON.parse(raw) : null;
+  } catch {
+    parseFailed = true;
+  }
+
+  const bodyMessage =
+    json && typeof json === 'object' && typeof (json as { message?: unknown }).message === 'string'
+      ? (json as { message: string }).message.trim()
+      : '';
 
   if (!res.ok) {
     if (res.status === 401) {
@@ -44,8 +59,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       // Clear credentials so the app falls back to the login screen on next render.
       handleUnauthorized();
     }
-    throw new ApiError(res.status, json.message ?? 'Request failed');
+    // El status SIEMPRE va en el mensaje: en HTTP/2 `res.statusText` viene vacío,
+    // y sin él un fallo del proxy se quedaba sin nada que mostrar al usuario.
+    const detail =
+      bodyMessage ||
+      (raw.trim() ? `respuesta no esperada: ${raw.trim().slice(0, 180)}` : 'el servidor no dio detalle');
+    throw new ApiError(res.status, `${res.status} en ${init?.method ?? 'GET'} ${path} — ${detail}`);
   }
+
+  // 200 con cuerpo que no es JSON: típico de una ruta de API que no existe y
+  // acaba en el fallback del SPA (index.html) o de un error interceptado por el
+  // proxy. Antes esto se devolvía como `undefined` y el guardado parecía OK.
+  if (parseFailed) {
+    throw new ApiError(
+      res.status,
+      `${res.status} en ${init?.method ?? 'GET'} ${path} — el servidor respondió algo que no es JSON` +
+        ` (empezaba con: ${raw.trim().slice(0, 80) || 'cuerpo vacío'})`,
+    );
+  }
+
+  if (json === null) return undefined as T;   // 200 con cuerpo vacío
 
   return (json as { data: T }).data;
 }

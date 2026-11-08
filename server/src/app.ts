@@ -151,8 +151,21 @@ export async function buildApp(): Promise<FastifyInstance> {
   });
 
   // ─── 404 fallback (SPA) ──────────────────────────────────────────────────────
+  // Solo para rutas de interfaz. En /api NUNCA se devuelve index.html: ese
+  // fallback convertía cualquier ruta de API inexistente en un 200 con HTML, y el
+  // cliente lo tragaba como respuesta válida (res.ok=true, el JSON.parse fallaba y
+  // acababa devolviendo undefined). Un guardado que no llegaba a ningún handler
+  // parecía un éxito: sin datos guardados y sin mensaje de error.
   if (!config.server.isDev) {
-    app.setNotFoundHandler((_request, reply) => {
+    app.setNotFoundHandler((request, reply) => {
+      if (request.url.startsWith('/api')) {
+        return reply.status(404).send({
+          success: false,
+          error: 'NOT_FOUND',
+          message: `Ruta de API inexistente: ${request.method} ${request.url.split('?')[0]}`,
+          statusCode: 404,
+        });
+      }
       reply.sendFile('index.html');
     });
   }

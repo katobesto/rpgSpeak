@@ -162,6 +162,8 @@ export function StoryAssistant({ open, onClose }: StoryAssistantProps) {
         isActive: false,
         adventureMode: briefing.adventureMode,
         openWorld: briefing.openWorld,
+        // El asistente no tiene UI para el modo muerte: se crea siempre apagado.
+        deathMode: false,
         characters: links,
       };
       return storiesApi.create(dto);

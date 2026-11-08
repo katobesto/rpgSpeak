@@ -987,9 +987,10 @@ export type UpdateCharacterDto = Partial<CreateCharacterDto>;
 
 // `calendar` se marca opcional: el servidor lo tiene con default null (ver
 // story.schema.ts), así que un cliente que no lo envíe obtiene el gregoriano.
+// Igual que `deathMode`, con default false en el mismo esquema zod.
 export type CreateStoryDto =
-  Omit<Story, 'id' | 'userId' | 'ownerName' | 'createdAt' | 'updatedAt' | 'calendar'> &
-  { calendar?: StoryCalendar | null };
+  Omit<Story, 'id' | 'userId' | 'ownerName' | 'createdAt' | 'updatedAt' | 'calendar' | 'deathMode'> &
+  { calendar?: StoryCalendar | null; deathMode?: boolean };
 export type UpdateStoryDto = Partial<CreateStoryDto>;
 
 // ─── Story Assistant Types ────────────────────────────────────────────────────
