@@ -1,6 +1,7 @@
 import type { LLMProvider, ProviderOptions } from '../provider.interface.js';
 import type { GenerateRequest, GenerateResponse, ProviderModel } from '@rpgspeak/shared';
 import { ProviderError } from '../../../shared/errors.js';
+import { normalizeStrictTemplateMessages } from '../normalize-messages.js';
 
 interface OllamaMessage {
   role: string;
@@ -49,7 +50,11 @@ export class OllamaProvider implements LLMProvider {
   async generate(request: GenerateRequest): Promise<GenerateResponse> {
     const body = {
       model: request.model ?? '',
-      messages: request.messages,
+      // Ollama aplica la plantilla chat del modelo (Gemma, Qwen…): los
+      // ~15 mensajes SYSTEM del footer salen de distribución en plantillas
+      // que solo admiten un system inicial. Se normalizan igual que en
+      // LM Studio — ver normalize-messages.ts.
+      messages: normalizeStrictTemplateMessages(request.messages),
       stream: false,
       options: {
         temperature: request.temperature,
@@ -84,7 +89,7 @@ export class OllamaProvider implements LLMProvider {
   async *stream(request: GenerateRequest): AsyncGenerator<string, GenerateResponse, unknown> {
     const body = {
       model: request.model ?? '',
-      messages: request.messages,
+      messages: normalizeStrictTemplateMessages(request.messages),
       stream: true,
       options: {
         temperature: request.temperature,

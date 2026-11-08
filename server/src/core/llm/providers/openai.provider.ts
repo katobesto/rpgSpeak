@@ -1,6 +1,7 @@
 import type { LLMProvider, ProviderOptions } from '../provider.interface.js';
 import type { GenerateRequest, GenerateResponse, ProviderModel } from '@rpgspeak/shared';
 import { ProviderError } from '../../../shared/errors.js';
+import { normalizeStrictTemplateMessages } from '../normalize-messages.js';
 
 // ── Parser del endpoint /models ──────────────────────────────────────────────
 // OpenRouter expone un esquema rico (pricing, architecture, supported_parameters,
@@ -92,42 +93,12 @@ export class OpenAIProvider implements LLMProvider {
   // Templates estrictos: un sistema inicial y alternancia user/assistant.
   // Los sistemas tardíos se adjuntan al siguiente user EN SU POSICIÓN, nunca
   // a la cabecera: subir el estado cambiante invalidaba todo el prefix-cache.
+  // Aplica a todo backend local que aplique la plantilla HF del modelo
+  // (lmstudio, custom/llama.cpp, mlx, oobabooga). OpenAI y OpenRouter sí
+  // aceptan system en cualquier posición y se dejan intactos.
   private normalizeMessages(messages: { role: string; content: string }[]): typeof messages {
-    if (this.type !== 'lmstudio') return messages;
-
-    const result: typeof messages = [];
-    const pending: string[] = [];
-    for (const msg of messages) {
-      if (msg.role === 'system') {
-        if (result.length === 0 || (result.length === 1 && result[0].role === 'system')) {
-          if (result.length === 0) result.push({ ...msg });
-          else result[0].content += `\n\n${msg.content}`;
-        } else {
-          pending.push(msg.content);
-        }
-        continue;
-      }
-      if (pending.length && msg.role === 'assistant') {
-        const last = result[result.length - 1];
-        if (last?.role === 'user') last.content += `\n\n${pending.join('\n\n')}`;
-        else result.push({ role: 'user', content: pending.join('\n\n') });
-        pending.length = 0;
-      }
-      const content = pending.length ? `${pending.join('\n\n')}\n\n${msg.content}` : msg.content;
-      pending.length = 0;
-      const previous = result[result.length - 1];
-      if (msg.role === 'assistant' && (!previous || previous.role === 'system')) {
-        result.push({ role: 'user', content: 'Continúa la conversación.' });
-      }
-      if (previous?.role === msg.role) previous.content += `\n\n${content}`;
-      else result.push({ role: msg.role, content });
-    }
-    if (pending.length) {
-      const last = result[result.length - 1];
-      if (last?.role === 'user') last.content += `\n\n${pending.join('\n\n')}`;
-      else result.push({ role: 'user', content: pending.join('\n\n') });
-    }
-    return result;
+    if (!['lmstudio', 'custom', 'mlx', 'oobabooga'].includes(this.type)) return messages;
+    return normalizeStrictTemplateMessages(messages);
   }
 
   private buildBody(request: GenerateRequest, stream: boolean) {

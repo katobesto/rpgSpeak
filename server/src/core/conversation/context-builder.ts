@@ -1816,6 +1816,29 @@ export async function buildContext(opts: BuildContextOptions): Promise<BuildCont
       ];
       if (present.length > 0) anchorParts.push(`Presentes: ${present.join(', ')}.`);
     }
+    // Voz: el ancla también reafirma QUIÉN habla y CÓMO suena. La identidad
+    // (ficha + muestras) vive al inicio del prompt, a decenas de miles de
+    // tokens del punto de generación; en conversaciones largas la inercia del
+    // propio historial —que el modelo imita— aplana la voz y todos los
+    // personajes acaban sonando igual. El recordatorio va junto a la acción,
+    // y con las muestras de voz si la ficha las tiene (few-shot tardío: es el
+    // ancla de estilo más potente que existe). El footer no se cachea nunca,
+    // así que duplicar aquí 2 muestras no cuesta prefijo.
+    if (!narratorMode && character) {
+      anchorParts.push(`Eres ${character.name}: conserva tu voz —vocabulario, muletillas y ritmo con que ya has hablado— sea lo que sea la escena.`);
+      const voiceSamples = (character.exampleDialogue ?? []).slice(0, 2);
+      if (voiceSamples.length > 0) {
+        anchorParts.push(`Así suenas:\n${voiceSamples.map((ex) => `Jugador: ${ex.user}\n${character.name}: ${ex.assistant}`).join('\n')}`);
+      }
+    } else if (narratorMode) {
+      const cast = [character, ...groupCharacters].filter((c): c is Character => Boolean(c)).slice(0, 3);
+      if (cast.length > 0) {
+        anchorParts.push(
+          `Registros de voz — cada uno conserva el suyo:\n` +
+          cast.map((c) => `- ${c.name}: ${(c.personality.trim() || c.description.trim()).slice(0, 80)}`).join('\n'),
+        );
+      }
+    }
     const action = lastMessage.content.trim().replace(/\s+/g, ' ');
     anchorParts.push(`El jugador acaba de hacer esto: ${action.length > 300 ? `${action.slice(0, 300)}…` : action}`);
     anchorParts.push(

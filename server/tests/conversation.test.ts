@@ -158,6 +158,10 @@ test('scene anchor restates location, present and the player action at the gener
   assert.match(anchor.content, /Aria, Dragón/);
   assert.match(anchor.content, /El jugador acaba de hacer esto: Ataca al dragón con la espada/);
   assert.match(anchor.content, /No recapitules el pasado/);
+  // Voz: el ancla reafirma quién habla y cómo suena (la ficha queda muy lejos
+  // del punto de generación en conversaciones largas).
+  assert.match(anchor.content, /Eres Aria: conserva tu voz/);
+  assert.match(anchor.content, /Así suenas:\nJugador: Hola\nAria: Te escucho\./);
 });
 
 test('relevance keeps only threads, memories and events connected to the current action', async () => {

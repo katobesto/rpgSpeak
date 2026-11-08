@@ -119,3 +119,25 @@ test('LM Studio normalizes inline directives, consecutive roles and trailing sys
   for (const msg of messages) assert.ok(combined.includes(msg.content));
   assert.equal(JSON.stringify(messages), original);
 });
+
+test('Ollama folds footer systems into the last user message (strict HF templates)', async () => {
+  const provider = new OllamaProvider({ baseUrl: 'http://test' });
+  const body = await capture(provider, {
+    ...request,
+    messages: [
+      { role: 'system', content: 'Reglas estables' },
+      { role: 'user', content: 'Hola' },
+      { role: 'assistant', content: 'Respuesta anterior' },
+      { role: 'system', content: 'Afinidad: 55' },
+      { role: 'system', content: 'Ubicación: taberna' },
+      { role: 'user', content: 'Sigue' },
+    ],
+  });
+  const msgs = body.messages as { role: string; content: string }[];
+  // Un único system en cabecera: el resto viaja pegado al último user, en su
+  // posición, para no romper la plantilla (Gemma) ni el prefix-cache.
+  assert.equal(msgs.filter((m) => m.role === 'system').length, 1);
+  assert.equal(msgs[0].content, 'Reglas estables');
+  assert.equal(msgs.at(-1)?.role, 'user');
+  assert.match(msgs.at(-1)!.content, /Afinidad: 55[\s\S]*Ubicación: taberna[\s\S]*Sigue/);
+});
